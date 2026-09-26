@@ -49,9 +49,20 @@
       "!**/*.md"
     ],
     "asar": true,
-    "electronLanguages": ["es", "es-419", "en-US"],
+    "electronLanguages": [
+      "es",
+      "es-419",
+      "en-US"
+    ],
     "win": {
-      "target": [{ "target": "nsis", "arch": ["x64"] }],
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
       "icon": "build/icon.ico",
       "artifactName": "Viciont-Studio-Launcher-Setup-${version}.${ext}",
       "executableName": "Viciont Studio Launcher"
@@ -72,10 +83,13 @@
       "uninstallerSidebar": "build/uninstallerSidebar.bmp",
       "include": "build/installer.nsh",
       "language": "3082",
-      "installerLanguages": ["es_ES"],
-      "multiLanguageInstaller": false,
+      "installerLanguages": [
+        "es_ES"
+      ],
+      "multiLanguageInstaller": true,
       "runAfterFinish": true,
-      "deleteAppDataOnUninstall": false
+      "deleteAppDataOnUninstall": false,
+      "displayLanguageSelector": false
     },
     "publish": [
       {
