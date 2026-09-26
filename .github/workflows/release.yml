@@ -1,4 +1,5 @@
-# Compila el instalador y publica la versión en GitHub Releases al subir una etiqueta vX.Y.Z
+# Compila el instalador y lo publica en GitHub Releases al subir una etiqueta vX.Y.Z
+# (antes sube el número de "version" en package.json).
 name: Publicar versión
 
 on:
@@ -12,11 +13,25 @@ jobs:
   windows:
     runs-on: windows-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
         with:
           node-version: 22
       - run: npm ci
+      # La release se crea antes de compilar: si la crea electron-builder mientras sube
+      # varios archivos a la vez, puede duplicarla y repartir los archivos entre las dos.
+      - name: Crear la release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $v = $tag.TrimStart('v')
+          gh release view $tag *> $null
+          if ($LASTEXITCODE -ne 0) {
+            gh release create $tag --title "Viciont Studio Launcher $v" --notes "Descarga **Viciont-Studio-Launcher-Setup-$v.exe** en *Assets* y ábrelo. Los launchers instalados se actualizan solos." --latest
+          }
+          exit 0
       - run: npx electron-builder --win --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
