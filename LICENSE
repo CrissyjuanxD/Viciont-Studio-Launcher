@@ -1,0 +1,21 @@
+Copyright (c) 2026 CrissyjuanxD — Viciont Studios. Todos los derechos reservados.
+
+Viciont Studio Launcher es propiedad de CrissyjuanxD / Viciont Studios. El código
+se publica para que cualquiera pueda verlo y descargar el launcher desde las
+Releases de GitHub. No está permitido redistribuir versiones modificadas ni usar
+el nombre, el logotipo o la marca de Viciont Studios sin permiso.
+
+------------------------------------------------------------------------------
+Componentes de terceros
+------------------------------------------------------------------------------
+
+- Electron — MIT License — https://github.com/electron/electron
+- electron-updater / electron-builder — MIT License — https://github.com/electron-userland/electron-builder
+- yauzl — MIT License — https://github.com/thejoshwolfe/yauzl
+- skinview3d (incluye three.js) — MIT License — https://github.com/bs-community/skinview3d
+- Fuentes Bebas Neue, Chakra Petch y Share Tech Mono — SIL Open Font License 1.1
+- CustomSkinLoader — GPL-3.0 — https://github.com/xfl03/MCCustomSkinLoader
+  (no se incluye en el launcher: se descarga desde Modrinth dentro de cada instancia)
+
+Minecraft es una marca de Mojang Studios / Microsoft. Este proyecto no está
+afiliado a Mojang ni a Microsoft.

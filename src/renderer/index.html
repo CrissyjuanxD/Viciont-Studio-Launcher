@@ -1,0 +1,68 @@
+<!doctype html>
+<html lang="es" class="fx-full">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Viciont Studio Launcher</title>
+  <link rel="icon" href="img/favicon.png">
+  <link rel="stylesheet" href="css/fonts.css">
+  <link rel="stylesheet" href="css/base.css">
+  <link rel="stylesheet" href="css/app.css">
+  <script type="module" src="js/main.js"></script>
+</head>
+<body>
+  <canvas id="bg" class="bg" aria-hidden="true"></canvas>
+  <div class="bg-fallback" aria-hidden="true"></div>
+  <div class="scene" id="scene" aria-hidden="true"></div>
+  <div class="fx-layer" aria-hidden="true">
+    <div class="fx-noise"></div>
+    <div class="fx-scanlines"></div>
+    <div class="fx-scanbar"></div>
+    <div class="fx-vignette"></div>
+  </div>
+
+  <header class="titlebar">
+    <div class="titlebar__brand">
+      <img src="img/emblem-160.webp" alt="">
+      <span class="titlebar__name">Viciont Studio Launcher</span>
+      <span class="titlebar__ver mono" id="app-version"></span>
+    </div>
+    <div class="titlebar__status" id="titlebar-status"></div>
+  </header>
+
+  <div class="shell" id="shell" hidden>
+    <nav class="rail" aria-label="Navegación">
+      <button class="rail__btn rail__home" id="rail-home" type="button" data-tip="Inicio" aria-label="Inicio"><i data-icon="home"></i></button>
+      <div class="rail__sep"></div>
+      <div class="rail__list" id="rail-list" aria-label="Instancias"></div>
+      <div class="rail__bottom">
+        <button class="rail__btn" id="rail-admin" type="button" data-tip="Administrar instancias" aria-label="Administrar instancias" hidden><i data-icon="grid"></i></button>
+        <button class="rail__btn" id="rail-skins" type="button" data-tip="Skins" aria-label="Skins"><i data-icon="shirt"></i></button>
+        <button class="rail__btn" id="rail-settings" type="button" data-tip="Ajustes" aria-label="Ajustes"><i data-icon="gear"></i></button>
+        <button class="rail__avatar" id="rail-avatar" type="button" aria-label="Tu cuenta"><canvas width="8" height="8"></canvas><span class="rail__avatar-type" id="rail-avatar-type"></span></button>
+        <button class="rail__btn" id="rail-logout" type="button" data-tip="Cerrar sesión" aria-label="Cerrar sesión"><i data-icon="logout"></i></button>
+      </div>
+    </nav>
+    <main class="view" id="view"></main>
+  </div>
+
+  <div class="login" id="login" hidden></div>
+
+  <div class="boot" id="boot">
+    <div class="boot__inner">
+      <img class="boot__logo" src="img/emblem.webp" alt="">
+      <div class="boot__log mono">
+        <p class="boot__line">&gt; iniciando viciont_studio_launcher…</p>
+        <p class="boot__line">&gt; cargando instancias y cuenta…</p>
+        <p class="boot__line boot__line--ok">&gt; listo_</p>
+      </div>
+      <div class="boot__bar"><span></span></div>
+    </div>
+  </div>
+
+  <div class="transition-fx" id="transition-fx" aria-hidden="true"></div>
+  <div class="tooltip" id="tooltip" role="tooltip"></div>
+  <div id="modals"></div>
+  <div class="toasts" id="toasts" aria-live="polite"></div>
+</body>
+</html>

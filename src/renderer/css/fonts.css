@@ -1,0 +1,7 @@
+/* Fuentes incluidas en la app (licencia SIL Open Font License) */
+@font-face { font-family: 'Bebas Neue'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/bebas-neue-400.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/chakra-petch-400.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 500; font-display: swap; src: url('../fonts/chakra-petch-500.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 600; font-display: swap; src: url('../fonts/chakra-petch-600.woff2') format('woff2'); }
+@font-face { font-family: 'Chakra Petch'; font-style: normal; font-weight: 700; font-display: swap; src: url('../fonts/chakra-petch-700.woff2') format('woff2'); }
+@font-face { font-family: 'Share Tech Mono'; font-style: normal; font-weight: 400; font-display: swap; src: url('../fonts/share-tech-mono-400.woff2') format('woff2'); }

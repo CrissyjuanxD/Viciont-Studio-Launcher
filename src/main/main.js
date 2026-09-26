@@ -1,0 +1,557 @@
+'use strict';
+// Viciont Studio Launcher — proceso principal.
+
+const path = require('node:path');
+const fs = require('node:fs');
+const fsp = fs.promises;
+const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard } = require('electron');
+const paths = require('./core/paths');
+const log = require('./core/log');
+const { Settings, totalMB, DEFAULT_JVM, recommendedMax } = require('./core/settings');
+const { setUserAgent, getJson, cached } = require('./util/net');
+const { dirSize, rmrf, exists, readJson } = require('./util/fsx');
+const { Backend } = require('./services/backend');
+const { Accounts } = require('./services/accounts');
+const { Instances } = require('./services/instances');
+const { Skins } = require('./services/skins');
+const { Media } = require('./services/media');
+const { Admin } = require('./services/admin');
+const { Updater } = require('./services/updater');
+const modrinth = require('./services/modrinth');
+const { getVersionManifest } = require('./game/versions');
+const { listLoaderVersions, supportedGameVersions, LOADERS } = require('./game/loaders');
+const { probeJava } = require('./game/java');
+
+const isDev = process.argv.includes('--dev') || !app.isPackaged;
+const RENDERER = path.join(__dirname, '..', 'renderer');
+const APP_NAME = 'Viciont Studio Launcher';
+const VERSION = app.getVersion();
+const STUDIO_SITE = 'https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/';
+// Pruebas automáticas (solo en desarrollo): --vsl-test=script.js [--hidden]
+const TEST_SCRIPT = !app.isPackaged ? (process.argv.find((a) => a.startsWith('--vsl-test=')) || '').slice(11) : '';
+const HIDDEN_TEST = Boolean(TEST_SCRIPT) && process.argv.includes('--hidden');
+
+setUserAgent(`ViciontStudioLauncher/${VERSION} (+https://github.com/CrissyjuanxD/Viciont-Studio-Launcher)`);
+app.setName(APP_NAME);
+app.setAppUserModelId('com.viciontstudios.launcher');
+
+if (!app.requestSingleInstanceLock()) {
+  app.quit();
+} else {
+  start();
+}
+
+function start() {
+  const settings = new Settings();
+  if (!settings.get().hardwareAcceleration) app.disableHardwareAcceleration();
+  // Menos procesos y nada de teclas multimedia capturadas por los vídeos de fondo.
+  app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService,SpareRendererForSitePerProcess');
+
+  protocol.registerSchemesAsPrivileged([
+    { scheme: 'vsl', privileges: { standard: true, secure: true, supportFetchAPI: true, codeCache: true } },
+    { scheme: 'vsl-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
+  ]);
+
+  let dataRoot = settings.get().dataDir || paths.CONFIG_ROOT;
+  let dirs = paths.dataDirs(dataRoot);
+  const getDirs = () => dirs;
+
+  const backend = new Backend(settings, log);
+  const accounts = new Accounts({ backend, log });
+  const instances = new Instances({ dirs, settings, backend, accounts, log, configRoot: paths.CONFIG_ROOT });
+  const skins = new Skins({ getDirs, accounts, backend, log });
+  const media = new Media({ getDirs, backend, log });
+  const admin = new Admin({ getDirs, backend, log });
+  const updater = new Updater({ log, settings });
+
+  let win = null;
+  let tray = null;
+  let quitting = false;
+  let closeAsked = false;
+  let hiddenForGame = false;
+  const stateFile = paths.configFile('window.json');
+
+  const send = (type, data) => {
+    if (win && !win.isDestroyed()) win.webContents.send('vsl:event', { type, data });
+  };
+
+  // ---------- Ventana ----------
+  async function createWindow() {
+    const saved = await readJson(stateFile, {});
+    win = new BrowserWindow({
+      width: saved.width || 1180,
+      height: saved.height || 720,
+      x: saved.x, y: saved.y,
+      minWidth: 960, minHeight: 600,
+      show: false,
+      backgroundColor: '#06020c',
+      title: `${APP_NAME} ${VERSION}`,
+      icon: path.join(RENDERER, 'img', 'icon.png'),
+      titleBarStyle: 'hidden',
+      titleBarOverlay: { color: '#07030d', symbolColor: '#e9e0ff', height: 36 },
+      webPreferences: {
+        preload: path.join(__dirname, '..', 'preload', 'preload.js'),
+        contextIsolation: true,
+        sandbox: true,
+        nodeIntegration: false,
+        spellcheck: false,
+        backgroundThrottling: true,
+        devTools: isDev,
+      },
+    });
+    if (saved.maximized) win.maximize();
+    win.setMenu(null);
+    const wc = win.webContents;
+    wc.on('will-navigate', (e, url) => { if (!String(e?.url || url).startsWith('vsl://app/')) e.preventDefault(); });
+    wc.setWindowOpenHandler(({ url }) => {
+      if (/^https:\/\//i.test(url)) shell.openExternal(url);
+      return { action: 'deny' };
+    });
+    wc.on('will-attach-webview', (e) => e.preventDefault());
+    wc.on('before-input-event', (e, input) => {
+      // sin recargar ni abrir herramientas en la versión final
+      if (!isDev && (input.key === 'F5' || (input.control && ['r', 'R'].includes(input.key)) || (input.control && input.shift && ['i', 'I'].includes(input.key)))) e.preventDefault();
+      if (isDev && input.key === 'F12' && input.type === 'keyDown') wc.toggleDevTools();
+    });
+    wc.on('render-process-gone', (_, d) => log.error('La interfaz se cerró:', d.reason));
+    win.once('ready-to-show', () => {
+      if (HIDDEN_TEST) {
+        // pruebas: ventana invisible que no roba el foco ni los clics del usuario
+        win.setOpacity(0);
+        win.setIgnoreMouseEvents(true);
+        win.setSkipTaskbar(true);
+        win.showInactive();
+        return;
+      }
+      win.show();
+      win.focus();
+    });
+    win.on('close', (e) => {
+      saveWindowState();
+      if (quitting) return;
+      if (instances.busy() || admin.tasks.size) {
+        e.preventDefault();
+        if (!closeAsked) {
+          closeAsked = true;
+          send('close-requested', { tasks: [...instances.tasks.keys()], admin: admin.tasks.size });
+          setTimeout(() => { closeAsked = false; }, 800);
+        }
+      }
+    });
+    win.on('closed', () => {
+      win = null;
+      // si el juego sigue abierto, el launcher queda en la bandeja para poder volver
+      if (!quitting && instances.anyRunning()) ensureTray('El juego sigue abierto');
+    });
+    // Windows se está apagando o cerrando sesión: parar descargas de forma segura.
+    win.on('session-end', () => { quitting = true; instances.cancelAll(); });
+    win.on('focus', () => send('focus', true));
+    win.on('blur', () => send('focus', false));
+    win.on('minimize', () => send('visibility', 'minimized'));
+    win.on('restore', () => send('visibility', 'visible'));
+    await win.loadURL('vsl://app/index.html');
+  }
+
+  function saveWindowState() {
+    if (!win || win.isDestroyed()) return;
+    const maximized = win.isMaximized();
+    const b = maximized ? (readJsonSyncSafe(stateFile) || {}) : win.getBounds();
+    fs.writeFile(stateFile, JSON.stringify({ ...b, maximized }), () => {});
+  }
+
+  function readJsonSyncSafe(f) { try { return JSON.parse(fs.readFileSync(f, 'utf8')); } catch { return null; } }
+
+  function showWindow() {
+    if (win) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+    } else createWindow();
+  }
+
+  function ensureTray(tooltip) {
+    if (!tray) {
+      tray = new Tray(nativeImage.createFromPath(path.join(RENDERER, 'img', 'icon.png')).resize({ width: 16, height: 16 }));
+      tray.on('click', showWindow);
+    }
+    tray.setToolTip(tooltip || APP_NAME);
+    tray.setContextMenu(Menu.buildFromTemplate([
+      { label: `Abrir ${APP_NAME}`, click: showWindow },
+      { type: 'separator' },
+      { label: 'Salir', click: () => { quitting = true; app.quit(); } },
+    ]));
+  }
+
+  function destroyTray() {
+    if (tray) { tray.destroy(); tray = null; }
+  }
+
+  // ---------- Eventos de los servicios → interfaz ----------
+  instances.on('instance', (d) => send('instance', d));
+  instances.on('progress', (p) => {
+    send('progress', p);
+    if (win && !win.isDestroyed() && p.kind !== 'launch') win.setProgressBar(p.total > 0 ? Math.min(1, p.done / p.total) : 2);
+  });
+  instances.on('task-done', (d) => {
+    send('task-done', d);
+    if (win && !win.isDestroyed() && !instances.busy()) win.setProgressBar(-1);
+  });
+  instances.on('game-start', (d) => {
+    send('game', { ...d, state: 'running' });
+    const mode = settings.get().onLaunch;
+    if (!win) return;
+    if (mode === 'minimize') setTimeout(() => win?.minimize(), 1200);
+    if (mode === 'hide') {
+      const name = instances.remote.get(d.id)?.name || d.id;
+      ensureTray(`Jugando a ${name}`);
+      // cerrar la ventana libera casi toda la memoria del launcher mientras juegas
+      setTimeout(() => {
+        if (win && !instances.busy() && instances.anyRunning()) {
+          hiddenForGame = true;
+          saveWindowState();
+          win.destroy();
+        }
+      }, 1500);
+    }
+  });
+  instances.on('game-exit', (d) => {
+    const s = settings.get();
+    if (instances.anyRunning()) { send('game', { ...d, state: 'exit' }); return; }
+    if (!win) {
+      // ventana cerrada por el modo "ocultar": se vuelve a abrir; si la cerró el jugador, se sale
+      if (hiddenForGame && s.reopenOnExit) {
+        hiddenForGame = false;
+        destroyTray();
+        createWindow().then(() => setTimeout(() => send('game', { ...d, state: 'exit' }), 1200));
+      } else if (!hiddenForGame) {
+        quitting = true;
+        app.quit();
+      }
+      return;
+    }
+    hiddenForGame = false;
+    destroyTray();
+    if (s.reopenOnExit && win.isMinimized()) win.restore();
+    send('game', { ...d, state: 'exit' });
+  });
+  admin.on('progress', (p) => send('admin-progress', p));
+  accounts.on('change', (s) => send('accounts', s));
+  updater.on('state', (s) => send('update', s));
+
+  // ---------- IPC ----------
+  const handlers = {};
+  const on = (name, fn) => { handlers[name] = fn; };
+  const parentWin = () => (win && !win.isDestroyed() ? win : undefined);
+
+  // app
+  on('app:info', () => ({
+    name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
+    dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
+    news: backend.news(), admin: admin.status(), update: updater.state, defaultJvm: DEFAULT_JVM,
+    loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
+  }));
+  on('app:openExternal', (url) => {
+    if (!/^https:\/\/[^\s]+$/i.test(String(url))) throw new Error('Enlace no permitido');
+    return shell.openExternal(url);
+  });
+  on('app:openFolder', async (kind, id) => {
+    const map = { data: dataRoot, logs: log.DIR, instance: id ? instances.gameDir(id) : null, config: paths.CONFIG_ROOT };
+    const target = kind === 'instance-sub' ? path.join(instances.gameDir(id.id), id.sub.replace(/[^a-z_-]/gi, '')) : map[kind];
+    if (!target) throw new Error('Carpeta no válida');
+    await fsp.mkdir(target, { recursive: true });
+    return shell.openPath(target);
+  });
+  on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 5000)); return true; });
+  // Nombre, frases y redes del estudio: se leen de la web (se editan en su panel).
+  on('app:studio', async () => {
+    const file = paths.configFile('studio.json');
+    try {
+      const d = await cached('studio', 60 * 60 * 1000, () => getJson(`${STUDIO_SITE}data/content.json`, { timeout: 10000, retries: 1 }));
+      const out = {
+        name: String(d?.site?.name || 'Viciont Studios').slice(0, 60),
+        founder: String(d?.site?.founder || 'CrissyjuanxD').slice(0, 40),
+        tagline: String(d?.site?.tagline || '').slice(0, 200),
+        typing: (Array.isArray(d?.site?.typing) ? d.site.typing : []).map((t) => String(t).slice(0, 60)).slice(0, 8),
+        socials: Object.fromEntries(['youtube', 'x', 'discord'].map((k) => [k, /^https:\/\//i.test(d?.socials?.[k] || '') ? d.socials[k] : ''])),
+        site: STUDIO_SITE,
+      };
+      fs.writeFile(file, JSON.stringify(out), () => {});
+      return out;
+    } catch {
+      return readJson(file, { name: 'Viciont Studios', founder: 'CrissyjuanxD', typing: [], socials: {}, site: STUDIO_SITE });
+    }
+  });
+  on('app:closeDecision', async (quit) => {
+    if (!quit) return false;
+    quitting = true;
+    send('closing', true);
+    await instances.cancelAll();
+    for (const p of admin.tasks.values()) p.stop();
+    setTimeout(() => app.quit(), 150);
+    return true;
+  });
+  on('app:checkUpdates', () => updater.check());
+  on('app:installUpdate', () => {
+    if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de reiniciar.');
+    quitting = true;
+    updater.install();
+    return true;
+  });
+
+  // ajustes
+  on('settings:get', () => settings.get());
+  on('settings:set', (patch) => {
+    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'apiBase', 'autoUpdate'];
+    const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
+    const before = settings.get().apiBase;
+    const out = settings.set(clean);
+    if (out.apiBase !== before) instances.refresh().then((l) => send('instances', l));
+    return out;
+  });
+  on('settings:chooseDataDir', async () => {
+    const r = await dialog.showOpenDialog(parentWin(), { title: 'Elegir carpeta de datos', properties: ['openDirectory', 'createDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    let target = r.filePaths[0];
+    if (path.basename(target).toLowerCase() !== paths.APP_DIR_NAME.toLowerCase()) target = path.join(target, paths.APP_DIR_NAME);
+    return target;
+  });
+  on('settings:moveDataDir', async (target, { move }) => {
+    if (instances.busy() || instances.anyRunning()) throw new Error('Cierra el juego y espera a que terminen las descargas.');
+    const dest = target === null ? paths.CONFIG_ROOT : path.resolve(String(target));
+    if (path.resolve(dest).toLowerCase() === path.resolve(dataRoot).toLowerCase()) return { dataDir: dataRoot };
+    paths.ensureDataRoot(dest);
+    if (move) {
+      for (const sub of ['meta', 'instances', 'skins', 'admin', 'backups']) {
+        const from = path.join(dataRoot, sub);
+        if (!(await exists(from))) continue;
+        const to = path.join(dest, sub);
+        send('moving', { sub });
+        try { await fsp.rename(from, to); } catch {
+          await fsp.cp(from, to, { recursive: true, force: false, errorOnExist: false });
+          await rmrf(from);
+        }
+      }
+    }
+    settings.set({ dataDir: dest === paths.CONFIG_ROOT ? null : dest });
+    dataRoot = dest;
+    dirs = paths.dataDirs(dataRoot);
+    instances.setDirs(dirs);
+    media.localRoots.set('admin', path.join(dirs.admin, 'media'));
+    paths.registerDataDir(dataRoot);
+    return { dataDir: dataRoot };
+  });
+  on('settings:storage', async () => {
+    const [meta, inst, caches] = await Promise.all([dirSize(dirs.meta), dirSize(dirs.instances), dirSize(dirs.caches)]);
+    return { meta, instances: inst, caches, dataDir: dataRoot };
+  });
+  on('settings:clearCache', async () => {
+    if (instances.busy()) throw new Error('Espera a que terminen las descargas.');
+    await rmrf(dirs.caches);
+    return true;
+  });
+  on('settings:chooseJava', async () => {
+    const r = await dialog.showOpenDialog(parentWin(), { title: 'Elegir java.exe o javaw.exe', properties: ['openFile'], filters: [{ name: 'Java', extensions: ['exe'] }] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    const info = await probeJava(r.filePaths[0]);
+    if (!info) throw new Error('Ese archivo no parece ser Java.');
+    return { path: r.filePaths[0], ...info };
+  });
+
+  // cuentas
+  on('accounts:get', () => accounts.summary());
+  on('accounts:loginMicrosoft', () => accounts.loginMicrosoft(parentWin()));
+  on('accounts:checkNick', (name) => accounts.checkNick(name));
+  on('accounts:loginOffline', (name, code) => accounts.loginOffline(name, code));
+  on('accounts:switch', (uuid) => accounts.setActive(uuid));
+  on('accounts:logout', (uuid) => accounts.remove(uuid));
+  on('accounts:recoveryCode', (uuid) => accounts.recoveryCode(uuid));
+  on('accounts:refresh', async () => {
+    const a = accounts.active();
+    if (a?.type === 'microsoft') await accounts.refreshProfile(a);
+    return accounts.summary();
+  });
+
+  // skins
+  on('skins:state', () => skins.state());
+  on('skins:add', (data) => skins.add(data));
+  on('skins:addFromName', (name) => skins.importFromName(name));
+  on('skins:update', (id, patch) => skins.update(id, patch));
+  on('skins:remove', (id) => skins.remove(id));
+  on('skins:apply', (id) => skins.apply(id));
+  on('skins:reset', () => skins.resetSkin());
+  on('skins:setCape', (id) => skins.setCape(id));
+  on('skins:current', () => skins.current().catch(() => null));
+
+  // instancias
+  on('instances:list', () => instances.list());
+  on('instances:refresh', () => instances.refresh());
+  on('instances:get', (id) => instances.get(id));
+  on('instances:install', (id) => { instances.install(id).catch(() => {}); return true; });
+  on('instances:repair', (id) => { instances.install(id, { repair: true }).catch(() => {}); return true; });
+  on('instances:cancel', (id) => { instances.cancel(id); return true; });
+  on('instances:play', (id) => instances.play(id, { version: VERSION }));
+  on('instances:stop', (id) => { instances.stop(id); return true; });
+  on('instances:uninstall', (id, opts) => instances.uninstall(id, opts));
+  on('instances:setOptions', (id, patch) => instances.setOptions(id, patch));
+  on('instances:size', (id) => instances.size(id));
+  on('instances:log', (id) => instances.logTail(id));
+
+  // administración
+  const needAdmin = (fn) => (...a) => {
+    if (!admin.key) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
+    return fn(...a);
+  };
+  on('admin:status', () => admin.status());
+  on('admin:unlock', (key, remember) => admin.unlock(key, remember));
+  on('admin:lock', () => admin.lock());
+  on('admin:list', needAdmin(() => admin.list()));
+  on('admin:create', needAdmin((d) => admin.create(d)));
+  on('admin:open', needAdmin((id) => admin.open(id)));
+  on('admin:discard', needAdmin((id) => admin.discard(id)));
+  on('admin:saveMeta', needAdmin((id, meta) => admin.saveMeta(id, meta)));
+  on('admin:addFiles', needAdmin(async (id, targetDir, folders) => {
+    const r = await dialog.showOpenDialog(parentWin(), {
+      title: folders ? 'Elegir carpetas' : 'Elegir archivos',
+      properties: folders ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
+    });
+    if (r.canceled || !r.filePaths.length) return null;
+    return admin.addLocal(id, r.filePaths, targetDir);
+  }));
+  on('admin:addPaths', needAdmin((id, list, targetDir) => admin.addLocal(id, list.filter((p) => typeof p === 'string'), targetDir)));
+  on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
+  on('admin:updateFile', needAdmin((id, p, patch) => admin.updateFile(id, p, patch)));
+  on('admin:removeFiles', needAdmin((id, list) => admin.removeFiles(id, list)));
+  on('admin:setMedia', needAdmin((id, kind, data) => admin.setMedia(id, kind, data)));
+  on('admin:clearMedia', needAdmin((id, kind) => admin.clearMedia(id, kind)));
+  on('admin:scanFolder', needAdmin(async () => {
+    const r = await dialog.showOpenDialog(parentWin(), { title: 'Carpeta de la instancia (CurseForge, Prism, Modrinth, .minecraft…)', properties: ['openDirectory'] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    return admin.scanFolder(r.filePaths[0]);
+  }));
+  on('admin:importFolder', needAdmin((id, root, include) => admin.importFolder(id, root, include)));
+  on('admin:importMrpack', needAdmin(async (id) => {
+    const r = await dialog.showOpenDialog(parentWin(), { title: 'Modpack de Modrinth', properties: ['openFile'], filters: [{ name: 'Modpack de Modrinth', extensions: ['mrpack'] }] });
+    if (r.canceled || !r.filePaths[0]) return null;
+    return admin.importMrpack(id, r.filePaths[0]);
+  }));
+  on('admin:publish', needAdmin(async (id) => {
+    const inst = await admin.publish(id);
+    instances.refresh().then((l) => send('instances', l));
+    return inst;
+  }));
+  on('admin:updateMeta', needAdmin(async (id, meta) => {
+    const inst = await admin.updateMeta(id, meta);
+    instances.refresh().then((l) => send('instances', l));
+    return inst;
+  }));
+  on('admin:remove', needAdmin(async (id) => {
+    await admin.remove(id);
+    instances.refresh().then((l) => send('instances', l));
+    return true;
+  }));
+  on('admin:offlineAccounts', needAdmin((q) => admin.offlineAccounts(q)));
+  on('admin:releaseNick', needAdmin((n) => admin.releaseNick(n)));
+
+  // catálogo (versiones y Modrinth)
+  on('catalog:mcVersions', async () => {
+    const m = await getVersionManifest(dirs);
+    return m.versions.map((v) => ({ id: v.id, type: v.type, date: v.releaseTime }));
+  });
+  on('catalog:loaderVersions', (type, mc) => listLoaderVersions(type, mc));
+  on('catalog:loaderGames', async (type) => {
+    const s = await supportedGameVersions(type);
+    return s ? [...s] : null;
+  });
+  on('modrinth:search', (q) => modrinth.search(q));
+  on('modrinth:versions', (id, q) => modrinth.versions(id, q));
+
+  ipcMain.handle('vsl', async (event, channel, ...args) => {
+    const url = event.senderFrame?.url || '';
+    if (!url.startsWith('vsl://app/')) return { ok: false, error: { message: 'Origen no permitido' } };
+    const fn = handlers[channel];
+    if (!fn) return { ok: false, error: { message: `Acción desconocida: ${channel}` } };
+    try {
+      return { ok: true, data: await fn(...args) };
+    } catch (e) {
+      if (e?.name !== 'AbortError') log.warn(`[${channel}]`, e?.message || e);
+      return { ok: false, error: { message: e?.message || String(e), code: e?.code || null, status: e?.status || null } };
+    }
+  });
+
+  // ---------- Arranque ----------
+  app.on('second-instance', showWindow);
+  app.on('before-quit', () => { quitting = true; saveWindowState(); });
+  app.on('window-all-closed', () => {
+    if (quitting || !instances.anyRunning()) app.quit();
+  });
+
+  app.whenReady().then(async () => {
+    log.info(`${APP_NAME} ${VERSION} — datos en ${dataRoot}`);
+    paths.ensureDataRoot(dataRoot);
+    paths.registerDataDir(dataRoot);
+    media.localRoots.set('admin', path.join(dirs.admin, 'media'));
+
+    const ses = session.defaultSession;
+    ses.setPermissionRequestHandler((_, perm, cb) => cb(perm === 'clipboard-sanitized-write'));
+    ses.setPermissionCheckHandler((_, perm) => perm === 'clipboard-sanitized-write');
+
+    const CSP = [
+      "default-src 'self'",
+      "script-src 'self'",
+      "style-src 'self' 'unsafe-inline'",
+      "img-src 'self' data: blob: vsl-media: https://cdn.modrinth.com",
+      "media-src 'self' vsl-media: blob:",
+      "font-src 'self'",
+      "connect-src 'self' data:",
+      "worker-src 'self' blob:",
+      "object-src 'none'",
+      "base-uri 'none'",
+      "form-action 'none'",
+      "frame-ancestors 'none'",
+    ].join('; ');
+    const TYPES = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.png': 'image/png', '.webp': 'image/webp', '.svg': 'image/svg+xml', '.woff2': 'font/woff2', '.json': 'application/json', '.ico': 'image/x-icon' };
+    protocol.handle('vsl', async (req) => {
+      const u = new URL(req.url);
+      if (u.host !== 'app') return new Response('not found', { status: 404 });
+      const rel = decodeURIComponent(u.pathname).replace(/^\/+/, '') || 'index.html';
+      const file = path.resolve(RENDERER, rel);
+      if (!file.startsWith(RENDERER + path.sep)) return new Response('forbidden', { status: 403 });
+      try {
+        const body = await fsp.readFile(file);
+        const headers = { 'Content-Type': TYPES[path.extname(file)] || 'application/octet-stream', 'X-Content-Type-Options': 'nosniff' };
+        if (file.endsWith('.html')) headers['Content-Security-Policy'] = CSP;
+        return new Response(body, { headers });
+      } catch {
+        return new Response('not found', { status: 404 });
+      }
+    });
+    protocol.handle('vsl-media', (req) => media.handle(req));
+
+    accounts.load();
+    admin.load();
+    await backend.init();
+    await instances.loadCache();
+    updater.init();
+    await createWindow();
+    backend.refreshRemote().then(() => instances.refresh()).then((l) => send('instances', l)).catch(() => {});
+    if (TEST_SCRIPT) {
+      const run = require(path.resolve(TEST_SCRIPT));
+      const ctx = {
+        win, log, instances, accounts, admin, settings,
+        exec: (js) => win.webContents.executeJavaScript(js, true),
+        capture: async (file) => { const img = await win.webContents.capturePage(); fs.writeFileSync(file, img.toPNG()); },
+        wait: (ms) => new Promise((r) => setTimeout(r, ms)),
+      };
+      Promise.resolve().then(() => run(ctx)).catch((e) => log.error('[test]', e))
+        .finally(() => { if (!process.argv.includes('--keep')) { quitting = true; app.quit(); } });
+    }
+    // refresco suave de la lista cada 10 minutos (solo si la ventana está abierta)
+    const t = setInterval(() => {
+      if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) instances.refresh().then((l) => send('instances', l)).catch(() => {});
+    }, 10 * 60 * 1000);
+    t.unref?.();
+  });
+
+  process.on('uncaughtException', (e) => log.error('Error no controlado:', e));
+  process.on('unhandledRejection', (e) => log.warn('Promesa sin controlar:', e));
+}
