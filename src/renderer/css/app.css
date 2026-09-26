@@ -524,3 +524,17 @@
 .tag { display: inline-flex; align-items: center; gap: 5px; }
 .tag .i, .pubbar__info .i, .muted .i, .field__hint .i { display: inline-block; width: 13px; height: 13px; vertical-align: -2px; }
 .pubbar__info span { display: inline-flex; align-items: center; gap: 5px; }
+
+/* Visor de skins compacto y de tamaño fijo (como en Modrinth) */
+.skins { grid-template-columns: 320px minmax(0, 1fr); align-items: start; }
+.skins__stage { width: 320px; min-height: 0; position: sticky; top: 0; }
+.skins__name { position: static; padding: 16px 18px 0; flex-wrap: wrap; }
+.skins__name h2 { font-size: 1.6rem; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.skins__stage canvas { flex: none; width: 280px; height: 360px; margin: 6px auto 4px; }
+.skins__floor { bottom: 66px; }
+.skins__tools { flex-wrap: wrap; padding: 12px; }
+.skins__tools .btn { padding-inline: 0.7em; }
+
+/* Privacidad (Acerca de) */
+.plain-list { margin: 0; padding-left: 18px; display: grid; gap: 8px; color: var(--muted); font-size: 0.88rem; line-height: 1.55; }
+.plain-list b { color: var(--text); }

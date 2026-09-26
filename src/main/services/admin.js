@@ -1,5 +1,8 @@
 'use strict';
-// Administración de instancias (acceso restringido con la clave de administrador).
+// Administración de instancias. Doble llave:
+//   1. El nick tiene que tener permisos concedidos desde el panel web del estudio.
+//   2. Hay que escribir la clave personal de ese nick (la genera el panel).
+// Cada petición va con la sesión del jugador + su clave, y el servidor comprueba los permisos.
 // Los cambios se preparan en un borrador local y se publican en el servidor de una vez:
 // solo se suben los archivos nuevos (el resto ya está en R2 o viene de Modrinth).
 
@@ -62,58 +65,146 @@ function cleanMeta(m = {}, id) {
 }
 
 class Admin extends EventEmitter {
-  constructor({ getDirs, backend, log }) {
+  constructor({ getDirs, backend, accounts, log }) {
     super();
     this.getDirs = getDirs;
     this.backend = backend;
+    this.accounts = accounts;
     this.log = log;
-    this.key = null;
-    this.remembered = false;
+    this.saved = {}; // cuenta → clave recordada (cifrada en admin.dat)
+    this.sessions = new Map(); // cuenta → { key, nick, perms, scope }
     this.tasks = new Map();
+    this.grants = new Map(); // rutas elegidas por el usuario (arrastrar y soltar / diálogos)
   }
 
   // ---------- Acceso ----------
   load() {
     const d = readSecure(KEY_FILE, null);
-    if (d?.key) { this.key = d.key; this.remembered = true; }
+    if (d?.keys && typeof d.keys === 'object') this.saved = d.keys;
   }
 
-  status() {
-    return { unlocked: Boolean(this.key), remembered: this.remembered, configured: this.backend.configured() };
+  saveKeys() {
+    if (Object.keys(this.saved).length) writeSecure(KEY_FILE, { keys: this.saved });
+    else fsp.rm(KEY_FILE, { force: true }).catch(() => {});
+  }
+
+  forget(uuid) {
+    this.sessions.delete(uuid);
+    if (this.saved[uuid]) { delete this.saved[uuid]; this.saveKeys(); }
+  }
+
+  current() {
+    const acc = this.accounts.active();
+    return acc ? this.sessions.get(acc.uuid) || null : null;
+  }
+
+  unlocked() { return Boolean(this.current()); }
+
+  can(perm) { return Boolean(this.current()?.perms?.includes(perm)); }
+
+  quickStatus() {
+    const s = this.current();
+    return { unlocked: Boolean(s), perms: s?.perms || [] };
+  }
+
+  async status() {
+    const acc = this.accounts.active();
+    const base = { configured: this.backend.configured(), server: this.backend.base() || null, nick: acc?.name || null, access: false, unlocked: false, perms: [] };
+    if (!acc || !base.configured) return base;
+    let me;
+    try { me = await this.accounts.me(); } catch (e) {
+      const s = this.sessions.get(acc.uuid);
+      return { ...base, error: e.message, access: Boolean(s), unlocked: Boolean(s), perms: s?.perms || [] };
+    }
+    if (!me?.admin) {
+      // el panel le quitó el acceso (o nunca lo tuvo): se olvida la clave de esta cuenta
+      this.forget(acc.uuid);
+      return base;
+    }
+    let s = this.sessions.get(acc.uuid);
+    if (!s && this.saved[acc.uuid]) {
+      try { s = await this.verify(acc, this.saved[acc.uuid]); } catch (e) {
+        if (e.code === 'EBADKEY' || e.code === 'ENOACCESS') this.forget(acc.uuid);
+      }
+    }
+    return {
+      ...base, access: true, hasKey: Boolean(me.admin.hasKey), unlocked: Boolean(s), remembered: Boolean(this.saved[acc.uuid]),
+      perms: s?.perms || me.admin.perms || [], scope: s?.scope ?? me.admin.scope,
+    };
+  }
+
+  async verify(acc, key) {
+    const r = await this.request(acc, key, '/v1/admin/ping', { timeout: 12000, retries: 0 });
+    const s = { key, nick: r.nick, perms: Array.isArray(r.perms) ? r.perms : [], scope: r.scope };
+    this.sessions.set(acc.uuid, s);
+    return s;
   }
 
   async unlock(key, remember) {
-    const k = String(key || '').trim();
-    if (k.length < 12) throw err('La clave es demasiado corta.', 'EBADKEY');
-    try {
-      await this.backend.call('/v1/admin/ping', { adminKey: k, timeout: 12000, retries: 0 });
-    } catch (e) {
-      if (e.status === 401 || e.status === 403) throw err('Clave de administrador incorrecta.', 'EBADKEY');
-      throw e;
-    }
-    this.key = k;
-    this.remembered = Boolean(remember);
-    if (remember) writeSecure(KEY_FILE, { key: k });
-    else await fsp.rm(KEY_FILE, { force: true });
-    this.log.info('Modo administrador activado');
+    const acc = this.accounts.active();
+    if (!acc) throw err('Inicia sesión primero.', 'ELOCKED');
+    const k = String(key || '').trim().toUpperCase();
+    if (!/^VSL-[0-9A-Z]{5}(-[0-9A-Z]{5}){4}$/.test(k)) throw err('Esa no es una clave válida. Tiene la forma VSL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX.', 'EBADKEY');
+    await this.verify(acc, k);
+    if (remember) this.saved[acc.uuid] = k; else delete this.saved[acc.uuid];
+    this.saveKeys();
+    this.log.info(`Modo administrador activado (${acc.name})`);
     return this.status();
   }
 
   async lock() {
-    this.key = null;
-    this.remembered = false;
-    await fsp.rm(KEY_FILE, { force: true });
-    return this.status();
+    const acc = this.accounts.active();
+    if (acc) this.forget(acc.uuid);
+    return { unlocked: false };
+  }
+
+  // Cabeceras de una petición de administración: sesión del jugador + clave personal.
+  async headers(acc, key) {
+    const token = await this.accounts.session(acc);
+    if (!token) throw err('No se pudo conectar con el servidor del estudio.', 'ENOBACKEND');
+    return { Authorization: `Bearer ${token}`, 'X-Admin-Key': key };
+  }
+
+  async request(acc, key, pathname, opts = {}) {
+    for (let attempt = 0; ; attempt++) {
+      try {
+        return await this.backend.call(pathname, { ...opts, headers: { ...(opts.headers || {}), ...(await this.headers(acc, key)) } });
+      } catch (e) {
+        if (e.status === 401 && e.code === 'unauthorized' && attempt === 0) { this.accounts.invalidateSession(acc); continue; }
+        if (e.status === 401 && e.code === 'bad_key') throw err('La clave de administrador no es correcta.', 'EBADKEY');
+        if (e.status === 403 && (e.code === 'not_admin' || e.code === 'wrong_account')) throw err(e.message, 'ENOACCESS');
+        if (e.status === 429) throw err(e.message, 'ETOOMANY');
+        throw e;
+      }
+    }
   }
 
   async call(pathname, opts = {}) {
-    if (!this.key) throw err('Activa el modo administrador para continuar.', 'ELOCKED');
+    const acc = this.accounts.active();
+    const s = acc && this.sessions.get(acc.uuid);
+    if (!s) throw err('Activa el modo administrador para continuar.', 'ELOCKED');
     try {
-      return await this.backend.call(pathname, { ...opts, adminKey: this.key });
+      return await this.request(acc, s.key, pathname, opts);
     } catch (e) {
-      if (e.status === 401) { await this.lock(); throw err('La clave de administrador ya no es válida.', 'EBADKEY'); }
+      if (e.code === 'EBADKEY' || e.code === 'ENOACCESS') {
+        this.forget(acc.uuid);
+        this.emit('locked');
+      }
       throw e;
     }
+  }
+
+  // Las rutas del PC solo se aceptan si el usuario las eligió (diálogo o arrastrar y soltar).
+  grant(p) {
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return;
+    this.grants.set(path.resolve(p).toLowerCase(), Date.now());
+    if (this.grants.size > 5000) this.grants.delete(this.grants.keys().next().value);
+  }
+
+  granted(p) {
+    if (typeof p !== 'string' || !path.isAbsolute(p)) return false;
+    const t = this.grants.get(path.resolve(p).toLowerCase());
+    return Boolean(t && Date.now() - t < 30 * 60 * 1000);
   }
 
   // ---------- Borradores ----------
@@ -538,7 +629,7 @@ class Admin extends EventEmitter {
       if (!m?.local) continue;
       const file = path.join(this.dirs().media, m.name);
       await send(this.backend.url(`/v1/admin/instances/${id}/media/${m.name}`), {
-        headers: { 'X-Admin-Key': this.key, 'Content-Type': m.type }, body: await fsp.readFile(file), onBytes: (n) => progress?.addDone(n),
+        headers: { ...(await this.uploadHeaders()), 'Content-Type': m.type }, body: await fsp.readFile(file), onBytes: (n) => progress?.addDone(n),
       });
       d.media[kind] = { key: `${id}/${m.name}`, type: m.type };
       await linkOrCopy(file, path.join(this.getDirs().media, id, m.name)).catch(() => {});
@@ -554,9 +645,16 @@ class Admin extends EventEmitter {
     return out;
   }
 
+  async uploadHeaders() {
+    const acc = this.accounts.active();
+    const s = acc && this.sessions.get(acc.uuid);
+    if (!s) throw err('Activa el modo administrador para continuar.', 'ELOCKED');
+    return this.headers(acc, s.key);
+  }
+
   async uploadBlob(id, t, progress) {
     const base = this.backend.url(`/v1/admin/instances/${id}/blobs/${t.sha}`);
-    const headers = { 'X-Admin-Key': this.key, 'Content-Type': 'application/octet-stream' };
+    const headers = { ...(await this.uploadHeaders()), 'Content-Type': 'application/octet-stream' };
     const onBytes = (n) => progress.addDone(n);
     if (t.size <= SINGLE_MAX) {
       const body = await fsp.readFile(t.file);

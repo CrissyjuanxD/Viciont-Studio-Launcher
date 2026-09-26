@@ -115,9 +115,19 @@ const app = {
     if (!state.accounts.active) { showLogin(); return; }
     app.refreshAvatar();
     app.refreshInstances(true);
-    if (current.name === 'home' || current.name === 'skins') { current.key = ''; app.go(state.route, { instant: true }); }
+    app.refreshAdmin();
+    if (current.name === 'home' || current.name === 'skins' || current.name === 'admin') { current.key = ''; app.go(current.name === 'admin' ? { name: 'home' } : state.route, { instant: true }); }
   },
-  onAdminChange(unlocked) {
+  // ¿La cuenta activa tiene acceso de administración? (lo decide el panel del estudio)
+  async refreshAdmin() {
+    try { state.admin = await call('admin:status'); } catch { state.admin = { access: false, unlocked: false, perms: [] }; }
+    app.onAdminChange(Boolean(state.admin?.unlocked));
+    return state.admin;
+  },
+  onAdminChange(unlocked, st) {
+    if (st) state.admin = st;
+    state.admin = { ...(state.admin || {}), unlocked };
+    if (!unlocked) state.admin.perms = [];
     state.info.admin = { ...(state.info.admin || {}), unlocked };
     $('rail-admin').hidden = !unlocked;
     paintTitlebar();
@@ -162,7 +172,7 @@ function paintTitlebar() {
   const box = $('titlebar-status');
   const chips = [];
   if (state.instancesMeta.error === 'EOFFLINE') chips.push(`<span class="chip chip--warn">${icon('alert')}Sin conexión</span>`);
-  if (state.info?.admin?.unlocked) chips.push(`<span class="chip">${icon('shield')}Admin</span>`);
+  if (state.admin?.unlocked) chips.push(`<span class="chip">${icon('shield')}Admin</span>`);
   const u = state.update;
   if (u?.status === 'ready') chips.push(`<button class="chip chip--hot" type="button" id="upd-chip">${icon('download')}Versión ${esc(u.version)} lista · Reiniciar</button>`);
   else if (u?.status === 'downloading') chips.push(`<span class="chip">${icon('download')}Actualizando launcher ${u.percent || 0}%</span>`);
@@ -198,8 +208,9 @@ function showShell() {
   app.refreshAvatar();
   paintRail();
   current.key = '';
-  app.go(state.route?.name ? state.route : { name: 'home' }, { instant: true });
+  app.go(state.route?.name && state.route.name !== 'admin' ? state.route : { name: 'home' }, { instant: true });
   app.refreshInstances(true);
+  app.refreshAdmin();
 }
 
 // ---------- Eventos del proceso principal ----------
@@ -219,6 +230,10 @@ on('task-done', (d) => {
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
 on('update', paintTitlebar);
+on('admin-locked', () => {
+  app.onAdminChange(false);
+  toast('Se cerró el modo administrador: tu clave o tus permisos cambiaron.', { kind: 'error', timeout: 8000 });
+});
 on('game', (d) => {
   if (d.state === 'running') {
     scene.pauseAll(true);
@@ -258,7 +273,7 @@ async function boot() {
     setEffects(settings.effects);
     $('app-version').textContent = `v${info.version}`;
     document.title = `Viciont Studio Launcher ${info.version}`;
-    $('rail-admin').hidden = !info.admin?.unlocked;
+    $('rail-admin').hidden = true;
   } catch (e) {
     console.error(e);
     toastError(e);
@@ -307,4 +322,7 @@ async function boot() {
 }
 
 boot();
-window.addEventListener('error', (e) => console.error(e.error || e.message));
+// errores de la interfaz: se guardan en el registro para poder arreglarlos
+const reportUi = (msg) => { try { call('app:uiError', String(msg).slice(0, 400)).catch(() => {}); } catch { /* nada */ } };
+window.addEventListener('error', (e) => { console.error(e.error || e.message); reportUi(`${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`); });
+window.addEventListener('unhandledrejection', (e) => { const m = e.reason?.message || String(e.reason); if (!/Acción|AbortError/.test(m)) reportUi(`Promesa: ${m}`); });

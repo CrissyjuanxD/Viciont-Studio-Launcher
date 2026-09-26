@@ -29,14 +29,26 @@ class Accounts extends EventEmitter {
     super();
     this.backend = backend;
     this.log = log;
-    this.data = { active: null, list: [] };
+    this.data = { active: null, list: [], device: null };
+    this.meCache = new Map();
   }
 
   load() {
     const d = readSecure(FILE, null);
-    if (d && Array.isArray(d.list)) this.data = { active: d.active || null, list: d.list };
+    if (d && Array.isArray(d.list)) this.data = { active: d.active || null, list: d.list, device: d.device || null };
     if (!this.find(this.data.active)) this.data.active = this.data.list[0]?.uuid || null;
   }
+
+  // Clave propia de este PC para Xbox (como el launcher oficial y Modrinth). Va cifrada con las cuentas.
+  deviceStore() {
+    return {
+      get: () => this.data.device || null,
+      set: (dev) => { this.data.device = dev; writeSecure(FILE, this.data); },
+    };
+  }
+
+  // Registro de actividad (lo recoge el servicio de telemetría).
+  track(type, info = {}) { this.emit('track', type, info); }
 
   save() {
     writeSecure(FILE, this.data);
@@ -68,21 +80,35 @@ class Accounts extends EventEmitter {
   }
 
   remove(uuid) {
+    const acc = this.find(uuid);
     this.data.list = this.data.list.filter((a) => a.uuid !== uuid);
     if (this.data.active === uuid) this.data.active = this.data.list[0]?.uuid || null;
+    this.meCache.delete(uuid);
     this.save();
+    // Microsoft olvida también la cuenta en la ventana de inicio de sesión
+    if (acc?.type === 'microsoft') microsoft.clearWebSession().catch(() => {});
     return this.summary();
   }
 
   // ---------- Premium ----------
   async loginMicrosoft(parentWindow) {
-    const acc = await microsoft.login(parentWindow);
+    let acc;
+    try {
+      acc = await microsoft.login(parentWindow, this.deviceStore());
+    } catch (e) {
+      if (e.code !== 'ECANCEL') {
+        this.log.warn('Inicio de sesión con Microsoft fallido:', e.message);
+        this.track('auth.error', { level: 'error', message: `Microsoft: ${e.message}`, data: { code: e.code || null, xerr: e.xerr || null, status: e.status || null } });
+      }
+      throw e;
+    }
     acc.needsLogin = false;
     acc.backend = null;
     this.upsert(acc);
     this.data.active = acc.uuid;
     this.save();
     this.log.info(`Sesión premium iniciada: ${acc.name}`);
+    this.track('auth.login', { uuid: acc.uuid, message: 'Inició sesión con Microsoft (premium)', data: { flow: acc.flow } });
     return this.summary();
   }
 
@@ -91,7 +117,7 @@ class Accounts extends EventEmitter {
     if (!acc || acc.type !== 'microsoft') return acc;
     if (!force && acc.mcToken && acc.mcExpiresAt - Date.now() > 15 * 60 * 1000) return acc;
     try {
-      const fresh = await microsoft.refresh(acc);
+      const fresh = await microsoft.refresh(acc, this.deviceStore());
       fresh.needsLogin = false;
       const saved = this.upsert(fresh);
       this.save();
@@ -101,6 +127,7 @@ class Accounts extends EventEmitter {
         this.upsert({ ...acc, needsLogin: true });
         this.save();
       }
+      if (e.code !== 'ENETWORK') this.track('auth.refresh_failed', { uuid: acc.uuid, level: 'warn', message: `No se pudo renovar la sesión premium: ${e.message}`, data: { code: e.code || null } });
       throw e;
     }
   }
@@ -160,6 +187,7 @@ class Accounts extends EventEmitter {
     this.data.active = acc.uuid;
     this.save();
     this.log.info(`Sesión no premium iniciada: ${nick}`);
+    this.track('auth.login', { uuid: acc.uuid, message: code ? 'Entró con su nick no premium (código de recuperación)' : 'Entró con un nick no premium' });
     return this.summary();
   }
 
@@ -211,6 +239,35 @@ class Accounts extends EventEmitter {
     return token;
   }
 
+  // El servidor rechazó el token (caducado o servidor nuevo): se pedirá otro.
+  invalidateSession(acc = this.active()) {
+    if (!acc?.backend) return;
+    acc.backend = null;
+    this.upsert(acc);
+    this.save();
+  }
+
+  // ¿Qué sabe el servidor de esta cuenta? (incluye si tiene permisos de administración)
+  async me({ fresh = false } = {}) {
+    const acc = this.active();
+    if (!acc || !this.backend.configured()) return null;
+    const c = this.meCache.get(acc.uuid);
+    if (!fresh && c && c.base === this.backend.base() && Date.now() - c.at < 5 * 60 * 1000) return c.data;
+    let data = null;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      const token = await this.session(acc);
+      try {
+        data = await this.backend.call('/v1/me', { token, timeout: 12000, retries: 0 });
+        break;
+      } catch (e) {
+        if (e.status === 401 && attempt === 0) { this.invalidateSession(acc); continue; }
+        throw e;
+      }
+    }
+    this.meCache.set(acc.uuid, { at: Date.now(), base: this.backend.base(), data });
+    return data;
+  }
+
   recoveryCode(uuid) {
     const a = this.find(uuid);
     return a?.type === 'offline' ? a.claimSecret || null : null;
@@ -222,7 +279,7 @@ class Accounts extends EventEmitter {
     if (!acc) throw new Error('Inicia sesión para jugar');
     if (acc.type === 'microsoft') {
       acc = await this.ensureFresh(acc);
-      return { type: 'microsoft', name: acc.name, uuid: acc.uuid, accessToken: acc.mcToken, xuid: '0' };
+      return { type: 'microsoft', name: acc.name, uuid: acc.uuid, accessToken: acc.mcToken, xuid: acc.xuid || '0' };
     }
     return { type: 'offline', name: acc.name, uuid: acc.uuid, accessToken: '0' };
   }

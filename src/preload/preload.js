@@ -22,7 +22,12 @@ contextBridge.exposeInMainWorld('vsl', {
     return () => ipcRenderer.removeListener('vsl:event', handler);
   },
   // Ruta real de un archivo soltado en la ventana (arrastrar y soltar en el panel).
+  // Solo funciona con archivos que el usuario soltó de verdad; el proceso principal
+  // únicamente acepta rutas registradas aquí.
   pathFor(file) {
-    try { return webUtils.getPathForFile(file) || null; } catch { return null; }
+    let p = null;
+    try { p = webUtils.getPathForFile(file) || null; } catch { p = null; }
+    if (p) ipcRenderer.send('vsl-grant', p);
+    return p;
   },
 });

@@ -1,5 +1,5 @@
-// Fondo animado (WebGL): la espiral difuminada de la web + rejilla de neón en
-// perspectiva, partículas, anillos de pulso, cubos flotantes y cortes glitch.
+// Fondo animado (WebGL): la espiral difuminada de la web + partículas, anillos
+// de pulso, cubos flotantes y cortes glitch.
 // Optimizado: se dibuja a media resolución, con límite de FPS, y se detiene por
 // completo cuando la ventana no se ve, está en segundo plano o se está jugando.
 
@@ -25,7 +25,6 @@ uniform float uHue;
 uniform vec2 uFlow;
 uniform vec2 uMouse;
 uniform float uIntensity;
-uniform float uGrid;
 uniform float uExtras;
 uniform float uGlitch;
 
@@ -81,20 +80,6 @@ float boxes(vec2 uv, float t) {
   return smoothstep(0.01, 0.0, abs(box)) + smoothstep(0.0, -0.03, box) * 0.12;
 }
 
-// Rejilla de neón en perspectiva hacia el horizonte.
-float gridFloor(vec2 uv, float t) {
-  float horizon = -0.2;
-  float d = horizon - uv.y;
-  if (d <= 0.0) return 0.0;
-  float z = 0.32 / d;
-  vec2 g = vec2(uv.x * z, z + t * 0.55);
-  vec2 f = abs(fract(g) - 0.5);
-  float lw = clamp(0.02 * z, 0.015, 0.4);
-  float line = max(smoothstep(0.5 - lw, 0.5, f.x), smoothstep(0.5 - lw, 0.5, f.y));
-  float fade = smoothstep(0.0, 0.22, d) * (1.0 - smoothstep(0.5, 1.4, abs(uv.x)));
-  return line * fade;
-}
-
 void main() {
   vec2 uv = (gl_FragCoord.xy - 0.5 * uRes) / min(uRes.x, uRes.y);
 
@@ -135,13 +120,6 @@ void main() {
     // cubos flotantes
     col += vec3(0.78, 0.45, 1.0) * boxes(uv, uTime) * 0.28 * uExtras;
   }
-  if (uGrid > 0.0) {
-    float gf = gridFloor(uv, uTime);
-    vec3 gc = mix(purple, pink, 0.5 + 0.5 * sin(uv.x * 2.0 + uTime * 0.3));
-    col += gc * gf * 0.42 * uGrid;
-    col += pink * exp(-abs(uv.y + 0.2) * 26.0) * 0.14 * uGrid;
-  }
-
   col.r += gl * 0.08;
   col.b += gl * 0.12;
   float vig = 1.0 - smoothstep(0.35, 1.8, length(uv));
@@ -164,9 +142,9 @@ function compile(gl, type, src) {
 }
 
 const MODES = {
-  home: { intensity: 1, grid: 1, extras: 1 },
-  dim: { intensity: 0.6, grid: 0, extras: 0.6 },
-  login: { intensity: 1, grid: 1, extras: 1 },
+  home: { intensity: 1, extras: 1 },
+  dim: { intensity: 0.6, extras: 0.6 },
+  login: { intensity: 1, extras: 1 },
 };
 
 export function createBackground(canvas) {
@@ -214,7 +192,7 @@ export function createBackground(canvas) {
     gl.enableVertexAttribArray(loc);
     gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
     uni = {};
-    for (const n of ['uRes', 'uTime', 'uRot1', 'uRot2', 'uOrbit', 'uHue', 'uFlow', 'uMouse', 'uIntensity', 'uGrid', 'uExtras', 'uGlitch']) {
+    for (const n of ['uRes', 'uTime', 'uRot1', 'uRot2', 'uOrbit', 'uHue', 'uFlow', 'uMouse', 'uIntensity', 'uExtras', 'uGlitch']) {
       uni[n] = gl.getUniformLocation(prog, n);
     }
     return true;
@@ -245,7 +223,7 @@ export function createBackground(canvas) {
     if (now - last < minFrame) return;
     last = now;
     const t = (now - start - pausedTotal) / 1000;
-    for (const k of ['intensity', 'grid', 'extras']) cur[k] += (target[k] - cur[k]) * 0.06;
+    for (const k of ['intensity', 'extras']) cur[k] += (target[k] - cur[k]) * 0.06;
     mouse.x += (mouse.tx - mouse.x) * 0.04;
     mouse.y += (mouse.ty - mouse.y) * 0.04;
     const g = now < glitchUntil ? 1 : (Math.random() < 0.004 ? 1 : 0);
@@ -258,7 +236,6 @@ export function createBackground(canvas) {
     gl.uniform2f(uni.uFlow, Math.cos(t * 0.05) * 2.0, Math.sin(t * 0.05) * 2.0);
     gl.uniform2f(uni.uMouse, mouse.x, mouse.y);
     gl.uniform1f(uni.uIntensity, cur.intensity);
-    gl.uniform1f(uni.uGrid, cur.grid);
     gl.uniform1f(uni.uExtras, cur.extras);
     gl.uniform1f(uni.uGlitch, g);
     gl.drawArrays(gl.TRIANGLES, 0, 3);

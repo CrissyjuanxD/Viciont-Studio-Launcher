@@ -40,7 +40,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 ## Qué hace
 
 **Para los jugadores**
-- **Iniciar sesión** con una cuenta de Microsoft (premium) o solo con un nick (no premium). No deja usar un nick de una cuenta premium: lo comprueba en la misma base de datos de Mojang que usa NameMC.
+- **Iniciar sesión** con una cuenta de Microsoft (premium) o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar un nick de una cuenta premium: lo comprueba en la misma base de datos de Mojang que usa NameMC.
 - Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro.
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
@@ -53,7 +53,8 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Ajustes** de RAM (con la memoria de tu PC), argumentos de Java, resolución, pantalla completa, Java propio por versión, descargas simultáneas, efectos visuales, carpeta de datos (se puede mover) y qué hacer al abrir el juego.
 - **Opciones por instancia**: RAM, Java, resolución y entrar directo al servidor.
 
-**Para el estudio (modo administrador, acceso restringido con clave)**
+**Para el estudio (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
+- Solo los nicks a los que se les da acceso desde el **panel web privado** ven **Ajustes → Administración**, y además tienen que escribir su **clave personal**. Cada uno tiene sus permisos: crear instancias, editar y publicar, eliminar, nicks no premium (y se puede limitar a algunas instancias).
 - Crear instancias **Vanilla, Fabric, Quilt, Forge o NeoForge** en cualquier versión de Minecraft, snapshots incluidas.
 - Añadir **mods, resource packs y shaders de Modrinth**, con sus dependencias añadidas solas, o **archivos propios**: mods, `config`, `options.txt`, `kubejs`, mapas, etc.
 - **Importar** un modpack `.mrpack` o una carpeta de CurseForge, Prism, Modrinth App o `.minecraft`. Detecta la versión y el cargador, y reconoce los mods que existen en Modrinth para no subirlos.
@@ -62,9 +63,10 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Publicar versiones**: solo se suben los archivos nuevos o cambiados. Los jugadores ven **Actualizar** y el texto de novedades.
 - Decidir qué archivos se sobrescriben en cada actualización y cuáles solo la primera vez, como `options.txt`, para no borrar los ajustes del jugador.
 - Gestionar los nicks no premium registrados, por ejemplo liberar el de alguien que perdió su código.
+- **Panel web** para el equipo de confianza (usuario, contraseña y verificación en dos pasos): permisos por nick y **registros** de todo lo que pasa (quién entra, quién está jugando, cambios de skin, descargas, actualizaciones y errores con el final del registro del juego) para ayudar a los jugadores cuando algo falla.
 
 **Optimizado**
-- El fondo animado (espiral, rejilla de neón, partículas y glitch) se dibuja a media resolución y con límite de FPS. Se **detiene por completo** cuando la ventana está minimizada, tapada o en segundo plano.
+- El fondo animado (espiral, figuras flotantes, partículas y glitch) se dibuja a media resolución y con límite de FPS. Se **detiene por completo** cuando la ventana está minimizada, tapada o en segundo plano.
 - Con la opción **"Cerrar la ventana"** al jugar, el launcher libera casi toda su memoria mientras juegas, se queda en la bandeja y vuelve a abrirse al cerrar el juego.
 
 ## Carpetas (como Modrinth App)
@@ -90,23 +92,30 @@ Desde **Configuración de Windows → Aplicaciones → Viciont Studio Launcher**
 
 Las actualizaciones automáticas nunca borran datos.
 
-## Servidor del estudio (Cloudflare Workers + R2)
+## Servidor del estudio (Cloudflare Workers + R2 + D1)
 
-Las instancias, los permisos, los archivos privados y las skins no premium viven en un servidor gratuito de Cloudflare. La guía paso a paso está en **[server/README.md](server/README.md)**. Cuando lo tengas, pon su dirección en [`remote/launcher.json`](remote/launcher.json) y todos los launchers la usarán solos.
+Las instancias, los permisos, los archivos privados, las skins no premium, los registros y los administradores viven en un servidor gratuito de Cloudflare. La guía paso a paso está en **[server/README.md](server/README.md)**. Cuando lo tengas, pon su dirección en [`remote/launcher.json`](remote/launcher.json) y todos los launchers la usarán solos.
 
 ## Seguridad
 
-- La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta).
-- Las sesiones se guardan **cifradas con Windows (DPAPI)**, y la contraseña de Microsoft solo se escribe en la página oficial de Microsoft.
-- Las cuentas premium se verifican con Mojang sin enviar su token al servidor del estudio.
-- Rutas peligrosas (`../`), archivos alterados y enlaces caducados se rechazan tanto en el launcher como en el servidor.
+- **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión, Microsoft también olvida la cuenta en esa ventana.
+- Las sesiones se guardan **cifradas con Windows (DPAPI)** en tu PC. Las cuentas premium se verifican con Mojang sin enviar su token al servidor del estudio.
+- La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta). La versión instalada lleva los "fusibles" de seguridad de Electron activados: no se puede arrancar como Node, ni con depuradores, ni cargar código que no sea el suyo.
+- **Sin servidores falsos**: en la versión instalada el servidor del estudio sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
+- La administración necesita **dos llaves** (nick autorizado desde el panel + clave personal vinculada a su cuenta) y el servidor comprueba los permisos en cada acción.
+- Todo lo que se descarga se comprueba con **SHA-1**. Rutas peligrosas (`../`), la carpeta interna del launcher, enlaces sin HTTPS, archivos alterados y enlaces caducados se rechazan tanto en el launcher como en el servidor.
+- Java solo se puede elegir entre ejecutables `java.exe`/`javaw.exe` reales, y al subir archivos al servidor solo se aceptan los que eliges tú en el diálogo o arrastras a la ventana.
+
+### Privacidad
+
+Para poder ayudarte si algo falla, el launcher envía al servidor del estudio un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo del estudio en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
 
 ## Desarrollo
 
 ```bash
 npm install
 npm run vendor   # copia fuentes y el visor 3D de skins a src/renderer
-npm start        # abre el launcher en modo desarrollo
+npm start        # abre el launcher (desde el código es siempre modo desarrollo)
 npm run dist     # crea el instalador en dist/
 ```
 

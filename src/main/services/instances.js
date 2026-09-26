@@ -200,6 +200,7 @@ class Instances extends EventEmitter {
       for (const f of manifest.files) {
         const rel = normalizeRel(f.path);
         if (!rel || seen.has(rel.toLowerCase()) || !/^[a-f0-9]{40}$/i.test(f.sha1 || '')) continue;
+        if (rel.toLowerCase().startsWith('.vsl/')) continue; // carpeta interna del launcher
         seen.add(rel.toLowerCase());
         files.push({ ...f, path: rel });
       }
@@ -226,7 +227,8 @@ class Instances extends EventEmitter {
         if (f.source === 'upload' || !url) {
           url = `${apiBase}/v1/instances/${id}/blobs/${f.sha1.toLowerCase()}${downloadToken ? `?t=${encodeURIComponent(downloadToken)}` : ''}`;
         }
-        if (!/^https?:\/\//i.test(url)) return;
+        // solo HTTPS (o el servidor local de pruebas); el SHA-1 se comprueba igualmente
+        if (!/^https:\/\//i.test(url) && !/^http:\/\/(127\.0\.0\.1|localhost)(:\d+)?\//i.test(url)) return;
         items.push({ url, dest, sha1: f.sha1.toLowerCase(), size: f.size, label: path.basename(f.path), force: true });
       }, signal);
 

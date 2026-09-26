@@ -1,7 +1,7 @@
 {
   "name": "viciont-studio-launcher",
   "productName": "Viciont Studio Launcher",
-  "version": "1.0.0",
+  "version": "1.0.2",
   "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas premium y no premium, skins y descargas rápidas.",
   "author": {
     "name": "CrissyjuanxD",
@@ -17,7 +17,6 @@
   "private": true,
   "scripts": {
     "start": "electron .",
-    "dev": "electron . --dev",
     "vendor": "node scripts/vendor.js",
     "dist": "electron-builder --win --x64",
     "release": "electron-builder --win --x64 --publish always"
@@ -49,6 +48,15 @@
       "!**/*.md"
     ],
     "asar": true,
+    "electronFuses": {
+      "runAsNode": false,
+      "enableCookieEncryption": true,
+      "enableNodeOptionsEnvironmentVariable": false,
+      "enableNodeCliInspectArguments": false,
+      "enableEmbeddedAsarIntegrityValidation": true,
+      "onlyLoadAppFromAsar": true,
+      "grantFileProtocolExtraPrivileges": false
+    },
     "electronLanguages": [
       "es",
       "es-419",

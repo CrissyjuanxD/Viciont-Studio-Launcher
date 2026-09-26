@@ -29,6 +29,7 @@ export const state = {
   progress: new Map(),
   studio: null,
   update: null,
+  admin: { access: false, unlocked: false, perms: [] }, // acceso de administración de la cuenta activa
   route: { name: 'home' },
   focused: true,
 };

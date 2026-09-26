@@ -12,9 +12,14 @@ const REMOTE_CONFIG = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-St
 const REMOTE_CACHE = configFile('remote.json');
 
 class Backend {
-  constructor(settings, log) {
+  // allowOverride: solo en desarrollo se puede usar otro servidor (settings.apiBase).
+  // En la versión instalada el servidor sale SIEMPRE de la configuración oficial
+  // (remote/launcher.json del repositorio), así nadie puede engañar a un jugador
+  // para que se conecte a un servidor falso con mods maliciosos.
+  constructor(settings, log, { allowOverride = false } = {}) {
     this.settings = settings;
     this.log = log;
+    this.allowOverride = allowOverride;
     this.remote = null;
   }
 
@@ -37,9 +42,9 @@ class Backend {
   }
 
   base() {
-    const s = this.settings.get().apiBase;
+    const s = this.allowOverride ? this.settings.get().apiBase : '';
     const r = this.remote?.apiBase;
-    const b = s || (typeof r === 'string' && /^https:\/\//i.test(r) ? r : '');
+    const b = s || (typeof r === 'string' && /^https:\/\/[a-z0-9.-]+(:\d+)?(\/[^\s?#]*)?$/i.test(r) ? r : '');
     return b ? b.replace(/\/+$/, '') : '';
   }
 
@@ -48,6 +53,7 @@ class Backend {
   news() { return Array.isArray(this.remote?.news) ? this.remote.news.slice(0, 6) : []; }
 
   async call(pathname, { method = 'GET', json, body, headers = {}, token, adminKey, type = 'json', timeout = 20000, signal, ok, retries } = {}) {
+    if (!pathname.startsWith('/')) throw new Error('Ruta no válida');
     const base = this.base();
     if (!base) {
       const e = new Error('El servidor de instancias todavía no está configurado.');

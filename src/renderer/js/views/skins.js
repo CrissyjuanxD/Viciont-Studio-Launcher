@@ -7,6 +7,8 @@ import { toast, toastError, confirm, modal, busy } from '../ui.js';
 import { loadImage, drawBody, drawCape, isSlim } from '../skinart.js';
 import { isIdle, onIdleChange, reducedMotion } from '../fx.js';
 
+const VIEW_W = 280;
+const VIEW_H = 360;
 let libPromise = null;
 function loadViewerLib() {
   if (window.skinview3d) return Promise.resolve(window.skinview3d);
@@ -69,25 +71,16 @@ export function render(root, _route, app) {
     try {
       const lib = await loadViewerLib();
       if (disposed) return;
-      const r = stage.getBoundingClientRect();
-      viewer = new lib.SkinViewer({ canvas, width: Math.max(200, r.width), height: Math.max(260, r.height - 130), pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
+      // Tamaño fijo (como en Modrinth): el visor nunca depende del tamaño de la
+      // ventana, así no puede entrar en un bucle de "crecer hasta abajo".
+      viewer = new lib.SkinViewer({ canvas, width: VIEW_W, height: VIEW_H, pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
       viewer.fov = 50;
-      viewer.zoom = 0.82;
+      viewer.zoom = 0.86;
       viewer.autoRotate = !reducedMotion();
       viewer.autoRotateSpeed = 0.55;
       viewer.controls.enableZoom = false;
       setAnim('idle');
       showSelected();
-      let rq = 0;
-      const ro = new ResizeObserver(() => {
-        cancelAnimationFrame(rq);
-        rq = requestAnimationFrame(() => {
-          const b = stage.getBoundingClientRect();
-          viewer?.setSize(Math.max(200, Math.floor(b.width)), Math.max(260, Math.floor(b.height - 58)));
-        });
-      });
-      ro.observe(stage);
-      viewer._ro = ro;
       viewer.renderPaused = isIdle();
     } catch (e) {
       stage.querySelector('.skins__floor').insertAdjacentHTML('afterend', `<p class="field__hint" style="padding:20px">${esc(e.message)}</p>`);
@@ -294,7 +287,7 @@ export function render(root, _route, app) {
   return () => {
     disposed = true;
     offIdle();
-    if (viewer) { viewer._ro?.disconnect(); viewer.dispose(); viewer = null; }
+    if (viewer) { viewer.dispose(); viewer = null; }
   };
 }
 

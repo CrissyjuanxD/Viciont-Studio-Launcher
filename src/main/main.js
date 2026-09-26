@@ -2,6 +2,7 @@
 // Viciont Studio Launcher — proceso principal.
 
 const path = require('node:path');
+const os = require('node:os');
 const fs = require('node:fs');
 const fsp = fs.promises;
 const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard } = require('electron');
@@ -17,12 +18,14 @@ const { Skins } = require('./services/skins');
 const { Media } = require('./services/media');
 const { Admin } = require('./services/admin');
 const { Updater } = require('./services/updater');
+const { Telemetry } = require('./services/telemetry');
 const modrinth = require('./services/modrinth');
 const { getVersionManifest } = require('./game/versions');
 const { listLoaderVersions, supportedGameVersions, LOADERS } = require('./game/loaders');
 const { probeJava } = require('./game/java');
 
-const isDev = process.argv.includes('--dev') || !app.isPackaged;
+// Modo desarrollo solo al ejecutar el código fuente (nunca en la versión instalada).
+const isDev = !app.isPackaged;
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const APP_NAME = 'Viciont Studio Launcher';
 const VERSION = app.getVersion();
@@ -56,13 +59,16 @@ function start() {
   let dirs = paths.dataDirs(dataRoot);
   const getDirs = () => dirs;
 
-  const backend = new Backend(settings, log);
+  const backend = new Backend(settings, log, { allowOverride: isDev });
   const accounts = new Accounts({ backend, log });
   const instances = new Instances({ dirs, settings, backend, accounts, log, configRoot: paths.CONFIG_ROOT });
   const skins = new Skins({ getDirs, accounts, backend, log });
   const media = new Media({ getDirs, backend, log });
-  const admin = new Admin({ getDirs, backend, log });
+  const admin = new Admin({ getDirs, backend, accounts, log });
   const updater = new Updater({ log, settings });
+  const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
+  const track = (type, info) => { try { telemetry.track(type, info); } catch { /* nunca rompe nada */ } };
+  const instName = (id) => instances.remote.get(id)?.name || id;
 
   let win = null;
   let tray = null;
@@ -113,7 +119,10 @@ function start() {
       if (!isDev && (input.key === 'F5' || (input.control && ['r', 'R'].includes(input.key)) || (input.control && input.shift && ['i', 'I'].includes(input.key)))) e.preventDefault();
       if (isDev && input.key === 'F12' && input.type === 'keyDown') wc.toggleDevTools();
     });
-    wc.on('render-process-gone', (_, d) => log.error('La interfaz se cerró:', d.reason));
+    wc.on('render-process-gone', (_, d) => {
+      log.error('La interfaz se cerró:', d.reason);
+      track('launcher.error', { level: 'error', message: `La interfaz se cerró (${d.reason})`, data: { exitCode: d.exitCode } });
+    });
     win.once('ready-to-show', () => {
       if (HIDDEN_TEST) {
         // pruebas: ventana invisible que no roba el foco ni los clics del usuario
@@ -195,9 +204,18 @@ function start() {
   instances.on('task-done', (d) => {
     send('task-done', d);
     if (win && !win.isDestroyed() && !instances.busy()) win.setProgressBar(-1);
+    if (d.kind === 'launch') return;
+    const name = instName(d.id);
+    const v = instances.remote.get(d.id)?.version;
+    if (d.ok) track('instance.installed', { instance: d.id, message: `${d.kind === 'repair' ? 'Reparó' : 'Descargó / actualizó'} ${name}${v ? ` (versión ${v})` : ''}`, data: { version: v || null } });
+    else if (d.cancelled) track('instance.paused', { instance: d.id, message: `Pausó la descarga de ${name}` });
+    else track('instance.error', { level: 'error', instance: d.id, message: `Error al descargar ${name}: ${d.error}`, data: { kind: d.kind } });
   });
   instances.on('game-start', (d) => {
     send('game', { ...d, state: 'running' });
+    const uuid = telemetry.gameStarted(d.id);
+    const r = instances.remote.get(d.id);
+    track('game.start', { uuid, instance: d.id, message: `Empezó a jugar ${instName(d.id)}`, data: { mc: r?.mc || null, loader: r?.loader?.type || null } });
     const mode = settings.get().onLaunch;
     if (!win) return;
     if (mode === 'minimize') setTimeout(() => win?.minimize(), 1200);
@@ -215,6 +233,13 @@ function start() {
     }
   });
   instances.on('game-exit', (d) => {
+    const uuid = telemetry.gameStopped(d.id);
+    const mins = Math.round((d.duration || 0) / 60000);
+    if (d.crashed) {
+      track('game.crash', { uuid, level: 'error', instance: d.id, message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min`, data: { code: d.code, minutes: mins, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) } });
+    } else {
+      track('game.exit', { uuid, instance: d.id, message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
+    }
     const s = settings.get();
     if (instances.anyRunning()) { send('game', { ...d, state: 'exit' }); return; }
     if (!win) {
@@ -235,8 +260,17 @@ function start() {
     send('game', { ...d, state: 'exit' });
   });
   admin.on('progress', (p) => send('admin-progress', p));
+  admin.on('locked', () => send('admin-locked', true));
   accounts.on('change', (s) => send('accounts', s));
-  updater.on('state', (s) => send('update', s));
+  accounts.on('track', (type, info) => track(type, info));
+  let lastUpdateStatus = null;
+  updater.on('state', (s) => {
+    send('update', s);
+    if (s.status === lastUpdateStatus) return;
+    lastUpdateStatus = s.status;
+    if (s.status === 'ready') track('launcher.update', { message: `Descargó la actualización ${s.version} del launcher` });
+    if (s.status === 'error') track('launcher.update_error', { level: 'warn', message: `No se pudo actualizar el launcher: ${s.error}` });
+  });
 
   // ---------- IPC ----------
   const handlers = {};
@@ -247,7 +281,7 @@ function start() {
   on('app:info', () => ({
     name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
     dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
-    news: backend.news(), admin: admin.status(), update: updater.state, defaultJvm: DEFAULT_JVM,
+    news: backend.news(), admin: admin.quickStatus(), update: updater.state, defaultJvm: DEFAULT_JVM,
     loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
   }));
   on('app:openExternal', (url) => {
@@ -262,6 +296,14 @@ function start() {
     return shell.openPath(target);
   });
   on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 5000)); return true; });
+  // errores de la interfaz (máximo 5 por sesión) para detectar fallos
+  let uiErrors = 0;
+  on('app:uiError', (message) => {
+    if (++uiErrors > 5) return false;
+    log.warn('[interfaz]', String(message).slice(0, 500));
+    track('launcher.ui_error', { level: 'warn', message: String(message).slice(0, 400) });
+    return true;
+  });
   // Nombre, frases y redes del estudio: se leen de la web (se editan en su panel).
   on('app:studio', async () => {
     const file = paths.configFile('studio.json');
@@ -301,22 +343,31 @@ function start() {
   // ajustes
   on('settings:get', () => settings.get());
   on('settings:set', (patch) => {
-    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'apiBase', 'autoUpdate'];
+    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate'];
+    if (isDev) allowed.push('apiBase');
     const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
+    if (clean.javaPaths) {
+      // solo ejecutables de Java que existan (nunca otro programa)
+      clean.javaPaths = Object.fromEntries(Object.entries(clean.javaPaths || {}).filter(([, v]) => typeof v === 'string' && /^javaw?\.exe$/i.test(path.basename(v)) && path.isAbsolute(v) && fs.existsSync(v)));
+    }
     const before = settings.get().apiBase;
     const out = settings.set(clean);
     if (out.apiBase !== before) instances.refresh().then((l) => send('instances', l));
     return out;
   });
+  let chosenDataDir = null;
   on('settings:chooseDataDir', async () => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Elegir carpeta de datos', properties: ['openDirectory', 'createDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
     let target = r.filePaths[0];
     if (path.basename(target).toLowerCase() !== paths.APP_DIR_NAME.toLowerCase()) target = path.join(target, paths.APP_DIR_NAME);
+    chosenDataDir = target;
     return target;
   });
-  on('settings:moveDataDir', async (target, { move }) => {
+  on('settings:moveDataDir', async (target, { move } = {}) => {
     if (instances.busy() || instances.anyRunning()) throw new Error('Cierra el juego y espera a que terminen las descargas.');
+    // solo la carpeta que el usuario eligió en el diálogo (o volver a la de por defecto)
+    if (target !== null && target !== chosenDataDir) throw new Error('Elige la carpeta con el botón "Cambiar".');
     const dest = target === null ? paths.CONFIG_ROOT : path.resolve(String(target));
     if (path.resolve(dest).toLowerCase() === path.resolve(dataRoot).toLowerCase()) return { dataDir: dataRoot };
     paths.ensureDataRoot(dest);
@@ -363,7 +414,15 @@ function start() {
   on('accounts:checkNick', (name) => accounts.checkNick(name));
   on('accounts:loginOffline', (name, code) => accounts.loginOffline(name, code));
   on('accounts:switch', (uuid) => accounts.setActive(uuid));
-  on('accounts:logout', (uuid) => accounts.remove(uuid));
+  on('accounts:logout', async (uuid) => {
+    const acc = accounts.find(uuid);
+    if (acc) {
+      track('auth.logout', { uuid, message: 'Cerró sesión en el launcher' });
+      await telemetry.flushNow(3000);
+    }
+    admin.forget(uuid);
+    return accounts.remove(uuid);
+  });
   on('accounts:recoveryCode', (uuid) => accounts.recoveryCode(uuid));
   on('accounts:refresh', async () => {
     const a = accounts.active();
@@ -377,9 +436,22 @@ function start() {
   on('skins:addFromName', (name) => skins.importFromName(name));
   on('skins:update', (id, patch) => skins.update(id, patch));
   on('skins:remove', (id) => skins.remove(id));
-  on('skins:apply', (id) => skins.apply(id));
-  on('skins:reset', () => skins.resetSkin());
-  on('skins:setCape', (id) => skins.setCape(id));
+  const premium = () => accounts.active()?.type === 'microsoft';
+  on('skins:apply', async (id) => {
+    const r = await skins.apply(id);
+    if (premium()) track('skin.change', { message: 'Cambió su skin (Mojang)' });
+    return r;
+  });
+  on('skins:reset', async () => {
+    const r = await skins.resetSkin();
+    if (premium()) track('skin.reset', { message: 'Volvió a la skin por defecto' });
+    return r;
+  });
+  on('skins:setCape', async (id) => {
+    const r = await skins.setCape(id);
+    if (premium()) track('cape.change', { message: id ? 'Cambió su capa' : 'Se quitó la capa' });
+    return r;
+  });
   on('skins:current', () => skins.current().catch(() => null));
 
   // instancias
@@ -389,16 +461,27 @@ function start() {
   on('instances:install', (id) => { instances.install(id).catch(() => {}); return true; });
   on('instances:repair', (id) => { instances.install(id, { repair: true }).catch(() => {}); return true; });
   on('instances:cancel', (id) => { instances.cancel(id); return true; });
-  on('instances:play', (id) => instances.play(id, { version: VERSION }));
+  on('instances:play', async (id) => {
+    try {
+      return await instances.play(id, { version: VERSION });
+    } catch (e) {
+      if (e?.name !== 'AbortError') track('game.launch_error', { level: 'error', instance: id, message: `No se pudo iniciar ${instName(id)}: ${e.message}` });
+      throw e;
+    }
+  });
   on('instances:stop', (id) => { instances.stop(id); return true; });
-  on('instances:uninstall', (id, opts) => instances.uninstall(id, opts));
+  on('instances:uninstall', async (id, opts) => {
+    const r = await instances.uninstall(id, opts);
+    track('instance.uninstall', { instance: id, message: `Desinstaló ${instName(id)}${opts?.keepSaves ? ' (guardó sus mundos)' : ''}` });
+    return r;
+  });
   on('instances:setOptions', (id, patch) => instances.setOptions(id, patch));
   on('instances:size', (id) => instances.size(id));
   on('instances:log', (id) => instances.logTail(id));
 
   // administración
   const needAdmin = (fn) => (...a) => {
-    if (!admin.key) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
+    if (!admin.unlocked()) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
     return fn(...a);
   };
   on('admin:status', () => admin.status());
@@ -417,7 +500,12 @@ function start() {
     if (r.canceled || !r.filePaths.length) return null;
     return admin.addLocal(id, r.filePaths, targetDir);
   }));
-  on('admin:addPaths', needAdmin((id, list, targetDir) => admin.addLocal(id, list.filter((p) => typeof p === 'string'), targetDir)));
+  on('admin:addPaths', needAdmin((id, list, targetDir) => {
+    // solo rutas que el usuario arrastró de verdad a la ventana
+    const ok = (Array.isArray(list) ? list : []).filter((p) => admin.granted(p));
+    if (!ok.length) throw new Error('Arrastra los archivos desde el Explorador de Windows.');
+    return admin.addLocal(id, ok, targetDir);
+  }));
   on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
   on('admin:updateFile', needAdmin((id, p, patch) => admin.updateFile(id, p, patch)));
   on('admin:removeFiles', needAdmin((id, list) => admin.removeFiles(id, list)));
@@ -426,9 +514,13 @@ function start() {
   on('admin:scanFolder', needAdmin(async () => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Carpeta de la instancia (CurseForge, Prism, Modrinth, .minecraft…)', properties: ['openDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
+    admin.grant(r.filePaths[0]);
     return admin.scanFolder(r.filePaths[0]);
   }));
-  on('admin:importFolder', needAdmin((id, root, include) => admin.importFolder(id, root, include)));
+  on('admin:importFolder', needAdmin((id, root, include) => {
+    if (!admin.granted(root)) throw new Error('Vuelve a elegir la carpeta.');
+    return admin.importFolder(id, root, include);
+  }));
   on('admin:importMrpack', needAdmin(async (id) => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Modpack de Modrinth', properties: ['openFile'], filters: [{ name: 'Modpack de Modrinth', extensions: ['mrpack'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
@@ -464,6 +556,11 @@ function start() {
   });
   on('modrinth:search', (q) => modrinth.search(q));
   on('modrinth:versions', (id, q) => modrinth.versions(id, q));
+
+  // Rutas de archivos soltados en la ventana (las registra el preload, no la página).
+  ipcMain.on('vsl-grant', (event, p) => {
+    if (String(event.senderFrame?.url || '').startsWith('vsl://app/') && typeof p === 'string') admin.grant(p);
+  });
 
   ipcMain.handle('vsl', async (event, channel, ...args) => {
     const url = event.senderFrame?.url || '';
@@ -532,6 +629,11 @@ function start() {
     await backend.init();
     await instances.loadCache();
     updater.init();
+    await telemetry.init();
+    track('launcher.start', {
+      message: `Abrió el launcher ${VERSION}`,
+      data: { os: `${os.version?.() || os.type()} (${os.release()})`, arch: process.arch, ramMB: totalMB, cpus: os.cpus().length, maxMemoryMB: settings.get().memory.max },
+    });
     await createWindow();
     backend.refreshRemote().then(() => instances.refresh()).then((l) => send('instances', l)).catch(() => {});
     if (TEST_SCRIPT) {
@@ -552,6 +654,10 @@ function start() {
     t.unref?.();
   });
 
-  process.on('uncaughtException', (e) => log.error('Error no controlado:', e));
+  let crashReports = 0;
+  process.on('uncaughtException', (e) => {
+    log.error('Error no controlado:', e);
+    if (++crashReports <= 5) track('launcher.error', { level: 'error', message: `Error interno: ${e?.message || e}`, data: { stack: String(e?.stack || '').split('\n').slice(0, 6) } });
+  });
   process.on('unhandledRejection', (e) => log.warn('Promesa sin controlar:', e));
 }

@@ -17,13 +17,16 @@ const TABS = [
 ];
 
 export function openSettings(app, tab = 'game') {
+  // la pestaña de administración solo existe para los nicks con acceso concedido en el panel
+  const tabs = TABS.filter(([k]) => k !== 'admin' || state.admin?.access);
+  if (!tabs.some(([k]) => k === tab)) tab = 'game';
   const m = modal({
     size: 'full',
     html: `
       <div class="settings">
         <nav class="settings__nav">
           <h2>Ajustes</h2>
-          ${TABS.map(([k, label, ic]) => `<button class="settings__tab" type="button" data-tab="${k}">${icon(ic)}${label}</button>`).join('')}
+          ${tabs.map(([k, label, ic]) => `<button class="settings__tab" type="button" data-tab="${k}">${icon(ic)}${label}</button>`).join('')}
         </nav>
         <div class="settings__pane" id="set-pane"></div>
       </div>`,
@@ -353,38 +356,56 @@ const PANES = {
   },
 
   admin(pane, app) {
+    const PERM_NAMES = { create: 'Crear instancias', edit: 'Editar y publicar', delete: 'Eliminar instancias', players: 'Nicks no premium' };
     const draw = async () => {
-      const st = await call('admin:status');
+      pane.innerHTML = '<div class="settings__section"><p class="field__hint"><span class="spin"></span> Comprobando tu acceso…</p></div>';
+      let st;
+      try { st = await call('admin:status'); } catch (e) { st = { access: false, error: e.message }; }
+      state.admin = st;
       const s = state.settings;
+      if (!st.access) {
+        pane.innerHTML = `
+          <div class="settings__section">
+            <h3>Administración</h3>
+            <div class="form-error">${icon('lock')}<span>${esc(st.error ? `No se pudo comprobar tu acceso: ${st.error}` : 'Tu cuenta ya no tiene acceso de administración.')}</span></div>
+          </div>`;
+        hydrateIcons(pane);
+        app.onAdminChange(false);
+        return;
+      }
+      const perms = (st.perms || []).map((p) => `<span class="tag">${esc(PERM_NAMES[p] || p)}</span>`).join('') || '<span class="tag">sin permisos</span>';
+      const scope = st.scope === '*' ? 'todas las instancias' : `${(st.scope || []).length} instancia(s)`;
       pane.innerHTML = `
         <div class="settings__section">
           <h3>Modo administrador</h3>
-          <p class="field__hint">Acceso restringido para gestionar las instancias del estudio: crearlas, subir mods y archivos, imágenes y vídeos de fondo, y decidir quién puede verlas.</p>
+          <p class="field__hint">Tu cuenta <b>${esc(st.nick)}</b> tiene acceso de administración concedido desde el panel del estudio. Es un acceso en dos pasos: el panel autoriza tu nick y tú escribes tu <b>clave personal</b>. Nadie más puede usarla: queda vinculada a tu cuenta.</p>
+          <dl class="kv"><dt>Permisos</dt><dd><span class="field__row" style="gap:6px">${perms}</span></dd><dt>Alcance</dt><dd>${esc(scope)}</dd></dl>
           ${st.unlocked
-            ? `<div class="form-ok">${icon('shield')}<span>Modo administrador activo${st.remembered ? ' (recordado en este PC)' : ''}.</span></div>
+            ? `<div class="form-ok">${icon('shield')}<span>Modo administrador activo${st.remembered ? ' (clave recordada en este PC, cifrada)' : ''}.</span></div>
                <div class="field__row"><button class="btn btn--sm btn--primary" type="button" id="go-admin">${icon('grid')}Abrir administración</button><button class="btn btn--sm btn--danger" type="button" id="lock">${icon('lock')}Salir del modo administrador</button></div>`
-            : `<form id="unlock" style="display:grid;gap:12px;max-width:460px">
-                 <label class="field"><span class="field__label">Clave de administrador</span><input class="input mono" type="password" name="key" autocomplete="off" spellcheck="false" placeholder="La que pusiste en el servidor (ADMIN_KEY)"></label>
-                 <label class="check"><input type="checkbox" name="remember"> Recordar en este PC (se guarda cifrada)</label>
+            : `<form id="unlock" style="display:grid;gap:12px;max-width:520px">
+                 <label class="field"><span class="field__label">Servidor</span><input class="input mono" type="text" value="${esc(st.server || 'sin configurar')}" readonly tabindex="-1" style="opacity:.75"></label>
+                 <label class="field"><span class="field__label">Clave personal</span><input class="input mono" type="password" name="key" autocomplete="off" spellcheck="false" placeholder="VSL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"></label>
+                 ${st.hasKey ? '' : `<p class="field__hint">${icon('info')} Todavía no tienes clave: pídele a un responsable del panel que te genere una.</p>`}
+                 <label class="check"><input type="checkbox" name="remember"> Recordar en este PC (se guarda cifrada con Windows)</label>
                  <div id="unlock-err"></div>
-                 <button class="btn btn--primary" type="submit" ${st.configured ? '' : 'disabled'}>${icon('unlock')}Entrar</button>
-                 ${st.configured ? '' : '<p class="field__hint">Primero configura la dirección del servidor (abajo).</p>'}
+                 <button class="btn btn--primary" type="submit" ${st.configured ? '' : 'disabled'}>${icon('unlock')}Activar</button>
                </form>`}
         </div>
-        <div class="settings__section">
-          <h3>Servidor del estudio</h3>
-          <p class="field__hint">Dirección del servidor de Cloudflare (Worker + R2). Normalmente llega sola desde GitHub (<code>remote/launcher.json</code>); aquí puedes forzar otra.</p>
-          <label class="field"><span class="field__label">URL del servidor</span><input class="input mono" id="api" placeholder="https://viciont-launcher.tu-cuenta.workers.dev" value="${esc(s.apiBase)}"></label>
+        ${state.info.dev ? `<div class="settings__section">
+          <h3>Servidor de pruebas (solo desarrollo)</h3>
+          <p class="field__hint">En la versión instalada el servidor siempre sale de la configuración oficial (<code>remote/launcher.json</code>) y no se puede cambiar.</p>
+          <label class="field"><span class="field__label">URL del servidor</span><input class="input mono" id="api" placeholder="http://127.0.0.1:8787" value="${esc(s.apiBase)}"></label>
           <div class="field__row"><button class="btn btn--sm" type="button" id="api-save">${icon('check')}Guardar</button><span class="field__hint">En uso ahora: <b>${esc(state.info.apiBase || 'ninguno')}</b></span></div>
-        </div>`;
+        </div>` : ''}`;
       hydrateIcons(pane);
       pane.querySelector('#unlock')?.addEventListener('submit', async (e) => {
         e.preventDefault();
         const f = e.currentTarget;
         const btn = f.querySelector('[type=submit]');
         try {
-          await busy(btn, () => call('admin:unlock', f.key.value, f.remember.checked), 'Comprobando…');
-          app.onAdminChange(true);
+          const r = await busy(btn, () => call('admin:unlock', f.key.value, f.remember.checked), 'Comprobando…');
+          app.onAdminChange(true, r);
           toast('Modo administrador activado.', { kind: 'success' });
           draw();
         } catch (er) {
@@ -394,7 +415,7 @@ const PANES = {
       });
       pane.querySelector('#lock')?.addEventListener('click', async () => { await call('admin:lock'); app.onAdminChange(false); draw(); });
       pane.querySelector('#go-admin')?.addEventListener('click', () => { document.querySelector('.modal .modal__close')?.click(); app.go({ name: 'admin' }); });
-      pane.querySelector('#api-save').addEventListener('click', async () => {
+      pane.querySelector('#api-save')?.addEventListener('click', async () => {
         const v = pane.querySelector('#api').value.trim();
         if (v && !/^https?:\/\/[^\s]+$/i.test(v)) { toast('Escribe una URL válida (https://…).', { kind: 'error' }); return; }
         await save({ apiBase: v });
@@ -420,6 +441,15 @@ const PANES = {
       <div class="settings__section">
         <h3>Información</h3>
         <dl class="kv"><dt>Versión</dt><dd>${esc(info.version)}</dd><dt>Datos</dt><dd>${esc(info.dataDir)}</dd><dt>Configuración</dt><dd>${esc(info.configDir)}</dd><dt>Servidor</dt><dd>${esc(info.apiBase || 'sin configurar')}</dd></dl>
+      </div>
+      <div class="settings__section">
+        <h3>Privacidad y seguridad</h3>
+        <ul class="plain-list">
+          <li><b>Tu contraseña de Microsoft</b> solo se escribe en la página oficial de Microsoft (igual que en Modrinth o el launcher oficial). El launcher nunca la ve ni la guarda.</li>
+          <li><b>Tus sesiones</b> se guardan cifradas con Windows en este PC y nunca se envían al servidor del estudio: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
+          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher avisa al servidor del estudio de lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
+          <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
+        </ul>
       </div>
       <div class="settings__section">
         <h3>Créditos y licencias</h3>

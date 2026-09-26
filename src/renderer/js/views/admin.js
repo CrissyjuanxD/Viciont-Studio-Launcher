@@ -1,4 +1,5 @@
-// Administración de instancias (solo con la clave de administrador).
+// Administración de instancias (nick autorizado en el panel + clave personal).
+// Los botones se muestran según los permisos del nick; el servidor los vuelve a comprobar siempre.
 
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
@@ -12,6 +13,8 @@ const FOLDERS = [
   ['config', 'Configuración', 'code'],
   ['', 'Otros archivos', 'file'],
 ];
+
+const can = (perm) => (state.admin?.perms || []).includes(perm);
 
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
@@ -30,8 +33,8 @@ function renderList(root, app) {
       <div class="page__head">
         <div><h1 class="title-lg">Administrar <span class="hl">instancias</span></h1><p class="lead">Crea instancias, añade mods (de Modrinth o tuyos), configs, resource packs, imágenes y vídeos, y decide quién puede verlas.</p></div>
         <div class="field__row">
-          <button class="btn" type="button" data-act="players">${icon('users')}Jugadores</button>
-          <button class="btn btn--primary" type="button" data-act="new">${icon('plus')}Nueva instancia</button>
+          ${can('players') ? `<button class="btn" type="button" data-act="players">${icon('users')}Jugadores</button>` : ''}
+          ${can('create') ? `<button class="btn btn--primary" type="button" data-act="new">${icon('plus')}Nueva instancia</button>` : ''}
         </div>
       </div>
       <div id="adm-note"></div>
@@ -68,13 +71,14 @@ function renderList(root, app) {
             <div class="acard__meta"><span class="chip chip--hot">nueva · sin publicar</span><span class="tag">editada ${esc(timeAgo(d.updatedAt))}</span></div></div>
         </button>`);
       }
-      cards.push(`<button class="acard acard--new" type="button" data-act="new">${icon('plus')}<span>Crear una instancia nueva</span></button>`);
+      if (can('create')) cards.push(`<button class="acard acard--new" type="button" data-act="new">${icon('plus')}<span>Crear una instancia nueva</span></button>`);
+      if (!cards.length) cards.push(`<div class="empty">${icon('lock')}<h3>Sin instancias</h3><p>Todavía no tienes permisos sobre ninguna instancia.</p></div>`);
       grid.innerHTML = cards.join('');
       hydrateIcons(grid);
     } catch (e) {
       grid.innerHTML = `<div class="empty">${icon('alert')}<h3>No se pudo cargar</h3><p>${esc(e.message)}</p></div>`;
       hydrateIcons(grid);
-      if (e.code === 'ELOCKED' || e.code === 'EBADKEY') app.onAdminChange(false);
+      if (e.code === 'ELOCKED' || e.code === 'EBADKEY' || e.code === 'ENOACCESS') app.onAdminChange(false);
     }
   };
 
@@ -83,8 +87,8 @@ function renderList(root, app) {
     if (open) { app.go({ name: 'admin', id: open.dataset.open }); return; }
     const b = e.target.closest('[data-act]');
     if (!b) return;
-    if (b.dataset.act === 'new') newInstanceModal(app);
-    if (b.dataset.act === 'players') playersModal();
+    if (b.dataset.act === 'new' && can('create')) newInstanceModal(app);
+    if (b.dataset.act === 'players' && can('players')) playersModal();
   });
   load();
   return () => {};
@@ -253,8 +257,8 @@ function renderEditor(root, id, app) {
         <div class="editor__body" id="ed-body"></div>
         <div class="pubbar"><div class="pubbar__info" id="ed-info"></div>
           <div class="field__row">
-            ${d.baseVersion ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
-            <button class="btn btn--primary" type="button" data-act="publish">${icon('upload')}Publicar versión ${(d.baseVersion || 0) + 1}</button>
+            ${d.baseVersion && can('edit') ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
+            ${can(d.baseVersion ? 'edit' : 'create') ? `<button class="btn btn--primary" type="button" data-act="publish">${icon('upload')}Publicar versión ${(d.baseVersion || 0) + 1}</button>` : '<span class="field__hint">No tienes permiso para publicar cambios en esta instancia.</span>'}
           </div></div>
       </div>`;
     hydrateIcons(root);
@@ -564,7 +568,7 @@ function renderEditor(root, id, app) {
           await call('admin:discard', id);
           app.go({ name: 'admin' });
         } },
-        ...(d.baseVersion ? ['-', { label: 'Eliminar del servidor', icon: 'trash', danger: true, onClick: async () => {
+        ...(d.baseVersion && can('delete') ? ['-', { label: 'Eliminar del servidor', icon: 'trash', danger: true, onClick: async () => {
           const ok = await confirm({ title: `¿Eliminar ${d.meta.name}?`, text: 'Desaparecerá para todos los jugadores y se borrarán sus archivos del servidor. No se puede deshacer.', ok: 'Eliminar', danger: true, icon: 'trash' });
           if (!ok) return;
           try { await call('admin:remove', id); toast('Instancia eliminada.', { kind: 'success' }); app.go({ name: 'admin' }); } catch (er) { toastError(er); }
