@@ -20,8 +20,11 @@
 ## Descargar
 
 1. Entra en **[Releases](https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest)** y descarga `Viciont-Studio-Launcher-Setup-X.Y.Z.exe`.
-2. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**. Sale porque el instalador no tiene un certificado de pago; es normal en launchers independientes.
-3. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cada versión nueva cambia su nombre, por ejemplo *Viciont Studio Launcher 1.0.1*.
+2. Si el navegador avisa de que el archivo *"no se descarga habitualmente"*, no es un virus: el instalador es nuevo y no está firmado con un certificado de pago, así que Microsoft todavía no lo conoce.
+   - **Edge:** en Descargas, pulsa la flecha **⌄** junto a *Eliminar* → **Conservar** → **Mostrar más** → **Conservar de todas formas**.
+   - **Chrome:** en Descargas, pulsa **Conservar** (o *Descargar archivo no seguro*).
+3. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
+4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cada versión nueva cambia su nombre, por ejemplo *Viciont Studio Launcher 1.0.1*.
 
 Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
 
