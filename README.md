@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest"><b>⬇ Descargar para Windows</b></a>
   ·
-  <a href="https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/">Web del estudio</a>
+  <a href="https://viciontstudios.pages.dev/">Web de Viciont Studios</a>
 </p>
 
 ---

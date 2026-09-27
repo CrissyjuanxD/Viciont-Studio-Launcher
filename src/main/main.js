@@ -30,7 +30,6 @@ const isDev = !app.isPackaged;
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const APP_NAME = 'Viciont Studios Launcher';
 const VERSION = app.getVersion();
-const STUDIO_SITE = 'https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/';
 // Pruebas automáticas (solo en desarrollo): --vsl-test=script.js [--hidden]
 const TEST_SCRIPT = !app.isPackaged ? (process.argv.find((a) => a.startsWith('--vsl-test=')) || '').slice(11) : '';
 const HIDDEN_TEST = Boolean(TEST_SCRIPT) && process.argv.includes('--hidden');
@@ -313,7 +312,7 @@ function start() {
     name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
     dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
     news: backend.news(), admin: admin.quickStatus(), update: updater.state, defaultJvm: DEFAULT_JVM,
-    discord: { available: Boolean(backend.discordClientId()) },
+    discord: { available: Boolean(backend.discordClientId()) }, site: backend.siteUrl(),
     loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
   }));
   on('app:openExternal', (url) => {
@@ -347,20 +346,21 @@ function start() {
   // Nombre, frases y redes del estudio: se leen de la web (se editan en su panel).
   on('app:studio', async () => {
     const file = paths.configFile('studio.json');
+    const site = backend.siteUrl();
     try {
-      const d = await cached('studio', 60 * 60 * 1000, () => getJson(`${STUDIO_SITE}data/content.json`, { timeout: 10000, retries: 1 }));
+      const d = await cached(`studio:${site}`, 60 * 60 * 1000, () => getJson(`${site}data/content.json`, { timeout: 10000, retries: 1 }));
       const out = {
         name: String(d?.site?.name || 'Viciont Studios').slice(0, 60),
         founder: String(d?.site?.founder || 'CrissyjuanxD').slice(0, 40),
         tagline: String(d?.site?.tagline || '').slice(0, 200),
         typing: (Array.isArray(d?.site?.typing) ? d.site.typing : []).map((t) => String(t).slice(0, 60)).slice(0, 8),
         socials: Object.fromEntries(['youtube', 'x', 'discord'].map((k) => [k, /^https:\/\//i.test(d?.socials?.[k] || '') ? d.socials[k] : ''])),
-        site: STUDIO_SITE,
+        site,
       };
       fs.writeFile(file, JSON.stringify(out), () => {});
       return out;
     } catch {
-      return readJson(file, { name: 'Viciont Studios', founder: 'CrissyjuanxD', typing: [], socials: {}, site: STUDIO_SITE });
+      return { ...(await readJson(file, { name: 'Viciont Studios', founder: 'CrissyjuanxD', typing: [], socials: {} })), site };
     }
   });
   on('app:closeDecision', async (quit) => {

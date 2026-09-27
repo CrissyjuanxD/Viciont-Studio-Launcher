@@ -11,6 +11,7 @@ const { configFile } = require('../core/paths');
 const REMOTE_CONFIG = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-Studio-Launcher/main/remote/launcher.json';
 const REMOTE_CACHE = configFile('remote.json');
 const DISCORD_CLIENT_ID = '1553630868638146660'; // aplicación de Discord de Viciont Studios
+const SITE_URL = 'https://viciontstudios.pages.dev/'; // web de Viciont Studios (Cloudflare Pages)
 
 class Backend {
   // allowOverride: solo en desarrollo se puede usar otro servidor (settings.apiBase).
@@ -57,6 +58,12 @@ class Backend {
   discordClientId() {
     const id = String(this.remote?.discordClientId || '');
     return /^\d{15,25}$/.test(id) ? id : DISCORD_CLIENT_ID;
+  }
+
+  // Web de Viciont Studios (se puede cambiar sin publicar otra versión).
+  siteUrl() {
+    const u = String(this.remote?.site || '');
+    return /^https:\/\/[a-z0-9.-]+(\/[^\s?#]*)?\/$/i.test(u) ? u : SITE_URL;
   }
 
   async call(pathname, { method = 'GET', json, body, headers = {}, token, adminKey, type = 'json', timeout = 20000, signal, ok, retries } = {}) {

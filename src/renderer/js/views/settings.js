@@ -474,7 +474,7 @@ const PANES = {
         <p class="field__hint">Launcher oficial de Viciont Studios, creado por <b>CrissyjuanxD</b>. Inspirado en el funcionamiento de Modrinth App (código abierto).</p>
         <div class="field__row">
           <button class="btn btn--sm" type="button" data-link="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher">${icon('github')}Código en GitHub</button>
-          <button class="btn btn--sm btn--ghost" type="button" data-link="https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/">${icon('globe')}Web de Viciont Studios</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-link="${esc(info.site)}">${icon('globe')}Web de Viciont Studios</button>
         </div>
       </div>
       <div class="settings__section">
