@@ -2,7 +2,15 @@
 
 const bridge = window.vsl;
 
-export const call = (channel, ...args) => bridge.call(channel, ...args);
+// El error se crea aquí (y no en el puente) para que conserve su código: ECANCEL, EEXPIRED…
+export async function call(channel, ...args) {
+  const r = await bridge.invoke(channel, ...args);
+  if (r?.ok) return r.data;
+  const e = new Error(r?.error?.message || 'Error desconocido');
+  e.code = r?.error?.code || null;
+  e.status = r?.error?.status || null;
+  throw e;
+}
 export const pathFor = (file) => bridge.pathFor(file);
 
 // ---------- Estado + eventos ----------

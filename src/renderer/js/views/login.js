@@ -9,6 +9,8 @@ import { glitchImg, scramble } from '../fx.js';
 export function render(root, { onDone, canCancel = false, onCancel } = {}) {
   let step = 'choose';
   let checkSeq = 0;
+  let disposed = false;
+  let msBusy = false;
 
   const draw = () => {
     root.innerHTML = `
@@ -28,6 +30,7 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
 
   const drawStep = () => {
     const box = root.querySelector('#login-step');
+    if (disposed || !box) return;
     if (step === 'choose') {
       box.innerHTML = `
         <div class="login__options">
@@ -47,6 +50,10 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
         <div class="login__form" style="justify-items:center;text-align:center;padding:10px 0">
           <span class="spin" style="width:34px;height:34px;border-width:3px"></span>
           <p class="login__sub">Termina el inicio de sesión en la ventana de Microsoft…<br><small class="muted">Tu contraseña solo se escribe en la página oficial de Microsoft.</small></p>
+          <div class="field__row" style="justify-content:center">
+            <button class="btn btn--sm" type="button" data-opt="ms-focus">${icon('external')}Mostrar la ventana</button>
+            <button class="btn btn--sm btn--ghost" type="button" data-opt="ms-cancel">Cancelar</button>
+          </div>
         </div>`;
     } else if (step === 'offline') {
       box.innerHTML = `
@@ -127,30 +134,44 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
     if (el) el.innerHTML = msg ? `<div class="form-error">${icon('alert')}<span>${esc(msg)}</span></div>` : '';
   };
 
-  root.addEventListener('click', async (e) => {
+  // Un solo manejador por pantalla (se quita al salir): si no, cada vez que se volvía a
+  // esta pantalla se sumaba otro y un clic abría varias ventanas de Microsoft.
+  const onClick = async (e) => {
     const b = e.target.closest('[data-opt]');
-    if (!b) return;
+    if (!b || disposed) return;
     const opt = b.dataset.opt;
     if (opt === 'cancel') { onCancel?.(); return; }
     if (opt === 'back') { step = 'choose'; drawStep(); return; }
     if (opt === 'offline') { step = 'offline'; drawStep(); return; }
+    if (opt === 'ms-focus') { call('accounts:loginMicrosoft').catch(() => {}); return; }
+    if (opt === 'ms-cancel') { call('accounts:cancelLogin').catch(() => {}); return; }
     if (opt === 'ms') {
+      if (msBusy) return;
+      msBusy = true;
       step = 'ms';
       drawStep();
       try {
         const summary = await call('accounts:loginMicrosoft');
+        if (disposed) return;
         state.accounts = summary;
         onDone?.(summary);
       } catch (err) {
+        if (disposed) return;
         step = 'choose';
         drawStep();
         if (err.code !== 'ECANCEL') showError(err.message);
+      } finally {
+        msBusy = false;
       }
     }
-  });
+  };
+  root.addEventListener('click', onClick);
 
   draw();
-  return () => {};
+  return () => {
+    disposed = true;
+    root.removeEventListener('click', onClick);
+  };
 }
 
 export { toastError };

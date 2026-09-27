@@ -362,8 +362,8 @@
 .login-opt:hover { border-color: rgba(236, 72, 153, 0.7); background: rgba(236, 72, 153, 0.1); box-shadow: var(--glow-pink); transform: translateY(-2px); }
 .login-opt__icon { width: 48px; height: 48px; flex: none; display: grid; place-items: center; border-radius: 14px; background: var(--grad-soft); border: 1px solid var(--line-strong); }
 .login-opt__icon .i { width: 24px; height: 24px; }
-.login-opt__title { font: 700 0.95rem/1.2 var(--font-ui); letter-spacing: 0.04em; }
-.login-opt__desc { font-size: 0.8rem; color: var(--muted); margin-top: 3px; }
+.login-opt__title { display: block; font: 700 0.95rem/1.2 var(--font-ui); letter-spacing: 0.04em; }
+.login-opt__desc { display: block; font-size: 0.8rem; line-height: 1.45; color: var(--muted); margin-top: 3px; }
 .login__back { border: 0; background: none; color: #f0abfc; font: 600 0.78rem var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase; display: inline-flex; gap: 6px; align-items: center; margin-bottom: 14px; padding: 0; }
 .login__back:hover { color: #fff; }
 .login__form { display: grid; gap: 14px; }

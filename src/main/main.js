@@ -19,6 +19,7 @@ const { Media } = require('./services/media');
 const { Admin } = require('./services/admin');
 const { Updater } = require('./services/updater');
 const { Telemetry } = require('./services/telemetry');
+const { DiscordPresence } = require('./services/discord');
 const modrinth = require('./services/modrinth');
 const { getVersionManifest } = require('./game/versions');
 const { listLoaderVersions, supportedGameVersions, LOADERS } = require('./game/loaders');
@@ -69,6 +70,31 @@ function start() {
   const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
   const track = (type, info) => { try { telemetry.track(type, info); } catch { /* nunca rompe nada */ } };
   const instName = (id) => instances.remote.get(id)?.name || id;
+
+  // ---------- Discord (qué haces en el launcher) ----------
+  const discord = new DiscordPresence({ log, version: VERSION });
+  const presence = { view: 'home', instanceId: null, playing: null, downloading: null };
+  const instInfo = (id) => {
+    const r = instances.remote.get(id) || {};
+    const icon = typeof r.media?.icon === 'string' ? r.media.icon : null;
+    return {
+      id, name: r.name || id, mc: r.mc || '', loader: r.loader || null, loaderName: LOADERS[r.loader?.type]?.name || '',
+      visibility: r.visibility || 'public', iconUrl: icon && backend.configured() ? backend.url(`/v1/media/${icon}`) : null,
+    };
+  };
+  function updatePresence() {
+    const s = settings.get();
+    discord.configure({ enabled: s.discordRpc, clientId: backend.discordClientId() });
+    if (!discord.enabled) return;
+    discord.set(DiscordPresence.build({
+      version: VERSION,
+      view: presence.view,
+      instance: presence.instanceId ? instInfo(presence.instanceId) : null,
+      playing: presence.playing ? { ...instInfo(presence.playing.id), since: presence.playing.since } : null,
+      downloading: presence.downloading ? { ...instInfo(presence.downloading.id), percent: presence.downloading.percent } : null,
+      showPrivate: s.discordShowPrivate,
+    }));
+  }
 
   let win = null;
   let tray = null;
@@ -199,11 +225,13 @@ function start() {
   instances.on('instance', (d) => send('instance', d));
   instances.on('progress', (p) => {
     send('progress', p);
+    if (p.kind !== 'launch' && p.id) { presence.downloading = { id: p.id, percent: p.percent ?? null }; updatePresence(); }
     if (win && !win.isDestroyed() && p.kind !== 'launch') win.setProgressBar(p.total > 0 ? Math.min(1, p.done / p.total) : 2);
   });
   instances.on('task-done', (d) => {
     send('task-done', d);
     if (win && !win.isDestroyed() && !instances.busy()) win.setProgressBar(-1);
+    if (presence.downloading?.id === d.id) { presence.downloading = null; updatePresence(); }
     if (d.kind === 'launch') return;
     const name = instName(d.id);
     const v = instances.remote.get(d.id)?.version;
@@ -213,6 +241,8 @@ function start() {
   });
   instances.on('game-start', (d) => {
     send('game', { ...d, state: 'running' });
+    presence.playing = { id: d.id, since: Date.now() };
+    updatePresence();
     const uuid = telemetry.gameStarted(d.id);
     const r = instances.remote.get(d.id);
     track('game.start', { uuid, instance: d.id, message: `Empezó a jugar ${instName(d.id)}`, data: { mc: r?.mc || null, loader: r?.loader?.type || null } });
@@ -234,6 +264,7 @@ function start() {
   });
   instances.on('game-exit', (d) => {
     const uuid = telemetry.gameStopped(d.id);
+    if (presence.playing?.id === d.id) { presence.playing = null; updatePresence(); }
     const mins = Math.round((d.duration || 0) / 60000);
     if (d.crashed) {
       track('game.crash', { uuid, level: 'error', instance: d.id, message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min`, data: { code: d.code, minutes: mins, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) } });
@@ -282,6 +313,7 @@ function start() {
     name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
     dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
     news: backend.news(), admin: admin.quickStatus(), update: updater.state, defaultJvm: DEFAULT_JVM,
+    discord: { available: Boolean(backend.discordClientId()) },
     loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
   }));
   on('app:openExternal', (url) => {
@@ -296,6 +328,14 @@ function start() {
     return shell.openPath(target);
   });
   on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 5000)); return true; });
+  // qué pantalla está viendo el jugador (para Discord)
+  on('app:presence', (p) => {
+    const view = ['home', 'instance', 'skins', 'admin', 'login'].includes(p?.view) ? p.view : 'home';
+    presence.view = view === 'admin' ? 'home' : view;
+    presence.instanceId = view === 'instance' && typeof p?.id === 'string' ? p.id.slice(0, 48) : null;
+    updatePresence();
+    return true;
+  });
   // errores de la interfaz (máximo 5 por sesión) para detectar fallos
   let uiErrors = 0;
   on('app:uiError', (message) => {
@@ -343,7 +383,7 @@ function start() {
   // ajustes
   on('settings:get', () => settings.get());
   on('settings:set', (patch) => {
-    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate'];
+    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate', 'discordRpc', 'discordShowPrivate'];
     if (isDev) allowed.push('apiBase');
     const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
     if (clean.javaPaths) {
@@ -353,6 +393,7 @@ function start() {
     const before = settings.get().apiBase;
     const out = settings.set(clean);
     if (out.apiBase !== before) instances.refresh().then((l) => send('instances', l));
+    if ('discordRpc' in clean || 'discordShowPrivate' in clean) updatePresence();
     return out;
   });
   let chosenDataDir = null;
@@ -410,18 +451,30 @@ function start() {
 
   // cuentas
   on('accounts:get', () => accounts.summary());
-  on('accounts:loginMicrosoft', () => accounts.loginMicrosoft(parentWin()));
+  on('accounts:loginMicrosoft', () => accounts.loginMicrosoft());
+  on('accounts:cancelLogin', () => { accounts.cancelLogin(); return true; });
+  // ¿la cuenta activa está conectada con el servidor del estudio?
+  on('accounts:serverStatus', async () => {
+    if (!backend.configured()) return { ok: false, message: 'El servidor del estudio todavía no está configurado.' };
+    try {
+      const me = await accounts.me({ fresh: true });
+      if (!me?.name) return { ok: false, message: 'Inicia sesión con una cuenta para conectarte al servidor del estudio.' };
+      return { ok: true, name: me.name, type: me.type, admin: Boolean(me.admin) };
+    } catch (e) {
+      return { ok: false, message: e.message };
+    }
+  });
   on('accounts:checkNick', (name) => accounts.checkNick(name));
   on('accounts:loginOffline', (name, code) => accounts.loginOffline(name, code));
   on('accounts:switch', (uuid) => accounts.setActive(uuid));
-  on('accounts:logout', async (uuid) => {
+  on('accounts:logout', async (uuid, opts) => {
     const acc = accounts.find(uuid);
     if (acc) {
       track('auth.logout', { uuid, message: 'Cerró sesión en el launcher' });
       await telemetry.flushNow(3000);
     }
     admin.forget(uuid);
-    return accounts.remove(uuid);
+    return accounts.remove(uuid, { forgetMicrosoft: opts?.forgetMicrosoft === true });
   });
   on('accounts:recoveryCode', (uuid) => accounts.recoveryCode(uuid));
   on('accounts:refresh', async () => {
@@ -484,7 +537,7 @@ function start() {
     if (!admin.unlocked()) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
     return fn(...a);
   };
-  on('admin:status', () => admin.status());
+  on('admin:status', (opts) => admin.status({ fresh: opts?.fresh === true }));
   on('admin:unlock', (key, remember) => admin.unlock(key, remember));
   on('admin:lock', () => admin.lock());
   on('admin:list', needAdmin(() => admin.list()));
@@ -577,7 +630,7 @@ function start() {
 
   // ---------- Arranque ----------
   app.on('second-instance', showWindow);
-  app.on('before-quit', () => { quitting = true; saveWindowState(); });
+  app.on('before-quit', () => { quitting = true; saveWindowState(); discord.disconnect(); });
   app.on('window-all-closed', () => {
     if (quitting || !instances.anyRunning()) app.quit();
   });
@@ -635,7 +688,8 @@ function start() {
       data: { os: `${os.version?.() || os.type()} (${os.release()})`, arch: process.arch, ramMB: totalMB, cpus: os.cpus().length, maxMemoryMB: settings.get().memory.max },
     });
     await createWindow();
-    backend.refreshRemote().then(() => instances.refresh()).then((l) => send('instances', l)).catch(() => {});
+    updatePresence();
+    backend.refreshRemote().then(() => { updatePresence(); return instances.refresh(); }).then((l) => send('instances', l)).catch(() => {});
     if (TEST_SCRIPT) {
       const run = require(path.resolve(TEST_SCRIPT));
       const ctx = {

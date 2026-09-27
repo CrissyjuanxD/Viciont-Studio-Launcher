@@ -17,16 +17,16 @@ const TABS = [
 ];
 
 export function openSettings(app, tab = 'game') {
-  // la pestaña de administración solo existe para los nicks con acceso concedido en el panel
-  const tabs = TABS.filter(([k]) => k !== 'admin' || state.admin?.access);
-  if (!tabs.some(([k]) => k === tab)) tab = 'game';
+  // la pestaña de administración solo se ve para los nicks con acceso concedido en el panel
+  const tabs = TABS;
+  if (tab === 'admin' && !state.admin?.access) tab = 'game';
   const m = modal({
     size: 'full',
     html: `
       <div class="settings">
         <nav class="settings__nav">
           <h2>Ajustes</h2>
-          ${tabs.map(([k, label, ic]) => `<button class="settings__tab" type="button" data-tab="${k}">${icon(ic)}${label}</button>`).join('')}
+          ${tabs.map(([k, label, ic]) => `<button class="settings__tab" type="button" data-tab="${k}" ${k === 'admin' && !state.admin?.access ? 'hidden' : ''}>${icon(ic)}${label}</button>`).join('')}
         </nav>
         <div class="settings__pane" id="set-pane"></div>
       </div>`,
@@ -41,6 +41,11 @@ export function openSettings(app, tab = 'game') {
   };
   m.content.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
   show(tab);
+  // se vuelve a preguntar al servidor (por si acaban de darte o quitarte el acceso)
+  app.refreshAdmin?.({ fresh: true }).then((st) => {
+    const b = m.content.querySelector('[data-tab="admin"]');
+    if (b) b.hidden = !st?.access;
+  }).catch(() => {});
   return m;
 }
 
@@ -196,6 +201,12 @@ const PANES = {
         <label class="switch"><input type="checkbox" id="hwacc" ${s.hardwareAcceleration ? 'checked' : ''}> Aceleración por hardware (requiere reiniciar el launcher)</label>
       </div>
       <div class="settings__section">
+        <h3>Discord</h3>
+        <label class="switch"><input type="checkbox" id="discord" ${s.discordRpc ? 'checked' : ''}> Mostrar en Discord lo que haces en el launcher</label>
+        <label class="switch"><input type="checkbox" id="discord-private" ${s.discordShowPrivate ? 'checked' : ''} ${s.discordRpc ? '' : 'disabled'}> Mostrar también el nombre de las instancias privadas</label>
+        <p class="field__hint">En tu perfil de Discord saldrá <b>«Jugando a Viciont Studio Launcher»</b>, la instancia que estás viendo o descargando y a cuál estás jugando. Necesitas tener Discord abierto en este PC.${state.info?.discord?.available ? '' : ' <b>El estudio todavía no lo ha activado.</b>'}</p>
+      </div>
+      <div class="settings__section">
         <h3>Actualizaciones del launcher</h3>
         <label class="switch"><input type="checkbox" id="autoupd" ${s.autoUpdate ? 'checked' : ''}> Buscar e instalar actualizaciones automáticamente</label>
         <div class="field__row"><button class="btn btn--sm" type="button" id="check-upd">${icon('refresh')}Buscar ahora</button><span class="field__hint" id="upd-state"></span></div>
@@ -207,6 +218,11 @@ const PANES = {
       if (b.dataset.k === 'effects') { setEffects(r.effects); app.bg.refresh(); }
     }));
     pane.querySelector('#reopen').addEventListener('change', (e) => save({ reopenOnExit: e.target.checked }, true));
+    pane.querySelector('#discord').addEventListener('change', (e) => {
+      save({ discordRpc: e.target.checked }, true);
+      pane.querySelector('#discord-private').disabled = !e.target.checked;
+    });
+    pane.querySelector('#discord-private').addEventListener('change', (e) => save({ discordShowPrivate: e.target.checked }, true));
     pane.querySelector('#hwacc').addEventListener('change', (e) => save({ hardwareAcceleration: e.target.checked }));
     pane.querySelector('#autoupd').addEventListener('change', (e) => save({ autoUpdate: e.target.checked }, true));
     const conc = pane.querySelector('#conc');
@@ -306,6 +322,11 @@ const PANES = {
           </div>
           <button class="btn btn--sm btn--primary" type="button" id="add-acc" style="justify-self:start">${icon('plus')}Añadir otra cuenta</button>
         </div>
+        <div class="settings__section">
+          <h3>Servidor del estudio</h3>
+          <div id="srv-status" class="field__hint"><span class="spin" style="width:12px;height:12px"></span> Comprobando la conexión de tu cuenta…</div>
+          <div class="field__row"><button class="btn btn--sm btn--ghost" type="button" id="srv-retry">${icon('refresh')}Volver a comprobar</button></div>
+        </div>
         ${active?.type === 'offline' ? `
         <div class="settings__section">
           <h3>Código de recuperación</h3>
@@ -326,14 +347,31 @@ const PANES = {
       }));
       pane.querySelectorAll('[data-out]').forEach((b) => b.addEventListener('click', async () => {
         const acc = list.find((a) => a.uuid === b.dataset.out);
-        const ok = await confirm({ title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Guarda antes tu código de recuperación si quieres volver a usar el nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout' });
-        if (!ok) return;
-        state.accounts = await call('accounts:logout', b.dataset.out);
+        const ms = acc?.type === 'microsoft';
+        const r = await confirm({
+          title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Guarda antes tu código de recuperación si quieres volver a usar el nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
+          extra: ms ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido)</label>' : '',
+        });
+        if (!(ms ? r?.value : r)) return;
+        state.accounts = await call('accounts:logout', b.dataset.out, { forgetMicrosoft: Boolean(ms && r?.inputs?.forget) });
         app.onAccountChange();
         if (!state.accounts.active) { m.close(); return; }
         draw();
       }));
       pane.querySelector('#add-acc').addEventListener('click', () => { m.close(); app.addAccount(); });
+      const srv = async () => {
+        const box = pane.querySelector('#srv-status');
+        if (!box) return;
+        box.innerHTML = '<span class="spin" style="width:12px;height:12px"></span> Comprobando la conexión de tu cuenta…';
+        const st = await call('accounts:serverStatus').catch((e) => ({ ok: false, message: e.message }));
+        if (!box.isConnected) return;
+        box.innerHTML = st.ok
+          ? `<span class="chip">${icon('check')}Conectada</span> Tu cuenta <b>${esc(st.name || '')}</b> está verificada en el servidor del estudio${st.type === 'premium' ? ' (premium)' : ''}.`
+          : `<span class="chip chip--warn">${icon('alert')}Sin conexión</span> ${esc(st.message || 'No se pudo conectar.')}`;
+        hydrateIcons(box);
+      };
+      pane.querySelector('#srv-retry')?.addEventListener('click', srv);
+      srv();
       const show = pane.querySelector('#rec-show');
       if (show) {
         let code = null;

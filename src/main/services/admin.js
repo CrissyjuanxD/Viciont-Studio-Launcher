@@ -107,12 +107,12 @@ class Admin extends EventEmitter {
     return { unlocked: Boolean(s), perms: s?.perms || [] };
   }
 
-  async status() {
+  async status({ fresh = false } = {}) {
     const acc = this.accounts.active();
     const base = { configured: this.backend.configured(), server: this.backend.base() || null, nick: acc?.name || null, access: false, unlocked: false, perms: [] };
     if (!acc || !base.configured) return base;
     let me;
-    try { me = await this.accounts.me(); } catch (e) {
+    try { me = await this.accounts.me({ fresh }); } catch (e) {
       const s = this.sessions.get(acc.uuid);
       return { ...base, error: e.message, access: Boolean(s), unlocked: Boolean(s), perms: s?.perms || [] };
     }

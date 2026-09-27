@@ -199,10 +199,14 @@ export function createBackground(canvas) {
   }
 
   function scale() { return effectsLevel() === 'reduced' ? 0.34 : 0.5; }
+  const MAX_PIXELS = 960 * 540; // en pantallas grandes no hace falta más (el fondo es difuminado)
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
-    const w = Math.max(2, Math.round(window.innerWidth * dpr * scale()));
-    const h = Math.max(2, Math.round(window.innerHeight * dpr * scale()));
+    let s = scale();
+    const px = window.innerWidth * window.innerHeight * dpr * dpr * s * s;
+    if (px > MAX_PIXELS) s *= Math.sqrt(MAX_PIXELS / px);
+    const w = Math.max(2, Math.round(window.innerWidth * dpr * s));
+    const h = Math.max(2, Math.round(window.innerHeight * dpr * s));
     if (canvas.width !== w || canvas.height !== h) {
       canvas.width = w;
       canvas.height = h;
@@ -253,6 +257,29 @@ export function createBackground(canvas) {
     if (running && !wasRunning) { pausedTotal += now - pausedAt; kick(); }
     if (!running && wasRunning) pausedAt = now;
     wasRunning = running;
+    scheduleRelease();
+  }
+
+  // Si el fondo está parado un rato (ventana minimizada, jugando, tapado por el fondo
+  // de una instancia…), se libera su memoria de gráficos; al volver se recupera solo.
+  const loseExt = gl.getExtension('WEBGL_lose_context');
+  let released = false;
+  let releaseTimer = 0;
+  const wantRun = () => !paused && !hidden && effectsLevel() !== 'minimal';
+  function scheduleRelease() {
+    if (!loseExt) return;
+    if (wantRun()) {
+      clearTimeout(releaseTimer);
+      releaseTimer = 0;
+      if (released) { released = false; loseExt.restoreContext(); }
+      return;
+    }
+    if (!released && !releaseTimer) {
+      releaseTimer = setTimeout(() => {
+        releaseTimer = 0;
+        if (!wantRun() && !lost) { released = true; loseExt.loseContext(); }
+      }, 20000);
+    }
   }
   function setHidden(v) {
     hidden = v;
@@ -273,7 +300,14 @@ export function createBackground(canvas) {
   onIdleChange((v) => setHidden(v));
   if (isIdle()) setHidden(true);
   canvas.addEventListener('webglcontextlost', (e) => { e.preventDefault(); lost = true; });
-  canvas.addEventListener('webglcontextrestored', () => { if (init()) { lost = false; resize(); kick(); } });
+  canvas.addEventListener('webglcontextrestored', () => {
+    if (!init()) return;
+    lost = false;
+    canvas.width = 0; // obliga a volver a fijar el tamaño y el viewport
+    resize();
+    updateRun();
+    kick();
+  });
 
   return {
     setMode(name) {

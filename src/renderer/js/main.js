@@ -91,6 +91,7 @@ const app = {
       try { current.cleanup = mod.render(inner, route, app); } catch (e) { console.error(e); inner.innerHTML = `<div class="page"><div class="empty">${icon('alert')}<h3>Error</h3><p>${esc(e.message)}</p></div></div>`; }
       hydrateIcons(inner);
       paintRailActive();
+      call('app:presence', { view: route.name, id: route.id || null }).catch(() => {});
     };
     if (instant || !current.name) swap(); else glitchTransition(swap);
   },
@@ -119,8 +120,8 @@ const app = {
     if (current.name === 'home' || current.name === 'skins' || current.name === 'admin') { current.key = ''; app.go(current.name === 'admin' ? { name: 'home' } : state.route, { instant: true }); }
   },
   // ¿La cuenta activa tiene acceso de administración? (lo decide el panel del estudio)
-  async refreshAdmin() {
-    try { state.admin = await call('admin:status'); } catch { state.admin = { access: false, unlocked: false, perms: [] }; }
+  async refreshAdmin({ fresh = false } = {}) {
+    try { state.admin = await call('admin:status', { fresh }); } catch { state.admin = { access: false, unlocked: false, perms: [] }; }
     app.onAdminChange(Boolean(state.admin?.unlocked));
     return state.admin;
   },
@@ -184,18 +185,32 @@ function paintTitlebar() {
 }
 
 // ---------- Inicio de sesión ----------
+let loginCleanup = null;
+function closeLogin() {
+  try { loginCleanup?.(); } catch (e) { console.error(e); }
+  loginCleanup = null;
+  const box = $('login');
+  box.hidden = true;
+  box.innerHTML = '';
+}
+
 function showLogin({ canCancel = false } = {}) {
   const box = $('login');
+  closeLogin();
   $('shell').hidden = true;
   box.hidden = false;
   app.scene.clear();
   app.bg?.setMode('login');
-  loginView.render(box, {
+  call('app:presence', { view: 'login' }).catch(() => {});
+  loginCleanup = loginView.render(box, {
     canCancel,
-    onCancel: () => { box.hidden = true; box.innerHTML = ''; $('shell').hidden = false; },
+    onCancel: () => {
+      closeLogin();
+      $('shell').hidden = false;
+      call('app:presence', { view: state.route?.name || 'home', id: state.route?.id || null }).catch(() => {});
+    },
     onDone: () => {
-      box.hidden = true;
-      box.innerHTML = '';
+      closeLogin();
       showShell();
       toast(`¡Hola, ${state.accounts.active?.name}!`, { kind: 'success' });
     },
@@ -304,14 +319,17 @@ async function boot() {
   $('rail-logout').addEventListener('click', async () => {
     const acc = state.accounts.active;
     if (!acc) return;
-    const ok = await confirm({
+    const ms = acc.type === 'microsoft';
+    const r = await confirm({
       title: '¿Cerrar sesión?',
       text: `Saldrás de ${acc.name} en este launcher.${acc.type === 'offline' ? ' Si quieres volver a usar este nick en otro PC, guarda antes tu código de recuperación (Ajustes → Cuenta).' : ''}`,
       ok: 'Cerrar sesión', danger: true, icon: 'logout',
+      extra: ms ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido: la próxima vez pedirá la contraseña)</label>' : '',
     });
+    const ok = ms ? r?.value : r;
     if (!ok) return;
     try {
-      state.accounts = await call('accounts:logout', acc.uuid);
+      state.accounts = await call('accounts:logout', acc.uuid, { forgetMicrosoft: Boolean(ms && r?.inputs?.forget) });
       app.onAccountChange();
     } catch (e) { toastError(e); }
   });
@@ -322,6 +340,12 @@ async function boot() {
 }
 
 boot();
+let adminCheckedAt = Date.now();
+window.addEventListener('focus', () => {
+  if (!state.accounts?.active || Date.now() - adminCheckedAt < 2 * 60 * 1000) return;
+  adminCheckedAt = Date.now();
+  app.refreshAdmin({ fresh: true });
+});
 // errores de la interfaz: se guardan en el registro para poder arreglarlos
 const reportUi = (msg) => { try { call('app:uiError', String(msg).slice(0, 400)).catch(() => {}); } catch { /* nada */ } };
 window.addEventListener('error', (e) => { console.error(e.error || e.message); reportUi(`${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`); });

@@ -52,6 +52,12 @@ class Backend {
 
   news() { return Array.isArray(this.remote?.news) ? this.remote.news.slice(0, 6) : []; }
 
+  // ID de la aplicación de Discord del estudio (se puede cambiar sin publicar otra versión).
+  discordClientId() {
+    const id = String(this.remote?.discordClientId || '');
+    return /^\d{15,25}$/.test(id) ? id : '';
+  }
+
   async call(pathname, { method = 'GET', json, body, headers = {}, token, adminKey, type = 'json', timeout = 20000, signal, ok, retries } = {}) {
     if (!pathname.startsWith('/')) throw new Error('Ruta no válida');
     const base = this.base();

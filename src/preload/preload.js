@@ -6,9 +6,17 @@ const { contextBridge, ipcRenderer, webUtils } = require('electron');
 
 const PREFIXES = ['app:', 'settings:', 'accounts:', 'skins:', 'instances:', 'admin:', 'catalog:', 'modrinth:'];
 
+const allowed = (channel) => typeof channel === 'string' && PREFIXES.some((p) => channel.startsWith(p));
+
 contextBridge.exposeInMainWorld('vsl', {
+  // Devuelve { ok, data } o { ok: false, error: { message, code, status } }. La página
+  // rehace el error con su código (los errores que cruzan el puente pierden el código).
+  async invoke(channel, ...args) {
+    if (!allowed(channel)) return { ok: false, error: { message: 'Acción no permitida', code: 'EDENIED' } };
+    return ipcRenderer.invoke('vsl', channel, ...args);
+  },
   async call(channel, ...args) {
-    if (typeof channel !== 'string' || !PREFIXES.some((p) => channel.startsWith(p))) throw new Error('Acción no permitida');
+    if (!allowed(channel)) throw new Error('Acción no permitida');
     const r = await ipcRenderer.invoke('vsl', channel, ...args);
     if (r?.ok) return r.data;
     const e = new Error(r?.error?.message || 'Error desconocido');

@@ -2,33 +2,74 @@
 // Inicio de sesión con Microsoft (cuentas premium de Minecraft Java), igual que
 // Modrinth App y el launcher oficial: la contraseña se escribe SOLO en la página
 // oficial de Microsoft, dentro de una ventana aparte; el launcher nunca la ve.
-// Microsoft recuerda tu cuenta en esa ventana (como en Modrinth) hasta que
-// cierras sesión en el launcher.
+// Microsoft recuerda tu cuenta en esa ventana (como en Modrinth), así que la
+// próxima vez solo tendrás que elegirla.
 
 const path = require('node:path');
-const { BrowserWindow, shell, session } = require('electron');
+const crypto = require('node:crypto');
+const { app, BrowserWindow, shell, session } = require('electron');
 const { request, HttpError } = require('../util/net');
 const xbox = require('./xbox');
 
 const PARTITION = 'persist:vsl-microsoft';
 const ICON = path.join(__dirname, '..', '..', 'renderer', 'img', 'icon.png');
+const MS_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(live\.com|microsoft\.com|microsoftonline\.com|xboxlive\.com|xbox\.com|msauth\.net|msftauth\.net|live\.net|microsoftonline-p\.com|office\.com|bing\.com)(\/|$)/i;
 const { authError } = xbox;
 
+let current = null; // ventana de inicio de sesión abierta (solo puede haber una)
+
+// La ventana se identifica como un navegador normal (sin "Electron"), igual que
+// el motor de Windows que usa Modrinth, para que Microsoft muestre su página de siempre.
+let sessionReady = false;
+function loginSession() {
+  const ses = session.fromPartition(PARTITION);
+  if (!sessionReady) {
+    sessionReady = true;
+    const ua = app.userAgentFallback.replace(/\s(Electron|viciont-studio-launcher|Viciont Studio Launcher)\/\S+/gi, '');
+    ses.setUserAgent(ua);
+    ses.setPermissionRequestHandler((_, perm, cb) => cb(['clipboard-sanitized-write', 'storage-access', 'top-level-storage-access'].includes(perm)));
+  }
+  return ses;
+}
+
+// Trae al frente la ventana de Microsoft si ya está abierta.
+function focusLoginWindow() {
+  if (!current || current.isDestroyed()) return false;
+  if (current.isMinimized()) current.restore();
+  current.show();
+  current.focus();
+  current.flashFrame(true);
+  return true;
+}
+
+function cancelLogin() {
+  if (current && !current.isDestroyed()) current.close();
+}
+
 // Abre la página oficial de Microsoft y espera el código de autorización.
-function openLoginWindow(parent, url) {
+function openLoginWindow(url) {
+  // como Modrinth: si ya había una ventana de inicio de sesión, se cierra antes de abrir otra
+  if (current && !current.isDestroyed()) current.destroy();
   return new Promise((resolve, reject) => {
     let done = false;
     const win = new BrowserWindow({
-      parent, modal: Boolean(parent), width: 480, height: 680, minWidth: 420, minHeight: 560,
-      show: false, autoHideMenuBar: true, title: 'Iniciar sesión con Microsoft — Viciont Studio Launcher',
+      width: 1000, height: 700, minWidth: 500, minHeight: 500, center: true,
+      alwaysOnTop: true, autoHideMenuBar: true, show: true,
+      title: 'Iniciar sesión en Minecraft — Viciont Studio Launcher',
       backgroundColor: '#ffffff', icon: ICON,
-      webPreferences: { partition: PARTITION, contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
+      webPreferences: { session: loginSession(), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
     });
+    current = win;
     win.setMenu(null);
+    win.on('page-title-updated', (e) => e.preventDefault());
+    win.flashFrame(true);
+    win.once('focus', () => win.flashFrame(false));
+    win.focus();
     const finish = (err, code) => {
       if (done) return;
       done = true;
-      if (!win.isDestroyed()) win.close();
+      if (current === win) current = null;
+      if (!win.isDestroyed()) win.destroy();
       if (err) reject(err); else resolve(code);
     };
     const check = (u) => {
@@ -43,13 +84,13 @@ function openLoginWindow(parent, url) {
     };
     const wc = win.webContents;
     wc.on('will-redirect', (e, u) => { if (check(e?.url || u)) e.preventDefault(); });
-    wc.on('will-navigate', (e, u) => { if (check(e?.url || u)) e.preventDefault(); });
     wc.on('did-navigate', (_, u) => check(u));
     wc.on('did-redirect-navigation', (e, u) => check(e?.url || u));
     // Solo se permiten páginas de Microsoft; cualquier otro enlace se abre en el navegador.
     wc.on('will-navigate', (e, u) => {
       const target = e?.url || u;
-      if (!/^https:\/\/([a-z0-9-]+\.)*(live\.com|microsoft\.com|microsoftonline\.com|xboxlive\.com|xbox\.com|msauth\.net|msftauth\.net|live\.net)(\/|$)/i.test(target) && !target.startsWith(xbox.REDIRECT)) {
+      if (check(target)) { e.preventDefault(); return; }
+      if (!MS_HOSTS.test(target)) {
         e.preventDefault();
         if (/^https:\/\//i.test(target)) shell.openExternal(target);
       }
@@ -63,7 +104,9 @@ function openLoginWindow(parent, url) {
       if (!done && code <= -100) finish(authError('No se pudo abrir la página de Microsoft. Revisa tu conexión.', 'ENETWORK'));
     });
     win.on('closed', () => finish(authError('Cerraste la ventana de inicio de sesión.', 'ECANCEL')));
-    win.once('ready-to-show', () => win.show());
+    // se cierra sola a los 10 minutos, como en Modrinth
+    const timer = setTimeout(() => finish(authError('El inicio de sesión tardó demasiado. Vuelve a intentarlo.', 'ECANCEL')), 10 * 60 * 1000);
+    win.on('closed', () => clearTimeout(timer));
     win.loadURL(url).catch(() => {});
   });
 }
@@ -188,10 +231,11 @@ async function toMinecraft(msAccessToken, sessionId, store) {
   }
 }
 
+
 // Si Xbox no ofrece el inicio moderno (caída o cambio), se usa la página clásica.
-async function classicLogin(parent) {
+async function classicLogin() {
   const p = new URLSearchParams({ client_id: xbox.CLIENT_ID, response_type: 'code', redirect_uri: xbox.REDIRECT, scope: xbox.SCOPE, prompt: 'select_account' });
-  const code = await openLoginWindow(parent, `https://login.live.com/oauth20_authorize.srf?${p}`);
+  const code = await openLoginWindow(`https://login.live.com/oauth20_authorize.srf?${p}`);
   const ms = await xbox.msToken({ code, grant_type: 'authorization_code' });
   const { mc, xuid } = await classicXbox(ms.access_token, 't');
   return accountFromProfile(await getProfile(mc.accessToken), ms.refresh_token, mc, 'classic', xuid);
@@ -201,7 +245,7 @@ async function classicLogin(parent) {
 /**
  * store: { get(): dispositivo|null, set(dispositivo) } — se guarda cifrado con las cuentas.
  */
-async function login(parent, store) {
+async function login(store) {
   let flow;
   try {
     const dev = await ensureDevice(store);
@@ -210,9 +254,9 @@ async function login(parent, store) {
     flow = { verifier, sessionId, url };
   } catch (e) {
     if (e.code === 'ECANCEL') throw e;
-    return classicLogin(parent);
+    return classicLogin();
   }
-  const code = await openLoginWindow(parent, flow.url);
+  const code = await openLoginWindow(flow.url);
   const ms = await xbox.oauthToken(code, flow.verifier);
   const r = await toMinecraft(ms.access_token, flow.sessionId, store);
   const profile = await getProfile(r.mc.accessToken);
@@ -246,4 +290,69 @@ async function joinServer(account, serverId) {
   });
 }
 
-module.exports = { login, refresh, getProfile, joinServer, dashed, clearWebSession };
+// ---------- Prueba premium con el certificado de Mojang ----------
+// Si Mojang no contesta a nuestro servidor, este comprueba la cuenta sin hablar con
+// Mojang: el certificado de jugador (el mismo que usa el juego para el chat firmado)
+// y las texturas del perfil vienen firmados por Mojang, y el launcher firma nuestro
+// desafío con la clave del certificado. El token de Minecraft nunca sale del PC.
+const pemBody = (pem) => String(pem || '').replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
+
+function privateKeyFrom(pem) {
+  const der = Buffer.from(pemBody(pem), 'base64');
+  try { return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }); } catch { /* formato antiguo */ }
+  return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs1' });
+}
+
+async function playerCertificate(account) {
+  const c = account.cert;
+  const now = Date.now();
+  if (c?.publicKey && c?.privateKey && Date.parse(c.expiresAt) - now > 60 * 60 * 1000 && Date.parse(c.refreshedAfter || c.expiresAt) > now) return c;
+  let data;
+  try {
+    ({ data } = await request('https://api.minecraftservices.com/player/certificates', {
+      method: 'POST', headers: { Authorization: `Bearer ${account.mcToken}` }, body: '', timeout: 20000,
+    }));
+  } catch (e) {
+    if (e.status === 401) throw authError('La sesión de Minecraft caducó. Vuelve a iniciar sesión.', 'EEXPIRED');
+    throw e;
+  }
+  if (!data?.keyPair?.publicKey || !data?.keyPair?.privateKey || !data?.publicKeySignatureV2 || !data?.expiresAt) throw authError('Mojang no devolvió un certificado válido.');
+  const publicKey = pemBody(data.keyPair.publicKey);
+  crypto.createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' }); // comprobación
+  const privateKey = privateKeyFrom(data.keyPair.privateKey).export({ type: 'pkcs8', format: 'pem' });
+  return { publicKey, privateKey, signature: data.publicKeySignatureV2, expiresAt: data.expiresAt, refreshedAfter: data.refreshedAfter || null };
+}
+
+// Texturas del perfil firmadas por Mojang (dicen el nombre actual de la cuenta).
+const texturesCache = new Map();
+async function signedTextures(uuid) {
+  const id = String(uuid).replace(/-/g, '');
+  const hit = texturesCache.get(id);
+  if (hit && Date.now() - hit.at < 12 * 60 * 1000) return hit.textures;
+  const { data } = await request(`https://sessionserver.mojang.com/session/minecraft/profile/${id}?unsigned=false`, { timeout: 15000, retries: 3 });
+  const t = (data?.properties || []).find((p) => p.name === 'textures');
+  if (!t?.value || !t?.signature) throw authError('Mojang no devolvió el perfil firmado.');
+  const textures = { value: t.value, signature: t.signature };
+  texturesCache.set(id, { at: Date.now(), textures });
+  return textures;
+}
+
+/**
+ * Devuelve { cert, payload }: el certificado (para guardarlo cifrado con la cuenta)
+ * y los datos que se envían al servidor del estudio.
+ */
+async function premiumProof(account, challenge) {
+  const [cert, textures] = await Promise.all([playerCertificate(account), signedTextures(account.uuid)]);
+  const proof = crypto.sign('sha256', Buffer.from(`vsl-auth:${challenge}`), crypto.createPrivateKey(cert.privateKey)).toString('base64');
+  return {
+    cert,
+    payload: {
+      uuid: String(account.uuid).replace(/-/g, ''),
+      cert: { publicKey: cert.publicKey, expiresAt: cert.expiresAt, signature: cert.signature },
+      proof,
+      textures,
+    },
+  };
+}
+
+module.exports = { login, refresh, getProfile, joinServer, premiumProof, dashed, clearWebSession, focusLoginWindow, cancelLogin };

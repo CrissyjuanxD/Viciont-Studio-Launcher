@@ -31,6 +31,8 @@ class Accounts extends EventEmitter {
     this.log = log;
     this.data = { active: null, list: [], device: null };
     this.meCache = new Map();
+    this.sessionFlights = new Map(); // una sola conexión con el servidor a la vez por cuenta
+    this.msLogin = null; // una sola ventana de Microsoft a la vez
   }
 
   load() {
@@ -79,22 +81,37 @@ class Accounts extends EventEmitter {
     return this.summary();
   }
 
-  remove(uuid) {
+  // forgetMicrosoft: que Microsoft olvide también la cuenta en la ventana de inicio de
+  // sesión (para PCs compartidos). Si no, la próxima vez solo hay que elegirla, como en Modrinth.
+  remove(uuid, { forgetMicrosoft = false } = {}) {
     const acc = this.find(uuid);
     this.data.list = this.data.list.filter((a) => a.uuid !== uuid);
     if (this.data.active === uuid) this.data.active = this.data.list[0]?.uuid || null;
     this.meCache.delete(uuid);
     this.save();
-    // Microsoft olvida también la cuenta en la ventana de inicio de sesión
-    if (acc?.type === 'microsoft') microsoft.clearWebSession().catch(() => {});
+    if (acc?.type === 'microsoft' && forgetMicrosoft) microsoft.clearWebSession().catch(() => {});
     return this.summary();
   }
 
   // ---------- Premium ----------
-  async loginMicrosoft(parentWindow) {
+  // Si ya hay un inicio de sesión en curso, se trae su ventana al frente (nunca se abren dos).
+  loginMicrosoft() {
+    if (this.msLogin) {
+      microsoft.focusLoginWindow();
+      return this.msLogin;
+    }
+    this.msLogin = this._loginMicrosoft().finally(() => { this.msLogin = null; });
+    return this.msLogin;
+  }
+
+  cancelLogin() {
+    microsoft.cancelLogin();
+  }
+
+  async _loginMicrosoft() {
     let acc;
     try {
-      acc = await microsoft.login(parentWindow, this.deviceStore());
+      acc = await microsoft.login(this.deviceStore());
     } catch (e) {
       if (e.code !== 'ECANCEL') {
         this.log.warn('Inicio de sesión con Microsoft fallido:', e.message);
@@ -222,12 +239,31 @@ class Accounts extends EventEmitter {
     if (!acc || !this.backend.configured()) return null;
     const base = this.backend.base();
     if (acc.backend?.token && acc.backend.base === base && acc.backend.exp - Date.now() > 60 * 60 * 1000) return acc.backend.token;
+    // si varias partes del launcher piden sesión a la vez, se hace una sola vez
+    const key = `${acc.uuid}@${base}`;
+    if (this.sessionFlights.has(key)) return this.sessionFlights.get(key);
+    const flight = this._session(acc, base).finally(() => this.sessionFlights.delete(key));
+    this.sessionFlights.set(key, flight);
+    return flight;
+  }
+
+  async _session(acc, base) {
     let token;
     if (acc.type === 'microsoft') {
       const fresh = await this.ensureFresh(acc);
       const { challenge } = await this.backend.call('/v1/auth/challenge', { method: 'POST', json: {} });
-      await microsoft.joinServer(fresh, challenge);
-      const r = await this.backend.call('/v1/auth/premium', { method: 'POST', json: { name: fresh.name, challenge } });
+      // 1) como un servidor de Minecraft (join) y 2) certificado firmado por Mojang, por si
+      //    Mojang no le contesta a nuestro servidor. El token de Minecraft nunca se envía.
+      const [join, proof] = await Promise.allSettled([microsoft.joinServer(fresh, challenge), microsoft.premiumProof(fresh, challenge)]);
+      if (join.status === 'rejected') this.log.warn('Mojang no aceptó el join:', join.reason?.message);
+      const body = { name: fresh.name, challenge };
+      if (proof.status === 'fulfilled') {
+        fresh.cert = proof.value.cert;
+        Object.assign(body, proof.value.payload);
+      } else {
+        this.log.warn('No se pudo preparar el certificado premium:', proof.reason?.message);
+      }
+      const r = await this.backend.call('/v1/auth/premium', { method: 'POST', json: body });
       fresh.backend = { token: r.token, exp: r.expiresAt, base };
       token = r.token;
       this.upsert(fresh);

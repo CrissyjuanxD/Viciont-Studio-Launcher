@@ -287,7 +287,14 @@ export function render(root, _route, app) {
   return () => {
     disposed = true;
     offIdle();
-    if (viewer) { viewer.dispose(); viewer = null; }
+    if (viewer) {
+      // libera también la memoria de gráficos del visor 3D (si no, se queda reservada)
+      let gl = null;
+      try { gl = viewer.renderer.getContext(); } catch { gl = null; }
+      viewer.dispose();
+      try { gl?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ya liberado */ }
+      viewer = null;
+    }
   };
 }
 

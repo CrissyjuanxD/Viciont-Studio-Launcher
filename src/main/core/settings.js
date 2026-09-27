@@ -29,6 +29,8 @@ const DEFAULTS = {
   hardwareAcceleration: true,
   apiBase: '',
   autoUpdate: true,
+  discordRpc: true, // mostrar en Discord lo que haces en el launcher
+  discordShowPrivate: false, // nombre de las instancias privadas en Discord
   lastInstance: null,
 };
 
@@ -62,6 +64,8 @@ function sanitize(s) {
   out.hardwareAcceleration = s?.hardwareAcceleration !== false;
   out.apiBase = typeof s?.apiBase === 'string' && /^https?:\/\/[^\s]+$/i.test(s.apiBase.trim()) ? s.apiBase.trim().replace(/\/+$/, '') : '';
   out.autoUpdate = s?.autoUpdate !== false;
+  out.discordRpc = s?.discordRpc !== false;
+  out.discordShowPrivate = s?.discordShowPrivate === true;
   out.dataDir = typeof s?.dataDir === 'string' && s.dataDir.length > 2 ? s.dataDir : null;
   out.lastInstance = typeof s?.lastInstance === 'string' ? s.lastInstance : null;
   return out;
