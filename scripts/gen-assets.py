@@ -68,7 +68,7 @@ def center(text, y, f, fill):
     tw = d.textlength(text, font=f)
     d.text(((w - tw) / 2, y), text, font=f, fill=fill)
 center('VICIONT', 182, f1, (255, 255, 255))
-center('STUDIO', 212, f1, (240, 171, 252))
+center('STUDIOS', 212, f1, (240, 171, 252))
 center('L A U N C H E R', 250, f2, (216, 180, 254))
 center('by CrissyjuanxD', 288, f3, (155, 140, 186))
 d.line([(34, 244), (130, 244)], fill=(236, 72, 153), width=1)

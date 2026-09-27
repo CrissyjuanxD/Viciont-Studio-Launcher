@@ -15,7 +15,7 @@ export function render(root, _route, app) {
       <div class="home__hero">
         <div class="home__brand">
           ${glitchImg('img/emblem.webp', 'home__emblem')}
-          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span><span class="glitch glitch--grad" data-text="STUDIO">STUDIO</span></h1>
+          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span><span class="glitch glitch--grad" data-text="STUDIOS">STUDIOS</span></h1>
           <p class="home__tagline"><span id="home-typing"></span><span class="caret"></span></p>
           <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Elige una instancia de la barra lateral o de la lista.</p>
         </div>

@@ -29,7 +29,7 @@ jobs:
           $v = $tag.TrimStart('v')
           gh release view $tag *> $null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "Viciont Studio Launcher $v" --notes "Descarga **Viciont-Studio-Launcher-Setup-$v.exe** en *Assets* y ábrelo. Los launchers instalados se actualizan solos." --latest
+            gh release create $tag --title "Viciont Studios Launcher $v" --notes "Descarga **Viciont-Studios-Launcher-Setup-$v.exe** en *Assets* y ábrelo. Los launchers instalados se actualizan solos." --latest
           }
           exit 0
       - run: npx electron-builder --win --x64 --publish always

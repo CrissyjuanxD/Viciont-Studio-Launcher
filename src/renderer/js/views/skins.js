@@ -117,7 +117,7 @@ export function render(root, _route, app) {
     root.querySelector('#sk-lead').textContent = premium
       ? 'Tu skin se cambia en tu cuenta de Minecraft: la verá todo el mundo, en cualquier servidor.'
       : data?.serverReady
-        ? 'Tu skin se guarda en el servidor de Viciont Studios. La verán quienes jueguen con Viciont Studio Launcher (en instancias con mods).'
+        ? 'Tu skin se guarda en el servidor de Viciont Studios. La verán quienes jueguen con Viciont Studios Launcher (en instancias con mods).'
         : 'El servidor de skins de Viciont Studios todavía no está listo. Puedes preparar tu biblioteca mientras tanto.';
     const cur = root.querySelector('#sk-current');
     cur.innerHTML = data?.current

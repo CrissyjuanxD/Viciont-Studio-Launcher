@@ -1,8 +1,8 @@
 <p align="center">
-  <img src="docs/banner.png" alt="Viciont Studio Launcher" width="760">
+  <img src="docs/banner.png" alt="Viciont Studios Launcher" width="760">
 </p>
 
-<h1 align="center">Viciont Studio Launcher</h1>
+<h1 align="center">Viciont Studios Launcher</h1>
 
 <p align="center">
   El launcher de Minecraft oficial de <b>Viciont Studios</b>, creado por <b>CrissyjuanxD</b>.<br>
@@ -19,12 +19,12 @@
 
 ## Descargar
 
-1. Entra en **[Releases](https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest)** y descarga `Viciont-Studio-Launcher-Setup-X.Y.Z.exe`.
+1. Entra en **[Releases](https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest)** y descarga `Viciont-Studios-Launcher-Setup-X.Y.Z.exe`.
 2. Si el navegador avisa de que el archivo *"no se descarga habitualmente"*, no es un virus: el instalador es nuevo y no está firmado con un certificado de pago, así que Microsoft todavía no lo conoce.
    - **Edge:** en Descargas, pulsa la flecha **⌄** junto a *Eliminar* → **Conservar** → **Mostrar más** → **Conservar de todas formas**.
    - **Chrome:** en Descargas, pulsa **Conservar** (o *Descargar archivo no seguro*).
 3. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
-4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cada versión nueva cambia su nombre, por ejemplo *Viciont Studio Launcher 1.0.1*.
+4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
 
 Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
 
@@ -52,7 +52,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Sin archivos dañados**: todo se descarga a un archivo temporal, se comprueba con SHA-1 y solo entonces se coloca en su sitio. Si cierras el launcher o se va la luz a mitad, la próxima vez se verifica y **continúa donde se quedó**. Al cerrar durante una descarga te pregunta y la pausa de forma segura.
 - **Ajustes** de RAM (con la memoria de tu PC), argumentos de Java, resolución, pantalla completa, Java propio por versión, descargas simultáneas, efectos visuales, carpeta de datos (se puede mover) y qué hacer al abrir el juego.
 - **Opciones por instancia**: RAM, Java, resolución y entrar directo al servidor.
-- **Discord**: en tu perfil se ve «Jugando a Viciont Studio Launcher», la instancia que miras o descargas y a cuál juegas (con el tiempo de partida). Se puede desactivar en **Ajustes → Launcher**, donde también puedes ocultar el nombre de las instancias privadas.
+- **Discord**: en tu perfil se ve «Jugando a Viciont Studios Launcher», la instancia que miras o descargas y a cuál juegas (con el tiempo de partida). Se puede desactivar en **Ajustes → Launcher**, donde también puedes ocultar el nombre de las instancias privadas.
 
 **Para el estudio (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
 - Solo los nicks a los que se les da acceso desde el **panel web privado** ven **Ajustes → Administración**, y además tienen que escribir su **clave personal**. Cada uno tiene sus permisos: crear instancias, editar y publicar, eliminar, nicks no premium (y se puede limitar a algunas instancias).
@@ -86,7 +86,7 @@ La carpeta de datos se puede mover desde **Ajustes → Almacenamiento**.
 
 ## Desinstalar
 
-Desde **Configuración de Windows → Aplicaciones → Viciont Studio Launcher**. El desinstalador pregunta:
+Desde **Configuración de Windows → Aplicaciones → Viciont Studios Launcher**. El desinstalador pregunta:
 
 - **Conservar** instancias, mundos, cuentas y skins, si vas a reinstalar.
 - **Borrarlo todo**: instancias, mundos, cuentas, skins, Java y caché.

@@ -55,7 +55,7 @@ function openLoginWindow(url) {
     const win = new BrowserWindow({
       width: 1000, height: 700, minWidth: 500, minHeight: 500, center: true,
       alwaysOnTop: true, autoHideMenuBar: true, show: true,
-      title: 'Iniciar sesión en Minecraft — Viciont Studio Launcher',
+      title: 'Iniciar sesión en Minecraft — Viciont Studios Launcher',
       backgroundColor: '#ffffff', icon: ICON,
       webPreferences: { session: loginSession(), contextIsolation: true, sandbox: true, nodeIntegration: false, spellcheck: false },
     });

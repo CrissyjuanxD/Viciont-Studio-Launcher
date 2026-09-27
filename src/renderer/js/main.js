@@ -298,7 +298,7 @@ async function boot() {
     setInstances(list);
     setEffects(settings.effects);
     $('app-version').textContent = `v${info.version}`;
-    document.title = `Viciont Studio Launcher ${info.version}`;
+    document.title = `Viciont Studios Launcher ${info.version}`;
     $('rail-admin').hidden = true;
   } catch (e) {
     console.error(e);

@@ -204,7 +204,7 @@ const PANES = {
         <h3>Discord</h3>
         <label class="switch"><input type="checkbox" id="discord" ${s.discordRpc ? 'checked' : ''}> Mostrar en Discord lo que haces en el launcher</label>
         <label class="switch"><input type="checkbox" id="discord-private" ${s.discordHidePrivate ? '' : 'checked'} ${s.discordRpc ? '' : 'disabled'}> Mostrar también el nombre de las instancias privadas</label>
-        <p class="field__hint">En tu perfil de Discord saldrá <b>«Jugando a Viciont Studio Launcher»</b>, la instancia que estás viendo o descargando y a cuál estás jugando. Necesitas tener Discord abierto en este PC.${state.info?.discord?.available ? '' : ' <b>Viciont Studios todavía no lo ha activado.</b>'}</p>
+        <p class="field__hint">En tu perfil de Discord saldrá <b>«Jugando a Viciont Studios Launcher»</b>, la instancia que estás viendo o descargando y a cuál estás jugando. Necesitas tener Discord abierto en este PC.${state.info?.discord?.available ? '' : ' <b>Viciont Studios todavía no lo ha activado.</b>'}</p>
       </div>
       <div class="settings__section">
         <h3>Actualizaciones del launcher</h3>
@@ -470,7 +470,7 @@ const PANES = {
     pane.innerHTML = `
       <div class="settings__section" style="justify-items:start">
         <img src="img/logo-full.webp" alt="Viciont Studios" style="width:260px;filter:drop-shadow(0 0 20px rgba(168,85,247,.6))">
-        <h3>Viciont Studio Launcher ${esc(info.version)}</h3>
+        <h3>Viciont Studios Launcher ${esc(info.version)}</h3>
         <p class="field__hint">Launcher oficial de Viciont Studios, creado por <b>CrissyjuanxD</b>. Inspirado en el funcionamiento de Modrinth App (código abierto).</p>
         <div class="field__row">
           <button class="btn btn--sm" type="button" data-link="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher">${icon('github')}Código en GitHub</button>

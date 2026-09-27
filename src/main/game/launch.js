@@ -59,7 +59,7 @@ function buildCommand(plan, opts) {
     clientid: account.clientId || '',
     auth_xuid: account.xuid || '0',
     user_type: account.type === 'microsoft' ? 'msa' : 'legacy',
-    version_type: 'Viciont Studio',
+    version_type: 'Viciont Studios',
     user_properties: '{}',
     resolution_width: String(width || 854),
     resolution_height: String(height || 480),

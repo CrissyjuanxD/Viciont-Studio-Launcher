@@ -18,7 +18,7 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
         <div class="login__brand">
           ${glitchImg('img/emblem.webp')}
           <h1 class="login__title"><span class="glitch" data-text="INICIAR SESIÓN" id="login-title">INICIAR SESIÓN</span></h1>
-          <p class="login__sub">Viciont Studio Launcher</p>
+          <p class="login__sub">Viciont Studios Launcher</p>
         </div>
         <div id="login-step"></div>
         <p class="login__foot">Creado por <b>CrissyjuanxD</b> · Viciont Studios</p>

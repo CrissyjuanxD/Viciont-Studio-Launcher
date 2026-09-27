@@ -28,7 +28,7 @@ const { probeJava } = require('./game/java');
 // Modo desarrollo solo al ejecutar el código fuente (nunca en la versión instalada).
 const isDev = !app.isPackaged;
 const RENDERER = path.join(__dirname, '..', 'renderer');
-const APP_NAME = 'Viciont Studio Launcher';
+const APP_NAME = 'Viciont Studios Launcher';
 const VERSION = app.getVersion();
 const STUDIO_SITE = 'https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/';
 // Pruebas automáticas (solo en desarrollo): --vsl-test=script.js [--hidden]

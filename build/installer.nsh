@@ -26,7 +26,7 @@ Var vslRadioAll
     ${If} $0 == error
       Abort
     ${EndIf}
-    ${NSD_CreateLabel} 0 0 100% 34u "Viciont Studio Launcher guarda en tu PC las instancias (mods, mundos, configuraciones), tus cuentas, tus skins y el Java de Minecraft."
+    ${NSD_CreateLabel} 0 0 100% 34u "Viciont Studios Launcher guarda en tu PC las instancias (mods, mundos, configuraciones), tus cuentas, tus skins y el Java de Minecraft."
     Pop $0
     ${NSD_CreateRadioButton} 0 42u 100% 16u "Conservar mis instancias, mundos y cuentas (recomendado si vas a reinstalar)"
     Pop $vslRadioKeep
@@ -41,7 +41,7 @@ Var vslRadioAll
   Function un.vslDataPageLeave
     ${NSD_GetState} $vslRadioAll $0
     ${If} $0 == ${BST_CHECKED}
-      MessageBox MB_YESNO|MB_ICONEXCLAMATION "Se borrarán tus instancias y mundos de Viciont Studio Launcher. ¿Seguro?" IDYES +2
+      MessageBox MB_YESNO|MB_ICONEXCLAMATION "Se borrarán tus instancias y mundos de Viciont Studios Launcher. ¿Seguro?" IDYES +2
       Abort
       StrCpy $vslDeleteAll "1"
     ${Else}

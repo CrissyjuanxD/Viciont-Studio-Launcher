@@ -1,7 +1,7 @@
 {
   "name": "viciont-studio-launcher",
-  "productName": "Viciont Studio Launcher",
-  "version": "1.0.5",
+  "productName": "Viciont Studios Launcher",
+  "version": "1.0.6",
   "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas premium y no premium, skins y descargas rápidas.",
   "author": {
     "name": "CrissyjuanxD",
@@ -35,7 +35,7 @@
   },
   "build": {
     "appId": "com.viciontstudios.launcher",
-    "productName": "Viciont Studio Launcher",
+    "productName": "Viciont Studios Launcher",
     "copyright": "© 2026 CrissyjuanxD · Viciont Studios",
     "directories": {
       "output": "dist",
@@ -72,7 +72,7 @@
         }
       ],
       "icon": "build/icon.ico",
-      "artifactName": "Viciont-Studio-Launcher-Setup-${version}.${ext}",
+      "artifactName": "Viciont-Studios-Launcher-Setup-${version}.${ext}",
       "executableName": "Viciont Studio Launcher"
     },
     "nsis": {
@@ -82,8 +82,8 @@
       "allowToChangeInstallationDirectory": true,
       "createDesktopShortcut": true,
       "createStartMenuShortcut": true,
-      "shortcutName": "Viciont Studio Launcher",
-      "uninstallDisplayName": "Viciont Studio Launcher ${version}",
+      "shortcutName": "Viciont Studios Launcher",
+      "uninstallDisplayName": "Viciont Studios Launcher ${version}",
       "installerIcon": "build/icon.ico",
       "uninstallerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",

@@ -141,7 +141,7 @@ class DiscordPresence {
   // Construye la actividad a partir de lo que pasa en el launcher.
   static build({ version, view, instance, playing, downloading, showPrivate }) {
     const base = {
-      assets: { large_image: LOGO, large_text: `Viciont Studio Launcher ${version}` },
+      assets: { large_image: LOGO, large_text: `Viciont Studios Launcher ${version}` },
       buttons: [{ label: 'Descargar el launcher', url: DOWNLOAD }],
     };
     const label = (inst) => (inst.visibility === 'private' && !showPrivate ? 'una instancia privada' : inst.name);
@@ -152,7 +152,7 @@ class DiscordPresence {
     };
     const withIcon = (inst, a) => {
       if (inst.iconUrl && (inst.visibility !== 'private' || showPrivate)) {
-        a.assets = { large_image: inst.iconUrl, large_text: inst.name, small_image: LOGO, small_text: `Viciont Studio Launcher ${version}` };
+        a.assets = { large_image: inst.iconUrl, large_text: inst.name, small_image: LOGO, small_text: `Viciont Studios Launcher ${version}` };
       }
       return a;
     };
