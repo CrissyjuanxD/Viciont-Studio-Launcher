@@ -457,7 +457,7 @@ function start() {
   on('accounts:serverStatus', async () => {
     if (!backend.configured()) return { ok: false, message: 'El servidor del estudio todavía no está configurado.' };
     try {
-      const me = await accounts.me({ fresh: true });
+      const me = await accounts.me({ fresh: true, force: true });
       if (!me?.name) return { ok: false, message: 'Inicia sesión con una cuenta para conectarte al servidor del estudio.' };
       return { ok: true, name: me.name, type: me.type, admin: Boolean(me.admin) };
     } catch (e) {

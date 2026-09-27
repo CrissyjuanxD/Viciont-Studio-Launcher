@@ -307,18 +307,34 @@ async function playerCertificate(account) {
   const c = account.cert;
   const now = Date.now();
   if (c?.publicKey && c?.privateKey && Date.parse(c.expiresAt) - now > 60 * 60 * 1000 && Date.parse(c.refreshedAfter || c.expiresAt) > now) return c;
+  // El servicio solo acepta peticiones marcadas como JSON (si no, responde 415).
+  const variants = [
+    { headers: { 'Content-Type': 'application/json' }, body: '' },
+    { headers: { 'Content-Type': 'application/json' }, body: '{}' },
+    { headers: {}, body: undefined },
+  ];
   let data;
-  try {
-    ({ data } = await request('https://api.minecraftservices.com/player/certificates', {
-      method: 'POST', headers: { Authorization: `Bearer ${account.mcToken}` }, body: '', timeout: 20000,
-    }));
-  } catch (e) {
-    if (e.status === 401) throw authError('La sesión de Minecraft caducó. Vuelve a iniciar sesión.', 'EEXPIRED');
-    throw e;
+  for (let i = 0; ; i++) {
+    try {
+      ({ data } = await request('https://api.minecraftservices.com/player/certificates', {
+        method: 'POST', headers: { Authorization: `Bearer ${account.mcToken}`, ...variants[i].headers }, body: variants[i].body, timeout: 20000,
+      }));
+      break;
+    } catch (e) {
+      if (e.status === 401) throw authError('La sesión de Minecraft caducó. Vuelve a iniciar sesión.', 'EEXPIRED');
+      if ((e.status === 415 || e.status === 400) && i < variants.length - 1) continue;
+      throw e;
+    }
   }
   if (!data?.keyPair?.publicKey || !data?.keyPair?.privateKey || !data?.publicKeySignatureV2 || !data?.expiresAt) throw authError('Mojang no devolvió un certificado válido.');
-  const publicKey = pemBody(data.keyPair.publicKey);
-  crypto.createPublicKey({ key: Buffer.from(publicKey, 'base64'), format: 'der', type: 'spki' }); // comprobación
+  // Aunque la cabecera diga "RSA PUBLIC KEY", Mojang la da en formato X.509 (SPKI);
+  // por si algún día cambia, también se acepta PKCS#1 y se convierte.
+  const pubDer = Buffer.from(pemBody(data.keyPair.publicKey), 'base64');
+  let pub;
+  try { pub = crypto.createPublicKey({ key: pubDer, format: 'der', type: 'spki' }); } catch {
+    pub = crypto.createPublicKey({ key: pubDer, format: 'der', type: 'pkcs1' });
+  }
+  const publicKey = pub.export({ type: 'spki', format: 'der' }).toString('base64');
   const privateKey = privateKeyFrom(data.keyPair.privateKey).export({ type: 'pkcs8', format: 'pem' });
   return { publicKey, privateKey, signature: data.publicKeySignatureV2, expiresAt: data.expiresAt, refreshedAfter: data.refreshedAfter || null };
 }

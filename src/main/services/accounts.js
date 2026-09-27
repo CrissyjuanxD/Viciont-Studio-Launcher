@@ -32,6 +32,7 @@ class Accounts extends EventEmitter {
     this.data = { active: null, list: [], device: null };
     this.meCache = new Map();
     this.sessionFlights = new Map(); // una sola conexión con el servidor a la vez por cuenta
+    this.sessionFails = new Map(); // si falla, se espera cada vez más antes de reintentar
     this.msLogin = null; // una sola ventana de Microsoft a la vez
   }
 
@@ -124,6 +125,7 @@ class Accounts extends EventEmitter {
     this.upsert(acc);
     this.data.active = acc.uuid;
     this.save();
+    this.clearSessionFails(acc.uuid);
     this.log.info(`Sesión premium iniciada: ${acc.name}`);
     this.track('auth.login', { uuid: acc.uuid, message: 'Inició sesión con Microsoft (premium)', data: { flow: acc.flow } });
     return this.summary();
@@ -203,6 +205,7 @@ class Accounts extends EventEmitter {
     this.upsert(acc);
     this.data.active = acc.uuid;
     this.save();
+    this.clearSessionFails(acc.uuid);
     this.log.info(`Sesión no premium iniciada: ${nick}`);
     this.track('auth.login', { uuid: acc.uuid, message: code ? 'Entró con su nick no premium (código de recuperación)' : 'Entró con un nick no premium' });
     return this.summary();
@@ -235,14 +238,25 @@ class Accounts extends EventEmitter {
   }
 
   // Token de sesión para nuestro servidor (se renueva solo).
-  async session(acc = this.active()) {
+  // force: reintentar ya aunque el último intento fallara (cuando lo pide el jugador).
+  async session(acc = this.active(), { force = false } = {}) {
     if (!acc || !this.backend.configured()) return null;
     const base = this.backend.base();
     if (acc.backend?.token && acc.backend.base === base && acc.backend.exp - Date.now() > 60 * 60 * 1000) return acc.backend.token;
     // si varias partes del launcher piden sesión a la vez, se hace una sola vez
     const key = `${acc.uuid}@${base}`;
     if (this.sessionFlights.has(key)) return this.sessionFlights.get(key);
-    const flight = this._session(acc, base).finally(() => this.sessionFlights.delete(key));
+    // tras un fallo no se reintenta cada pocos segundos: 30 s, 1 min, 2 min… hasta 10 min
+    const fail = this.sessionFails.get(key);
+    if (fail && !force && Date.now() < fail.until) throw fail.error;
+    const flight = this._session(acc, base)
+      .then((token) => { this.sessionFails.delete(key); return token; })
+      .catch((e) => {
+        const count = (fail?.count || 0) + 1;
+        this.sessionFails.set(key, { count, error: e, until: Date.now() + Math.min(10 * 60 * 1000, 30 * 1000 * 2 ** (count - 1)) });
+        throw e;
+      })
+      .finally(() => this.sessionFlights.delete(key));
     this.sessionFlights.set(key, flight);
     return flight;
   }
@@ -275,6 +289,10 @@ class Accounts extends EventEmitter {
     return token;
   }
 
+  clearSessionFails(uuid) {
+    for (const k of [...this.sessionFails.keys()]) if (k.startsWith(`${uuid}@`)) this.sessionFails.delete(k);
+  }
+
   // El servidor rechazó el token (caducado o servidor nuevo): se pedirá otro.
   invalidateSession(acc = this.active()) {
     if (!acc?.backend) return;
@@ -284,14 +302,14 @@ class Accounts extends EventEmitter {
   }
 
   // ¿Qué sabe el servidor de esta cuenta? (incluye si tiene permisos de administración)
-  async me({ fresh = false } = {}) {
+  async me({ fresh = false, force = false } = {}) {
     const acc = this.active();
     if (!acc || !this.backend.configured()) return null;
     const c = this.meCache.get(acc.uuid);
     if (!fresh && c && c.base === this.backend.base() && Date.now() - c.at < 5 * 60 * 1000) return c.data;
     let data = null;
     for (let attempt = 0; attempt < 2; attempt++) {
-      const token = await this.session(acc);
+      const token = await this.session(acc, { force: force && attempt === 0 });
       try {
         data = await this.backend.call('/v1/me', { token, timeout: 12000, retries: 0 });
         break;
