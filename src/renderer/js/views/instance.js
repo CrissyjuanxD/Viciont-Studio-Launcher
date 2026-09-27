@@ -84,7 +84,7 @@ export function render(root, route, app) {
   let inst = instance(id);
   if (!inst) {
     app.scene.clear();
-    root.innerHTML = `<div class="page"><div class="empty">${icon('alert')}<h3>Instancia no disponible</h3><p>Puede que ya no tengas permiso para verla o que el estudio la haya retirado.</p><button class="btn btn--primary" data-home type="button">${icon('home')}Ir al inicio</button></div></div>`;
+    root.innerHTML = `<div class="page"><div class="empty">${icon('alert')}<h3>Instancia no disponible</h3><p>Puede que ya no tengas permiso para verla o que Viciont Studios la haya retirado.</p><button class="btn btn--primary" data-home type="button">${icon('home')}Ir al inicio</button></div></div>`;
     root.querySelector('[data-home]').addEventListener('click', () => app.go({ name: 'home' }));
     return () => {};
   }
@@ -122,7 +122,7 @@ export function render(root, route, app) {
           ${inst.description ? `<div class="inst__desc rich" id="inst-desc">${richText(inst.description)}</div><button class="inst__more" type="button" id="inst-more">Leer más</button>` : ''}
           ${inst.interrupted ? `<p class="inst__warn">${icon('alert')}La descarga anterior no terminó. Pulsa el botón para continuar donde se quedó.</p>` : ''}
           ${!inst.available && inst.installed ? `<p class="inst__warn">${icon('alert')}Esta instancia ya no está en el servidor (o no hay conexión). Puedes seguir jugando la versión instalada.</p>` : ''}
-          ${rec && assigned && rec > assigned ? `<p class="inst__warn">${icon('cpu')}El estudio recomienda ${Math.round(rec / 1024 * 10) / 10} GB de RAM y tienes ${Math.round(assigned / 1024 * 10) / 10} GB asignados. Cámbialo en Opciones.</p>` : ''}
+          ${rec && assigned && rec > assigned ? `<p class="inst__warn">${icon('cpu')}Viciont Studios recomienda ${Math.round(rec / 1024 * 10) / 10} GB de RAM y tienes ${Math.round(assigned / 1024 * 10) / 10} GB asignados. Cámbialo en Opciones.</p>` : ''}
           ${inst.status === 'update' && inst.changelog ? `<div class="panel"><div class="panel__title">Novedades de la versión ${esc(inst.version)}</div><div class="rich">${richText(inst.changelog)}</div></div>` : ''}
           <div class="inst__actions" id="inst-action">${actionHtml(inst)}</div>
           <div class="inst__meta">
@@ -257,7 +257,7 @@ function optionsModal(inst) {
             <div class="field"><span class="field__label">Memoria mínima (MB)</span><input class="input mono" id="o-min" type="number" min="256" step="256" value="${mem.min}"></div>
             <div class="field"><span class="field__label">Memoria máxima (MB)</span><input class="input mono" id="o-max" type="number" min="512" step="256" value="${mem.max}"></div>
           </div>
-          ${inst.memory?.recommended ? `<p class="field__hint">Recomendado por el estudio: <b>${inst.memory.recommended} MB</b>.</p>` : ''}
+          ${inst.memory?.recommended ? `<p class="field__hint">Recomendado por Viciont Studios: <b>${inst.memory.recommended} MB</b>.</p>` : ''}
         </div>
         <div class="settings__section">
           <label class="switch"><input type="checkbox" id="o-jvm" ${o.jvmArgs != null ? 'checked' : ''}> Argumentos de Java propios</label>

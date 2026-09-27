@@ -35,7 +35,7 @@ export function render(root, _route, app) {
       </footer>
     </section>`;
 
-  let stopTyping = typeLoop(root.querySelector('#home-typing'), ['instancias oficiales del estudio', 'eventos, series y hardcores', 'descargas rápidas y seguras', 'skins para todos']);
+  let stopTyping = typeLoop(root.querySelector('#home-typing'), ['instancias oficiales de Viciont Studios', 'eventos, series y hardcores', 'descargas rápidas y seguras', 'skins para todos']);
   const nameEl = root.querySelector('#home-name');
   if (nameEl) scramble(nameEl, acc.name);
   bindTilt(root);
@@ -49,8 +49,8 @@ export function render(root, _route, app) {
     if (meta.error === 'EOFFLINE') note.innerHTML = `<div class="banner-note">${icon('alert')}<span>Sin conexión con el servidor. Se muestran las instancias que ya tienes instaladas.</span></div>`;
     if (!list.length) {
       grid.innerHTML = meta.configured === false || meta.error === 'ENOBACKEND'
-        ? `<div class="empty">${icon('server')}<h3>Servidor en preparación</h3><p>El estudio todavía está configurando el servidor de instancias. Vuelve a mirar pronto.</p></div>`
-        : `<div class="empty">${icon('cube')}<h3>Nada por aquí todavía</h3><p>Cuando el estudio publique una instancia para tu cuenta aparecerá aquí.</p></div>`;
+        ? `<div class="empty">${icon('server')}<h3>Servidor en preparación</h3><p>Viciont Studios todavía está preparando el servidor de instancias. Vuelve a mirar pronto.</p></div>`
+        : `<div class="empty">${icon('cube')}<h3>Nada por aquí todavía</h3><p>Cuando Viciont Studios publique una instancia para tu cuenta, aparecerá aquí.</p></div>`;
     } else {
       grid.innerHTML = list.map((i) => `
         <button class="icard" type="button" data-id="${esc(i.id)}" data-tilt>
@@ -106,7 +106,7 @@ export function render(root, _route, app) {
     if (!box || !st) return;
     const items = [['youtube', 'YouTube'], ['x', 'X'], ['discord', 'Discord']].filter(([k]) => st.socials?.[k]);
     box.innerHTML = items.map(([k, label]) => `<button class="social-btn" type="button" data-social="${esc(st.socials[k])}" data-tip="${label} de Viciont Studios">${icon(k)}</button>`).join('')
-      + `<button class="social-btn" type="button" data-social="${esc(st.site)}" data-tip="Web del estudio">${icon('globe')}</button>`;
+      + `<button class="social-btn" type="button" data-social="${esc(st.site)}" data-tip="Web de Viciont Studios">${icon('globe')}</button>`;
     if (st.typing?.length) {
       stopTyping();
       stopTyping = typeLoop(root.querySelector('#home-typing'), st.typing);

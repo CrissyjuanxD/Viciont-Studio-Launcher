@@ -112,6 +112,17 @@ const app = {
     try { cur = await call('skins:current'); } catch { cur = null; }
     await paintHead(canvas, cur?.image || null);
   },
+  // Cambiar de cuenta: las sesiones ya están guardadas (cifradas) en el PC, así que el
+  // cambio es inmediato; lo que depende del servidor se actualiza después, en segundo plano.
+  async switchAccount(uuid) {
+    const summary = await call('accounts:switch', uuid);
+    state.accounts = summary;
+    glitchTransition(() => app.onAccountChange());
+    const name = summary.active?.name || '';
+    const playing = state.instances.some((i) => i.status === 'running');
+    toast(playing ? `Ahora usas la cuenta ${name}. El juego que está abierto sigue con la cuenta anterior.` : `Ahora usas la cuenta ${name}.`, { kind: 'success' });
+    return summary;
+  },
   onAccountChange() {
     if (!state.accounts.active) { showLogin(); return; }
     app.refreshAvatar();
@@ -308,7 +319,7 @@ async function boot() {
   $('rail-avatar').addEventListener('click', (e) => {
     const { list, active } = state.accounts;
     menu(e.currentTarget, [
-      ...list.filter((a) => !a.active).map((a) => ({ label: `Cambiar a ${a.name}`, icon: a.type === 'microsoft' ? 'microsoft' : 'user', onClick: async () => { state.accounts = await call('accounts:switch', a.uuid); app.onAccountChange(); } })),
+      ...list.filter((a) => !a.active).map((a) => ({ label: `Cambiar a ${a.name}`, icon: a.type === 'microsoft' ? 'microsoft' : 'user', onClick: () => app.switchAccount(a.uuid).catch(toastError) })),
       { label: 'Añadir otra cuenta', icon: 'plus', onClick: () => app.addAccount() },
       '-',
       { label: 'Cambiar skin', icon: 'shirt', onClick: () => app.go({ name: 'skins' }) },
@@ -322,14 +333,15 @@ async function boot() {
     const ms = acc.type === 'microsoft';
     const r = await confirm({
       title: '¿Cerrar sesión?',
-      text: `Saldrás de ${acc.name} en este launcher.${acc.type === 'offline' ? ' Si quieres volver a usar este nick en otro PC, guarda antes tu código de recuperación (Ajustes → Cuenta).' : ''}`,
+      text: `Saldrás de ${acc.name} en este launcher.${acc.type === 'offline' ? ' Tu código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick. Si vas a jugar en otro PC, anótalo antes (Ajustes → Cuenta).' : ''}`,
       ok: 'Cerrar sesión', danger: true, icon: 'logout',
-      extra: ms ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido: la próxima vez pedirá la contraseña)</label>' : '',
+      extra: ms
+        ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido: la próxima vez pedirá la contraseña)</label>'
+        : '<label class="check"><input type="checkbox" name="forget"> Olvidar también el código de este nick en este PC (recomendado si el PC es compartido: para volver a entrar necesitarás el código)</label>',
     });
-    const ok = ms ? r?.value : r;
-    if (!ok) return;
+    if (!r?.value) return;
     try {
-      state.accounts = await call('accounts:logout', acc.uuid, { forgetMicrosoft: Boolean(ms && r?.inputs?.forget) });
+      state.accounts = await call('accounts:logout', acc.uuid, ms ? { forgetMicrosoft: Boolean(r.inputs?.forget) } : { forgetRecovery: Boolean(r.inputs?.forget) });
       app.onAccountChange();
     } catch (e) { toastError(e); }
   });

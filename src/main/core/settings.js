@@ -30,7 +30,7 @@ const DEFAULTS = {
   apiBase: '',
   autoUpdate: true,
   discordRpc: true, // mostrar en Discord lo que haces en el launcher
-  discordShowPrivate: false, // nombre de las instancias privadas en Discord
+  discordHidePrivate: false, // ocultar en Discord el nombre de las instancias privadas
   lastInstance: null,
 };
 
@@ -65,7 +65,8 @@ function sanitize(s) {
   out.apiBase = typeof s?.apiBase === 'string' && /^https?:\/\/[^\s]+$/i.test(s.apiBase.trim()) ? s.apiBase.trim().replace(/\/+$/, '') : '';
   out.autoUpdate = s?.autoUpdate !== false;
   out.discordRpc = s?.discordRpc !== false;
-  out.discordShowPrivate = s?.discordShowPrivate === true;
+  out.discordHidePrivate = s?.discordHidePrivate === true;
+  delete out.discordShowPrivate;
   out.dataDir = typeof s?.dataDir === 'string' && s.dataDir.length > 2 ? s.dataDir : null;
   out.lastInstance = typeof s?.lastInstance === 'string' ? s.lastInstance : null;
   return out;

@@ -292,7 +292,7 @@ function renderEditor(root, id, app) {
     body.innerHTML = `
       <div class="editor__cols">
         <label class="field"><span class="field__label">Nombre <em>*</em></span><input class="input" data-m="name" maxlength="60" value="${esc(mt.name)}"></label>
-        <label class="field"><span class="field__label">Resumen (una frase)</span><input class="input" data-m="summary" maxlength="180" value="${esc(mt.summary)}" placeholder="El hardcore más difícil del estudio"></label>
+        <label class="field"><span class="field__label">Resumen (una frase)</span><input class="input" data-m="summary" maxlength="180" value="${esc(mt.summary)}" placeholder="El hardcore más difícil de Viciont Studios"></label>
       </div>
       <label class="field"><span class="field__label">Descripción</span><textarea class="input textarea" data-m="description" rows="5" maxlength="5000" placeholder="Explica de qué va la instancia. Usa **negrita** y deja una línea en blanco entre párrafos.">${esc(mt.description)}</textarea></label>
       <div class="panel"><div class="panel__title"><span>Versión del juego</span></div>

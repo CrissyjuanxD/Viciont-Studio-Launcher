@@ -41,7 +41,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 
 **Para los jugadores**
 - **Iniciar sesión** con una cuenta de Microsoft (premium) o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar un nick de una cuenta premium: lo comprueba en la misma base de datos de Mojang que usa NameMC.
-- Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro.
+- Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC (cifrado), así que puedes cerrar sesión y volver a entrar sin escribirlo.
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor del estudio y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
@@ -52,7 +52,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Sin archivos dañados**: todo se descarga a un archivo temporal, se comprueba con SHA-1 y solo entonces se coloca en su sitio. Si cierras el launcher o se va la luz a mitad, la próxima vez se verifica y **continúa donde se quedó**. Al cerrar durante una descarga te pregunta y la pausa de forma segura.
 - **Ajustes** de RAM (con la memoria de tu PC), argumentos de Java, resolución, pantalla completa, Java propio por versión, descargas simultáneas, efectos visuales, carpeta de datos (se puede mover) y qué hacer al abrir el juego.
 - **Opciones por instancia**: RAM, Java, resolución y entrar directo al servidor.
-- **Discord**: en tu perfil se ve «Jugando a Viciont Studio Launcher», la instancia que miras o descargas y a cuál juegas (con el tiempo de partida). Se puede desactivar en **Ajustes → Launcher**; las instancias privadas no muestran su nombre salvo que lo actives.
+- **Discord**: en tu perfil se ve «Jugando a Viciont Studio Launcher», la instancia que miras o descargas y a cuál juegas (con el tiempo de partida). Se puede desactivar en **Ajustes → Launcher**, donde también puedes ocultar el nombre de las instancias privadas.
 
 **Para el estudio (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
 - Solo los nicks a los que se les da acceso desde el **panel web privado** ven **Ajustes → Administración**, y además tienen que escribir su **clave personal**. Cada uno tiene sus permisos: crear instancias, editar y publicar, eliminar, nicks no premium (y se puede limitar a algunas instancias).

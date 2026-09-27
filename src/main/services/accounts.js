@@ -29,7 +29,7 @@ class Accounts extends EventEmitter {
     super();
     this.backend = backend;
     this.log = log;
-    this.data = { active: null, list: [], device: null };
+    this.data = { active: null, list: [], device: null, vault: {} };
     this.meCache = new Map();
     this.sessionFlights = new Map(); // una sola conexión con el servidor a la vez por cuenta
     this.sessionFails = new Map(); // si falla, se espera cada vez más antes de reintentar
@@ -38,8 +38,22 @@ class Accounts extends EventEmitter {
 
   load() {
     const d = readSecure(FILE, null);
-    if (d && Array.isArray(d.list)) this.data = { active: d.active || null, list: d.list, device: d.device || null };
+    if (d && Array.isArray(d.list)) {
+      this.data = { active: d.active || null, list: d.list, device: d.device || null, vault: d.vault && typeof d.vault === 'object' ? d.vault : {} };
+    }
     if (!this.find(this.data.active)) this.data.active = this.data.list[0]?.uuid || null;
+    for (const a of this.data.list) this.rememberCode(a, false);
+  }
+
+  // Códigos de recuperación de los nicks no premium usados en este PC. Se quedan guardados
+  // (cifrados) aunque cierres sesión, para poder volver a entrar sin escribirlos, salvo
+  // que al salir elijas olvidarlos.
+  rememberCode(acc, save = true) {
+    if (acc?.type !== 'offline' || !acc.claimSecret) return;
+    const k = acc.name.toLowerCase();
+    if (this.data.vault[k]?.code === acc.claimSecret) return;
+    this.data.vault[k] = { name: acc.name, code: acc.claimSecret, savedAt: Date.now() };
+    if (save) writeSecure(FILE, this.data);
   }
 
   // Clave propia de este PC para Xbox (como el launcher oficial y Modrinth). Va cifrada con las cuentas.
@@ -84,11 +98,16 @@ class Accounts extends EventEmitter {
 
   // forgetMicrosoft: que Microsoft olvide también la cuenta en la ventana de inicio de
   // sesión (para PCs compartidos). Si no, la próxima vez solo hay que elegirla, como en Modrinth.
-  remove(uuid, { forgetMicrosoft = false } = {}) {
+  // forgetRecovery: olvidar también el código del nick no premium en este PC (PCs compartidos).
+  remove(uuid, { forgetMicrosoft = false, forgetRecovery = false } = {}) {
     const acc = this.find(uuid);
     this.data.list = this.data.list.filter((a) => a.uuid !== uuid);
     if (this.data.active === uuid) this.data.active = this.data.list[0]?.uuid || null;
     this.meCache.delete(uuid);
+    if (acc?.type === 'offline') {
+      if (forgetRecovery) delete this.data.vault[acc.name.toLowerCase()];
+      else this.rememberCode(acc, false);
+    }
     this.save();
     if (acc?.type === 'microsoft' && forgetMicrosoft) microsoft.clearWebSession().catch(() => {});
     return this.summary();
@@ -171,10 +190,11 @@ class Accounts extends EventEmitter {
     }
     const mine = this.data.list.find((a) => a.type === 'offline' && a.name.toLowerCase() === nick.toLowerCase());
     if (mine) return { ok: true, reason: 'mine', message: 'Ya tienes este nick guardado en el launcher.' };
+    if (this.data.vault[nick.toLowerCase()]) return { ok: true, reason: 'mine', message: 'Este nick es tuyo en este PC: puedes entrar sin el código.' };
     if (this.backend.configured()) {
       try {
         const r = await this.backend.call('/v1/auth/offline/check', { method: 'POST', json: { name: nick }, timeout: 10000 });
-        if (r?.claimed) return { ok: false, reason: 'claimed', message: 'Otro jugador del launcher ya usa este nick. Si es tuyo, entra con tu código de recuperación.' };
+        if (r?.claimed) return { ok: false, reason: 'claimed', message: 'Este nick ya está registrado. Si es tuyo, escribe tu código de recuperación (lo ves en Ajustes → Cuenta del PC donde lo creaste).' };
       } catch (e) {
         this.log.warn('No se pudo comprobar el nick en el servidor:', e.message);
       }
@@ -191,23 +211,33 @@ class Accounts extends EventEmitter {
     const uuid = offline.offlineUuid(nick);
     const existing = this.find(uuid);
     const acc = existing ? { ...existing, name: nick } : { type: 'offline', uuid, name: nick, addedAt: Date.now() };
-    const code = String(recoveryCode || '').trim();
+    const typed = String(recoveryCode || '').trim();
+    // si no se escribe el código, se usa el guardado en este PC (si lo hay)
+    const saved = this.data.vault[nick.toLowerCase()]?.code || '';
+    const code = typed || acc.claimSecret || saved;
     if (code) acc.claimSecret = code;
     acc.backend = null;
     if (this.backend.configured()) {
       try {
         await this.offlineSession(acc, { forceNew: true });
       } catch (e) {
+        if (e.code === 'EBADCODE' && !typed && code === saved) {
+          // el código guardado ya no vale (p. ej. liberaron el nick y otra persona lo registró)
+          delete this.data.vault[nick.toLowerCase()];
+          writeSecure(FILE, this.data);
+          throw Object.assign(new Error('Este nick ya no está a tu nombre en este PC. Si es tuyo, escribe tu código de recuperación.'), { code: 'EBADCODE' });
+        }
         if (e.code === 'ENICKTAKEN' || e.code === 'EBADCODE') throw e;
         this.log.warn('Servidor no disponible, la cuenta se registrará más tarde:', e.message);
       }
     }
+    this.rememberCode(acc, false);
     this.upsert(acc);
     this.data.active = acc.uuid;
     this.save();
     this.clearSessionFails(acc.uuid);
     this.log.info(`Sesión no premium iniciada: ${nick}`);
-    this.track('auth.login', { uuid: acc.uuid, message: code ? 'Entró con su nick no premium (código de recuperación)' : 'Entró con un nick no premium' });
+    this.track('auth.login', { uuid: acc.uuid, message: typed ? 'Entró con su nick no premium (código de recuperación)' : 'Entró con un nick no premium' });
     return this.summary();
   }
 
@@ -216,6 +246,7 @@ class Accounts extends EventEmitter {
       try {
         const r = await this.backend.call('/v1/auth/offline/login', { method: 'POST', json: { name: acc.name, secret: acc.claimSecret } });
         acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+        this.rememberCode(acc);
         return acc.backend.token;
       } catch (e) {
         if (e.status === 404 && !forceNew) {
@@ -229,9 +260,10 @@ class Accounts extends EventEmitter {
       const r = await this.backend.call('/v1/auth/offline/claim', { method: 'POST', json: { name: acc.name } });
       acc.claimSecret = r.secret;
       acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+      this.rememberCode(acc);
       return acc.backend.token;
     } catch (e) {
-      if (e.status === 409) throw Object.assign(new Error('Otro jugador del launcher ya usa este nick. Si es tuyo, usa tu código de recuperación.'), { code: 'ENICKTAKEN' });
+      if (e.status === 409) throw Object.assign(new Error('Este nick ya está registrado. Si es tuyo, escribe tu código de recuperación (lo ves en Ajustes → Cuenta del PC donde lo creaste).'), { code: 'ENICKTAKEN' });
       if (e.status === 403 && e.code === 'premium') throw Object.assign(new Error(e.message), { code: 'EPREMIUM' });
       throw e;
     }

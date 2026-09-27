@@ -10,6 +10,7 @@ const { configFile } = require('../core/paths');
 // Configuración remota: permite cambiar la URL del servidor sin publicar otra versión.
 const REMOTE_CONFIG = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-Studio-Launcher/main/remote/launcher.json';
 const REMOTE_CACHE = configFile('remote.json');
+const DISCORD_CLIENT_ID = '1553630868638146660'; // aplicación de Discord de Viciont Studios
 
 class Backend {
   // allowOverride: solo en desarrollo se puede usar otro servidor (settings.apiBase).
@@ -52,10 +53,10 @@ class Backend {
 
   news() { return Array.isArray(this.remote?.news) ? this.remote.news.slice(0, 6) : []; }
 
-  // ID de la aplicación de Discord del estudio (se puede cambiar sin publicar otra versión).
+  // ID de la aplicación de Discord de Viciont Studios (se puede cambiar sin publicar otra versión).
   discordClientId() {
     const id = String(this.remote?.discordClientId || '');
-    return /^\d{15,25}$/.test(id) ? id : '';
+    return /^\d{15,25}$/.test(id) ? id : DISCORD_CLIENT_ID;
   }
 
   async call(pathname, { method = 'GET', json, body, headers = {}, token, adminKey, type = 'json', timeout = 20000, signal, ok, retries } = {}) {

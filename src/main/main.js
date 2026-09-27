@@ -92,7 +92,7 @@ function start() {
       instance: presence.instanceId ? instInfo(presence.instanceId) : null,
       playing: presence.playing ? { ...instInfo(presence.playing.id), since: presence.playing.since } : null,
       downloading: presence.downloading ? { ...instInfo(presence.downloading.id), percent: presence.downloading.percent } : null,
-      showPrivate: s.discordShowPrivate,
+      showPrivate: !s.discordHidePrivate,
     }));
   }
 
@@ -383,7 +383,7 @@ function start() {
   // ajustes
   on('settings:get', () => settings.get());
   on('settings:set', (patch) => {
-    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate', 'discordRpc', 'discordShowPrivate'];
+    const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate', 'discordRpc', 'discordHidePrivate'];
     if (isDev) allowed.push('apiBase');
     const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
     if (clean.javaPaths) {
@@ -393,7 +393,7 @@ function start() {
     const before = settings.get().apiBase;
     const out = settings.set(clean);
     if (out.apiBase !== before) instances.refresh().then((l) => send('instances', l));
-    if ('discordRpc' in clean || 'discordShowPrivate' in clean) updatePresence();
+    if ('discordRpc' in clean || 'discordHidePrivate' in clean) updatePresence();
     return out;
   });
   let chosenDataDir = null;
@@ -455,10 +455,10 @@ function start() {
   on('accounts:cancelLogin', () => { accounts.cancelLogin(); return true; });
   // ¿la cuenta activa está conectada con el servidor del estudio?
   on('accounts:serverStatus', async () => {
-    if (!backend.configured()) return { ok: false, message: 'El servidor del estudio todavía no está configurado.' };
+    if (!backend.configured()) return { ok: false, message: 'El servidor de Viciont Studios todavía no está configurado.' };
     try {
       const me = await accounts.me({ fresh: true, force: true });
-      if (!me?.name) return { ok: false, message: 'Inicia sesión con una cuenta para conectarte al servidor del estudio.' };
+      if (!me?.name) return { ok: false, message: 'Inicia sesión con una cuenta para conectarte al servidor de Viciont Studios.' };
       return { ok: true, name: me.name, type: me.type, admin: Boolean(me.admin) };
     } catch (e) {
       return { ok: false, message: e.message };
@@ -474,7 +474,7 @@ function start() {
       await telemetry.flushNow(3000);
     }
     admin.forget(uuid);
-    return accounts.remove(uuid, { forgetMicrosoft: opts?.forgetMicrosoft === true });
+    return accounts.remove(uuid, { forgetMicrosoft: opts?.forgetMicrosoft === true, forgetRecovery: opts?.forgetRecovery === true });
   });
   on('accounts:recoveryCode', (uuid) => accounts.recoveryCode(uuid));
   on('accounts:refresh', async () => {

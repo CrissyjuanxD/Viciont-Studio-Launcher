@@ -203,8 +203,8 @@ const PANES = {
       <div class="settings__section">
         <h3>Discord</h3>
         <label class="switch"><input type="checkbox" id="discord" ${s.discordRpc ? 'checked' : ''}> Mostrar en Discord lo que haces en el launcher</label>
-        <label class="switch"><input type="checkbox" id="discord-private" ${s.discordShowPrivate ? 'checked' : ''} ${s.discordRpc ? '' : 'disabled'}> Mostrar también el nombre de las instancias privadas</label>
-        <p class="field__hint">En tu perfil de Discord saldrá <b>«Jugando a Viciont Studio Launcher»</b>, la instancia que estás viendo o descargando y a cuál estás jugando. Necesitas tener Discord abierto en este PC.${state.info?.discord?.available ? '' : ' <b>El estudio todavía no lo ha activado.</b>'}</p>
+        <label class="switch"><input type="checkbox" id="discord-private" ${s.discordHidePrivate ? '' : 'checked'} ${s.discordRpc ? '' : 'disabled'}> Mostrar también el nombre de las instancias privadas</label>
+        <p class="field__hint">En tu perfil de Discord saldrá <b>«Jugando a Viciont Studio Launcher»</b>, la instancia que estás viendo o descargando y a cuál estás jugando. Necesitas tener Discord abierto en este PC.${state.info?.discord?.available ? '' : ' <b>Viciont Studios todavía no lo ha activado.</b>'}</p>
       </div>
       <div class="settings__section">
         <h3>Actualizaciones del launcher</h3>
@@ -222,7 +222,7 @@ const PANES = {
       save({ discordRpc: e.target.checked }, true);
       pane.querySelector('#discord-private').disabled = !e.target.checked;
     });
-    pane.querySelector('#discord-private').addEventListener('change', (e) => save({ discordShowPrivate: e.target.checked }, true));
+    pane.querySelector('#discord-private').addEventListener('change', (e) => save({ discordHidePrivate: !e.target.checked }, true));
     pane.querySelector('#hwacc').addEventListener('change', (e) => save({ hardwareAcceleration: e.target.checked }));
     pane.querySelector('#autoupd').addEventListener('change', (e) => save({ autoUpdate: e.target.checked }, true));
     const conc = pane.querySelector('#conc');
@@ -323,7 +323,7 @@ const PANES = {
           <button class="btn btn--sm btn--primary" type="button" id="add-acc" style="justify-self:start">${icon('plus')}Añadir otra cuenta</button>
         </div>
         <div class="settings__section">
-          <h3>Servidor del estudio</h3>
+          <h3>Servidor de Viciont Studios</h3>
           <div id="srv-status" class="field__hint"><span class="spin" style="width:12px;height:12px"></span> Comprobando la conexión de tu cuenta…</div>
           <div class="field__row"><button class="btn btn--sm btn--ghost" type="button" id="srv-retry">${icon('refresh')}Volver a comprobar</button></div>
         </div>
@@ -341,19 +341,20 @@ const PANES = {
         </div>` : ''}`;
       hydrateIcons(pane);
       pane.querySelectorAll('[data-use]').forEach((b) => b.addEventListener('click', async () => {
-        state.accounts = await call('accounts:switch', b.dataset.use);
-        app.onAccountChange();
+        try { await app.switchAccount(b.dataset.use); } catch (er) { toastError(er); return; }
         draw();
       }));
       pane.querySelectorAll('[data-out]').forEach((b) => b.addEventListener('click', async () => {
         const acc = list.find((a) => a.uuid === b.dataset.out);
         const ms = acc?.type === 'microsoft';
         const r = await confirm({
-          title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Guarda antes tu código de recuperación si quieres volver a usar el nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
-          extra: ms ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido)</label>' : '',
+          title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Su código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
+          extra: ms
+            ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido)</label>'
+            : '<label class="check"><input type="checkbox" name="forget"> Olvidar también el código de este nick en este PC (recomendado si el PC es compartido)</label>',
         });
-        if (!(ms ? r?.value : r)) return;
-        state.accounts = await call('accounts:logout', b.dataset.out, { forgetMicrosoft: Boolean(ms && r?.inputs?.forget) });
+        if (!r?.value) return;
+        state.accounts = await call('accounts:logout', b.dataset.out, ms ? { forgetMicrosoft: Boolean(r.inputs?.forget) } : { forgetRecovery: Boolean(r.inputs?.forget) });
         app.onAccountChange();
         if (!state.accounts.active) { m.close(); return; }
         draw();
@@ -366,7 +367,7 @@ const PANES = {
         const st = await call('accounts:serverStatus').catch((e) => ({ ok: false, message: e.message }));
         if (!box.isConnected) return;
         box.innerHTML = st.ok
-          ? `<span class="chip">${icon('check')}Conectada</span> Tu cuenta <b>${esc(st.name || '')}</b> está verificada en el servidor del estudio${st.type === 'premium' ? ' (premium)' : ''}.`
+          ? `<span class="chip">${icon('check')}Conectada</span> Tu cuenta <b>${esc(st.name || '')}</b> está verificada en el servidor de Viciont Studios${st.type === 'premium' ? ' (premium)' : ''}.`
           : `<span class="chip chip--warn">${icon('alert')}Sin conexión</span> ${esc(st.message || 'No se pudo conectar.')}`;
         hydrateIcons(box);
       };
@@ -378,7 +379,7 @@ const PANES = {
         const get = async () => { code ??= await call('accounts:recoveryCode', active.uuid); return code; };
         show.addEventListener('click', async () => {
           const c = await get();
-          pane.querySelector('#rec-code').textContent = c || 'Aún no hay código (se crea al conectar con el servidor del estudio).';
+          pane.querySelector('#rec-code').textContent = c || 'Aún no hay código (se crea al conectar con el servidor de Viciont Studios).';
         });
         pane.querySelector('#rec-copy').addEventListener('click', async () => {
           const c = await get();
@@ -416,7 +417,7 @@ const PANES = {
       pane.innerHTML = `
         <div class="settings__section">
           <h3>Modo administrador</h3>
-          <p class="field__hint">Tu cuenta <b>${esc(st.nick)}</b> tiene acceso de administración concedido desde el panel del estudio. Es un acceso en dos pasos: el panel autoriza tu nick y tú escribes tu <b>clave personal</b>. Nadie más puede usarla: queda vinculada a tu cuenta.</p>
+          <p class="field__hint">Tu cuenta <b>${esc(st.nick)}</b> tiene acceso de administración concedido desde el panel de Viciont Studios. Es un acceso en dos pasos: el panel autoriza tu nick y tú escribes tu <b>clave personal</b>. Nadie más puede usarla: queda vinculada a tu cuenta.</p>
           <dl class="kv"><dt>Permisos</dt><dd><span class="field__row" style="gap:6px">${perms}</span></dd><dt>Alcance</dt><dd>${esc(scope)}</dd></dl>
           ${st.unlocked
             ? `<div class="form-ok">${icon('shield')}<span>Modo administrador activo${st.remembered ? ' (clave recordada en este PC, cifrada)' : ''}.</span></div>
@@ -473,7 +474,7 @@ const PANES = {
         <p class="field__hint">Launcher oficial de Viciont Studios, creado por <b>CrissyjuanxD</b>. Inspirado en el funcionamiento de Modrinth App (código abierto).</p>
         <div class="field__row">
           <button class="btn btn--sm" type="button" data-link="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher">${icon('github')}Código en GitHub</button>
-          <button class="btn btn--sm btn--ghost" type="button" data-link="https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/">${icon('globe')}Web del estudio</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-link="https://crissyjuanxd.github.io/Viciont-Studios-Portafolio/">${icon('globe')}Web de Viciont Studios</button>
         </div>
       </div>
       <div class="settings__section">
@@ -484,8 +485,8 @@ const PANES = {
         <h3>Privacidad y seguridad</h3>
         <ul class="plain-list">
           <li><b>Tu contraseña de Microsoft</b> solo se escribe en la página oficial de Microsoft (igual que en Modrinth o el launcher oficial). El launcher nunca la ve ni la guarda.</li>
-          <li><b>Tus sesiones</b> se guardan cifradas con Windows en este PC y nunca se envían al servidor del estudio: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
-          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher avisa al servidor del estudio de lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
+          <li><b>Tus sesiones</b> se guardan cifradas con Windows en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
+          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
           <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
         </ul>
       </div>

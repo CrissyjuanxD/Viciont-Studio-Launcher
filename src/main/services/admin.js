@@ -161,7 +161,7 @@ class Admin extends EventEmitter {
   // Cabeceras de una petición de administración: sesión del jugador + clave personal.
   async headers(acc, key) {
     const token = await this.accounts.session(acc);
-    if (!token) throw err('No se pudo conectar con el servidor del estudio.', 'ENOBACKEND');
+    if (!token) throw err('No se pudo conectar con el servidor de Viciont Studios.', 'ENOBACKEND');
     return { Authorization: `Bearer ${token}`, 'X-Admin-Key': key };
   }
 
