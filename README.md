@@ -44,25 +44,28 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC (cifrado), así que puedes cerrar sesión y volver a entrar sin escribirlo.
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
-  - No premium: la skin se guarda en el servidor del estudio y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
+  - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
 - **Barra lateral** con las instancias que tienes permiso para ver, la casita para volver al inicio, las skins, los ajustes, tu cabeza de la skin (al pasar el cursor dice qué cuenta tienes) y el botón de cerrar sesión.
 - **Un solo botón** que cambia según el estado: **Descargar → Actualizar → Jugar → Jugando**. Mientras descarga se convierte en una tarjeta con la imagen de la instancia, el progreso, los MB/s y el tiempo que queda.
 - Cada instancia tiene su **fondo propio**: imagen, GIF o vídeo.
-- **Descargas rápidas**: varias a la vez, más conexiones para los archivos pequeños y desde los CDN oficiales (Mojang, Modrinth, Forge, NeoForge, Fabric y Quilt, más Cloudflare para los archivos del estudio).
+- **Descargas rápidas**: varias a la vez, más conexiones para los archivos pequeños y desde los CDN oficiales (Mojang, Modrinth, Forge, NeoForge, Fabric y Quilt, más Cloudflare para los archivos de Viciont Studios).
 - **Sin archivos dañados**: todo se descarga a un archivo temporal, se comprueba con SHA-1 y solo entonces se coloca en su sitio. Si cierras el launcher o se va la luz a mitad, la próxima vez se verifica y **continúa donde se quedó**. Al cerrar durante una descarga te pregunta y la pausa de forma segura.
 - **Ajustes** de RAM (con la memoria de tu PC), argumentos de Java, resolución, pantalla completa, Java propio por versión, descargas simultáneas, efectos visuales, carpeta de datos (se puede mover) y qué hacer al abrir el juego.
 - **Opciones por instancia**: RAM, Java, resolución y entrar directo al servidor.
 - **Discord**: en tu perfil se ve «Jugando a Viciont Studios Launcher», la instancia que miras o descargas y a cuál juegas (con el tiempo de partida). Se puede desactivar en **Ajustes → Launcher**, donde también puedes ocultar el nombre de las instancias privadas.
 
-**Para el estudio (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
+**Para Viciont Studios (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
 - Solo los nicks a los que se les da acceso desde el **panel web privado** ven **Ajustes → Administración**, y además tienen que escribir su **clave personal**. Cada uno tiene sus permisos: crear instancias, editar y publicar, eliminar, nicks no premium (y se puede limitar a algunas instancias).
 - Crear instancias **Vanilla, Fabric, Quilt, Forge o NeoForge** en cualquier versión de Minecraft, snapshots incluidas.
-- Añadir **mods, resource packs y shaders de Modrinth**, con sus dependencias añadidas solas, o **archivos propios**: mods, `config`, `options.txt`, `kubejs`, mapas, etc.
-- **Importar** un modpack `.mrpack` o una carpeta de CurseForge, Prism, Modrinth App o `.minecraft`. Detecta la versión y el cargador, y reconoce los mods que existen en Modrinth para no subirlos.
+- **Tu carpeta es la instancia**: cada instancia se sincroniza con una carpeta de tu PC. La cambias desde el launcher, desde el Explorador de Windows o jugando, y al publicar solo se sube lo que cambió (lo nuevo, lo modificado y lo que quitaste). A los jugadores solo se les actualizan esos archivos. Si otro administrador publica antes, **Traer cambios** respeta lo tuyo.
+- Añadir **mods, resource packs y shaders de Modrinth** (se descargan a tu carpeta con sus dependencias) o **archivos propios**: mods, `config`, `options.txt`, `kubejs`, mapas, etc.
+- **Importar** un modpack `.mrpack` o una carpeta de CurseForge, Prism, Modrinth App o `.minecraft`. Detecta la versión y el cargador. Al publicar, los mods que existen en Modrinth se enlazan a su CDN en vez de subirlos.
 - **Icono y fondo** (PNG, JPG, WEBP, GIF o vídeo MP4/WEBM). Las imágenes se optimizan solas.
 - Instancias **públicas** o **privadas** (solo para los nicks que elijas).
 - **Publicar versiones**: solo se suben los archivos nuevos o cambiados. Los jugadores ven **Actualizar** y el texto de novedades.
-- Decidir qué archivos se sobrescriben en cada actualización y cuáles solo la primera vez, como `options.txt`, para no borrar los ajustes del jugador.
+- Cada archivo elige cómo se actualiza: se reemplaza siempre, solo la primera vez o, en `options.txt` y parecidos, **se fusionan los ajustes**: el jugador recibe solo los que cambiaste (por ejemplo, el resource pack activado) y conserva los suyos (teclas, volumen, FOV…). Al publicar eliges qué ajustes se aplican.
+- **Copia de prueba**: instala la instancia como la vería un jugador cualquiera, para probar cada actualización.
+- **Qué ven los jugadores**: se puede quitar el botón «Carpeta» y, con Fabric o Quilt, **ocultar los mods**: la carpeta `mods` se ve vacía y el juego los carga desde otro sitio del PC. Dificulta copiar los mods privados (nada de lo que se instala en un PC se puede proteger al 100%).
 - Gestionar los nicks no premium registrados, por ejemplo liberar el de alguien que perdió su código.
 - **Panel web** para el equipo de confianza (usuario, contraseña y verificación en dos pasos): permisos por nick y **registros** de todo lo que pasa (quién entra, quién está jugando, cambios de skin, descargas, actualizaciones y errores con el final del registro del juego) para ayudar a los jugadores cuando algo falla.
 
@@ -93,23 +96,23 @@ Desde **Configuración de Windows → Aplicaciones → Viciont Studios Launcher*
 
 Las actualizaciones automáticas nunca borran datos.
 
-## Servidor del estudio (Cloudflare Workers + R2 + D1)
+## Servidor
 
-Las instancias, los permisos, los archivos privados, las skins no premium, los registros y los administradores viven en un servidor gratuito de Cloudflare. La guía paso a paso está en **[server/README.md](server/README.md)**. Cuando lo tengas, pon su dirección en [`remote/launcher.json`](remote/launcher.json) y todos los launchers la usarán solos.
+Las instancias, los permisos, los archivos privados, las skins no premium, los registros y los administradores viven en un servidor de Viciont Studios en Cloudflare (Workers + R2 + D1). Su código es privado. Su dirección está en [`remote/launcher.json`](remote/launcher.json): todos los launchers la leen de ahí.
 
 ## Seguridad
 
 - **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión, Microsoft también olvida la cuenta en esa ventana.
-- Las sesiones se guardan **cifradas con Windows (DPAPI)** en tu PC. Las cuentas premium se verifican con Mojang sin enviar su token al servidor del estudio: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
+- Las sesiones se guardan **cifradas con Windows (DPAPI)** en tu PC. Las cuentas premium se verifican con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
 - La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta). La versión instalada lleva los "fusibles" de seguridad de Electron activados: no se puede arrancar como Node, ni con depuradores, ni cargar código que no sea el suyo.
-- **Sin servidores falsos**: en la versión instalada el servidor del estudio sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
+- **Sin servidores falsos**: en la versión instalada el servidor de Viciont Studios sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
 - La administración necesita **dos llaves** (nick autorizado desde el panel + clave personal vinculada a su cuenta) y el servidor comprueba los permisos en cada acción.
 - Todo lo que se descarga se comprueba con **SHA-1**. Rutas peligrosas (`../`), la carpeta interna del launcher, enlaces sin HTTPS, archivos alterados y enlaces caducados se rechazan tanto en el launcher como en el servidor.
 - Java solo se puede elegir entre ejecutables `java.exe`/`javaw.exe` reales, y al subir archivos al servidor solo se aceptan los que eliges tú en el diálogo o arrastras a la ventana.
 
 ### Privacidad
 
-Para poder ayudarte si algo falla, el launcher envía al servidor del estudio un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo del estudio en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
+Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Studios un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo de Viciont Studios en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
 
 ## Desarrollo
 

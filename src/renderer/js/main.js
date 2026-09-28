@@ -159,7 +159,9 @@ function paintRail() {
     const ring = i.status === 'installing'
       ? `<svg class="rail-inst__ring" viewBox="0 0 64 64"><circle class="bgc" cx="32" cy="32" r="30"/><circle class="fgc" cx="32" cy="32" r="30" stroke-dasharray="188.5" stroke-dashoffset="${188.5 * (1 - (p?.percent || 0) / 100)}"/></svg>` : '';
     const badge = i.status === 'update' ? '<span class="rail-inst__badge"></span>' : i.status === 'running' ? '<span class="rail-inst__badge is-running"></span>' : '';
-    return `<button class="rail-inst" type="button" data-inst="${esc(i.id)}" data-tip="${esc(i.name)}" data-tip-sub="${esc(sub)}" aria-label="${esc(i.name)}"><span class="rail-inst__img">${instIcon(i)}</span>${ring}${badge}</button>`;
+    const tip = `${i.name}${i.test ? ' · copia de prueba' : ''}`;
+    const tipSub = i.workspace && i.status === 'installed' ? 'Tu carpeta sincronizada' : sub;
+    return `<button class="rail-inst" type="button" data-inst="${esc(i.id)}" data-tip="${esc(tip)}" data-tip-sub="${esc(tipSub)}" aria-label="${esc(tip)}"><span class="rail-inst__img">${instIcon(i)}</span>${ring}${badge}${i.test ? '<span class="rail-inst__tag">P</span>' : ''}</button>`;
   }).join('');
   paintRailActive();
 }

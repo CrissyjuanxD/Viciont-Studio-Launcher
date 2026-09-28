@@ -1,5 +1,8 @@
 // Administración de instancias (nick autorizado en el panel + clave personal).
 // Los botones se muestran según los permisos del nick; el servidor los vuelve a comprobar siempre.
+//
+// El contenido de una instancia es tu carpeta sincronizada: lo que cambies ahí (desde aquí o desde
+// el Explorador de Windows, o jugando) es lo que se publica. Al publicar solo se sube lo que cambió.
 
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
@@ -14,6 +17,13 @@ const FOLDERS = [
   ['', 'Otros archivos', 'file'],
 ];
 
+const POLICY = {
+  always: { label: 'Se reemplaza en cada actualización', short: 'Reemplazar', icon: 'refresh' },
+  once: { label: 'Solo la primera vez (el jugador puede cambiarlo)', short: 'Solo 1.ª vez', icon: 'lock' },
+  merge: { label: 'Fusionar ajustes: el jugador solo recibe los que cambies tú', short: 'Fusionar', icon: 'layers' },
+};
+const PROTECT_LOADERS = ['fabric', 'quilt'];
+
 const can = (perm) => (state.admin?.perms || []).includes(perm);
 
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
@@ -22,7 +32,7 @@ const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[
 export function render(root, route, app) {
   app.scene.clear();
   app.bg.setMode('dim');
-  if (route.id) return renderEditor(root, route.id, app);
+  if (route.id) return renderEditor(root, route.id, app, route);
   return renderList(root, app);
 }
 
@@ -31,7 +41,7 @@ function renderList(root, app) {
   root.innerHTML = `
     <div class="page">
       <div class="page__head">
-        <div><h1 class="title-lg">Administrar <span class="hl">instancias</span></h1><p class="lead">Crea instancias, añade mods (de Modrinth o tuyos), configs, resource packs, imágenes y vídeos, y decide quién puede verlas.</p></div>
+        <div><h1 class="title-lg">Administrar <span class="hl">instancias</span></h1><p class="lead">Cada instancia es una carpeta en tu PC: cámbiala como quieras (mods, configs, resource packs…), pruébala jugando y publica solo lo que cambió.</p></div>
         <div class="field__row">
           ${can('players') ? `<button class="btn" type="button" data-act="players">${icon('users')}Jugadores</button>` : ''}
           ${can('create') ? `<button class="btn btn--primary" type="button" data-act="new">${icon('plus')}Nueva instancia</button>` : ''}
@@ -48,11 +58,10 @@ function renderList(root, app) {
       const r = await call('admin:list');
       const note = root.querySelector('#adm-note');
       note.innerHTML = r.error ? `<div class="banner-note">${icon('alert')}<span>${esc(r.error)}</span></div>` : '';
-      const drafts = new Map(r.drafts.map((d) => [d.id, d]));
       const cards = r.published.map((p) => {
-        const d = drafts.get(p.id);
-        drafts.delete(p.id);
+        const l = p.local || {};
         const iconUrl = mediaUrl(p.media?.icon);
+        const pending = (l.changes || 0) > 0 || l.dirtyMeta;
         return `<button class="acard" type="button" data-open="${esc(p.id)}">
           <div class="acard__icon">${iconUrl ? `<img src="${iconUrl}" alt="">` : coverMini(p.name)}</div>
           <div style="min-width:0"><div class="acard__name">${esc(p.name)}</div>
@@ -60,15 +69,17 @@ function renderList(root, app) {
               <span class="tag">v${esc(p.version)}</span>
               <span class="tag">${esc(p.mc)} · ${esc(loaderLabel(p.loader))}</span>
               <span class="tag">${p.visibility === 'private' ? `${icon('lock')} privada (${(p.allow || []).length})` : `${icon('globe')} pública`}</span>
-              ${d ? '<span class="chip chip--hot">borrador sin publicar</span>' : ''}
+              ${l.synced ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
+              ${l.behind ? '<span class="chip chip--hot">hay una versión más nueva</span>' : ''}
+              ${pending ? `<span class="chip chip--hot">${l.changes ? `${l.changes} cambio(s)` : 'cambios'} sin publicar</span>` : ''}
             </div></div>
         </button>`;
       });
-      for (const d of drafts.values()) {
+      for (const d of r.drafts) {
         cards.push(`<button class="acard" type="button" data-open="${esc(d.id)}">
           <div class="acard__icon">${coverMini(d.name || d.id)}</div>
           <div style="min-width:0"><div class="acard__name">${esc(d.name || d.id)}</div>
-            <div class="acard__meta"><span class="chip chip--hot">nueva · sin publicar</span><span class="tag">editada ${esc(timeAgo(d.updatedAt))}</span></div></div>
+            <div class="acard__meta"><span class="chip chip--hot">nueva · sin publicar</span>${d.local?.synced ? `<span class="tag">${d.local.changes} archivo(s)</span>` : ''}<span class="tag">editada ${esc(timeAgo(d.updatedAt))}</span></div></div>
         </button>`);
       }
       if (can('create')) cards.push(`<button class="acard acard--new" type="button" data-act="new">${icon('plus')}<span>Crear una instancia nueva</span></button>`);
@@ -150,7 +161,7 @@ function newInstanceModal(app) {
     size: 'lg',
     html: `<div class="modal__body">
       <h2 class="modal__title">Nueva instancia</h2>
-      <p class="modal__text">Empieza desde cero o importa un modpack que ya tengas (CurseForge, Prism, Modrinth…).</p>
+      <p class="modal__text">Se crea una carpeta en tu PC para esta instancia. Empieza desde cero o importa un modpack que ya tengas (CurseForge, Prism, Modrinth…).</p>
       <form id="nf" style="display:grid;gap:16px;margin-top:18px">
         <div class="editor__cols">
           <label class="field"><span class="field__label">Nombre <em>*</em></span><input class="input" name="name" maxlength="60" required placeholder="Viciont Hardcore 4" autofocus></label>
@@ -185,15 +196,14 @@ function newInstanceModal(app) {
     try {
       const id = await create(e.submitter);
       m.close();
-      app.go({ name: 'admin', id });
+      app.go({ name: 'admin', id, tab: 'content' });
     } catch (er) { err(er); }
   });
   m.content.querySelectorAll('[data-import]').forEach((b) => b.addEventListener('click', async () => {
     try {
       const id = await create(b);
       m.close();
-      app.go({ name: 'admin', id, tab: 'content' });
-      setTimeout(() => (b.dataset.import === 'mrpack' ? importMrpack(id, app) : importFolder(id, app)), 400);
+      app.go({ name: 'admin', id, tab: 'content', import: b.dataset.import });
     } catch (er) { err(er); }
   }));
 }
@@ -228,38 +238,42 @@ async function playersModal() {
 }
 
 // ======================= EDITOR =======================
-function renderEditor(root, id, app) {
+function renderEditor(root, id, app, route = {}) {
   let d = null;
-  let tab = 'general';
+  let tab = route.tab || 'general';
   let filter = '';
+  let syncing = false;
   const offs = [];
+  const ws = () => d?.workspace || { synced: false };
 
   const saveMeta = debounce(async (patch) => {
-    try { d = await call('admin:saveMeta', id, patch); paintBar(); } catch (e) { toastError(e); }
+    try { d = { ...(await call('admin:saveMeta', id, patch)), workspace: d.workspace }; paintBar(); } catch (e) { toastError(e); }
   }, 450);
+
+  const setWs = (w) => { if (w) d.workspace = w; };
 
   const draw = () => {
     const iconKey = d.media?.icon;
     const iconSrc = iconKey?.local ? `vsl-media://local/admin/${iconKey.name}` : mediaUrl(iconKey?.key);
+    const w = ws();
     root.innerHTML = `
       <div class="editor">
         <div class="editor__head">
           <button class="btn btn--icon btn--ghost" type="button" data-act="back" data-tip="Volver">${icon('arrowLeft')}</button>
           <div class="acard__icon" style="width:44px;height:44px;border-radius:12px">${iconSrc ? `<img src="${iconSrc}" alt="">` : coverMini(d.meta.name)}</div>
           <div style="min-width:0;flex:1"><div class="title-md">${esc(d.meta.name)}</div>
-            <div class="acard__meta" style="margin-top:4px"><span class="tag mono">${esc(d.id)}</span>${d.baseVersion ? `<span class="tag">publicada v${d.baseVersion}</span>` : '<span class="chip chip--hot">nueva</span>'}<span class="tag">${esc(d.meta.mc)} · ${esc(loaderLabel(d.meta.loader))}</span></div></div>
+            <div class="acard__meta" style="margin-top:4px"><span class="tag mono">${esc(d.id)}</span>${d.baseVersion ? `<span class="tag">publicada v${d.baseVersion}</span>` : '<span class="chip chip--hot">nueva</span>'}<span class="tag">${esc(d.meta.mc)} · ${esc(loaderLabel(d.meta.loader))}</span>${w.synced ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}</div></div>
+          ${w.synced ? `<button class="btn btn--sm btn--ghost" type="button" data-act="play-ws" data-tip="Juega con tu carpeta para probar los cambios">${icon('play')}Jugar</button>` : ''}
+          ${d.baseVersion ? `<button class="btn btn--sm btn--ghost" type="button" data-act="test" data-tip="Instala otra copia como la de un jugador para probar las actualizaciones">${icon('eye')}Copia de prueba</button>` : ''}
           <button class="btn btn--sm btn--ghost" type="button" data-act="more">${icon('more')}</button>
         </div>
         <div class="editor__tabs">
           ${[['general', 'General', 'edit'], ['look', 'Apariencia', 'image'], ['content', 'Contenido', 'package'], ['access', 'Permisos', 'lock']]
-            .map(([k, l, ic]) => `<button class="editor__tab ${tab === k ? 'is-active' : ''}" type="button" data-tab="${k}">${icon(ic)}${l}${k === 'content' ? `<span class="count">${d.files.length}</span>` : ''}</button>`).join('')}
+            .map(([k, l, ic]) => `<button class="editor__tab ${tab === k ? 'is-active' : ''}" type="button" data-tab="${k}">${icon(ic)}${l}${k === 'content' ? '<span class="count"></span>' : ''}</button>`).join('')}
         </div>
         <div class="editor__body" id="ed-body"></div>
         <div class="pubbar"><div class="pubbar__info" id="ed-info"></div>
-          <div class="field__row">
-            ${d.baseVersion && can('edit') ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
-            ${can(d.baseVersion ? 'edit' : 'create') ? `<button class="btn btn--primary" type="button" data-act="publish">${icon('upload')}Publicar versión ${(d.baseVersion || 0) + 1}</button>` : '<span class="field__hint">No tienes permiso para publicar cambios en esta instancia.</span>'}
-          </div></div>
+          <div class="field__row" id="ed-actions"></div></div>
       </div>`;
     hydrateIcons(root);
     drawTab();
@@ -269,16 +283,29 @@ function renderEditor(root, id, app) {
   const paintBar = () => {
     const info = root.querySelector('#ed-info');
     if (!info) return;
-    const s = d.stats || {};
-    info.innerHTML = `<span><b>${s.files ?? d.files.length}</b> archivos</span><span><b>${bytes(s.size || 0)}</b></span><span><b>${s.mods ?? 0}</b> mods</span>${s.pendingUpload ? `<span><b>${s.pendingUpload}</b> por subir</span>` : ''}<span>${d.meta.visibility === 'private' ? `${icon('lock')} privada · ${d.meta.allow.length} nick(s)` : `${icon('globe')} pública`}</span>`;
+    const w = ws();
+    const files = w.files || [];
+    const ch = w.changes || { total: 0 };
+    const pending = ch.total > 0 || d.dirtyMeta;
+    info.innerHTML = `${w.synced ? `<span><b>${files.length}</b> archivos</span><span><b>${bytes(files.reduce((a, f) => a + (f.size || 0), 0))}</b></span><span><b>${files.filter((f) => f.path.startsWith('mods/')).length}</b> mods</span>` : '<span>Sin sincronizar en este PC</span>'}
+      ${pending ? `<span class="chip chip--hot">${ch.total ? `${ch.total} cambio(s) de archivos` : ''}${ch.total && d.dirtyMeta ? ' + ' : ''}${d.dirtyMeta && d.baseVersion ? 'textos o permisos' : ''}${!d.baseVersion ? 'sin publicar' : ''}</span>` : `<span>${icon('check')} Todo publicado</span>`}
+      <span>${d.meta.visibility === 'private' ? `${icon('lock')} privada · ${d.meta.allow.length} nick(s)` : `${icon('globe')} pública`}</span>`;
+    const acts = root.querySelector('#ed-actions');
+    const canPub = can(d.baseVersion ? 'edit' : 'create');
+    acts.innerHTML = `
+      ${d.baseVersion && can('edit') && d.dirtyMeta ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
+      ${canPub ? `<button class="btn btn--primary" type="button" data-act="publish" ${w.synced && !w.behind ? '' : 'disabled'} data-tip="${w.synced ? (w.behind ? 'Primero trae la versión más nueva' : 'Sube solo lo que cambió') : 'Primero sincroniza la instancia con tu PC'}">${icon('upload')}Publicar versión ${(d.baseVersion || 0) + 1}</button>` : '<span class="field__hint">No tienes permiso para publicar cambios en esta instancia.</span>'}`;
     hydrateIcons(info);
+    hydrateIcons(acts);
     const c = root.querySelector('[data-tab="content"] .count');
-    if (c) c.textContent = d.files.length;
+    if (c) c.textContent = w.synced ? (ch.total ? `${ch.total}` : files.length) : '';
+    c?.classList.toggle('count--hot', Boolean(ch.total));
   };
 
   const drawTab = () => {
     root.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === tab));
     const body = root.querySelector('#ed-body');
+    if (!body) return;
     if (tab === 'general') tabGeneral(body);
     if (tab === 'look') tabLook(body);
     if (tab === 'content') tabContent(body);
@@ -323,7 +350,7 @@ function renderEditor(root, id, app) {
       const v = vp.value();
       if (v.loader.type !== 'vanilla' && !v.loader.version) { toast('Esa combinación no está disponible.', { kind: 'error' }); return; }
       try {
-        d = await busy(e.currentTarget, () => call('admin:saveMeta', id, v));
+        d = { ...(await busy(e.currentTarget, () => call('admin:saveMeta', id, v))), workspace: d.workspace };
         toast(`Versión: Minecraft ${v.mc} · ${loaderLabel(v.loader)}`, { kind: 'success' });
         draw();
       } catch (er) { toastError(er); }
@@ -355,7 +382,7 @@ function renderEditor(root, id, app) {
       </div>`;
     body.querySelectorAll('[data-pick]').forEach((el) => el.addEventListener('click', () => pickMedia(el.dataset.pick)));
     body.querySelectorAll('[data-clear]').forEach((el) => el.addEventListener('click', async () => {
-      d = await call('admin:clearMedia', id, el.dataset.clear);
+      d = { ...(await call('admin:clearMedia', id, el.dataset.clear)), workspace: d.workspace };
       draw();
     }));
   };
@@ -370,29 +397,57 @@ function renderEditor(root, id, app) {
       const t = toast('Preparando imagen…', { timeout: 0 });
       try {
         const out = await processMedia(file, kind);
-        d = await call('admin:setMedia', id, kind, out);
+        d = { ...(await call('admin:setMedia', id, kind, out)), workspace: d.workspace };
         draw();
       } catch (e) { toastError(e); } finally { t(); }
     });
     inp.click();
   };
 
-  // ---------- Contenido ----------
+  // ---------- Contenido (tu carpeta sincronizada) ----------
   const tabContent = (body) => {
+    const w = ws();
+    if (!w.synced) {
+      const p = state.progress.get(id);
+      body.innerHTML = `
+        <div class="panel sync-panel">
+          <div class="sync-panel__icon">${icon('refresh')}</div>
+          <div>
+            <h3 class="title-md">Sincroniza esta instancia con tu PC</h3>
+            <p class="field__hint" style="margin-top:6px">Se ${d.baseVersion ? `descarga la versión publicada (v${d.baseVersion})` : 'crea la carpeta'} en tu PC. Desde ahí la cambias como quieras —desde aquí, desde el Explorador o jugando— y al publicar solo se sube lo que cambió. A los jugadores solo se les actualizan esos archivos.</p>
+            ${d.legacy ? `<p class="inst__warn" style="margin-top:10px">${icon('alert')}Tienes cambios de una versión anterior del launcher: al sincronizar se pasarán a tu carpeta.</p>` : ''}
+            ${w.error ? `<div class="form-error" style="margin-top:10px">${esc(w.error)}</div>` : ''}
+            <div class="field__row" style="margin-top:14px"><button class="btn btn--primary" type="button" data-act="sync" ${syncing ? 'disabled' : ''}>${syncing ? '<span class="spin"></span>' : icon('download')}${syncing ? esc(p?.label || 'Sincronizando…') : 'Sincronizar con mi PC'}</button></div>
+          </div>
+        </div>`;
+      return;
+    }
+    const ch = w.changes || { total: 0 };
     body.innerHTML = `
+      ${w.behind ? `<div class="banner-note">${icon('alert')}<span>Otro administrador publicó la versión ${w.remoteVersion}. Tráela antes de publicar: lo que hayas cambiado tú se respeta.</span><button class="btn btn--sm btn--primary" type="button" data-act="pull">${icon('download')}Traer cambios</button></div>` : ''}
       <div class="files" id="files">
         <div class="files__toolbar">
           <button class="btn btn--sm btn--primary" type="button" data-act="modrinth">${icon('search')}Buscar en Modrinth</button>
-          <button class="btn btn--sm" type="button" data-act="upload">${icon('upload')}Subir archivos</button>
-          <button class="btn btn--sm" type="button" data-act="upload-folder">${icon('folder')}Subir carpeta</button>
-          <button class="btn btn--sm btn--ghost" type="button" data-act="import-folder">${icon('download')}Importar instancia</button>
-          <button class="btn btn--sm btn--ghost" type="button" data-act="import-mrpack">${icon('package')}Importar .mrpack</button>
+          <button class="btn btn--sm" type="button" data-act="upload">${icon('upload')}Añadir archivos</button>
+          <button class="btn btn--sm" type="button" data-act="upload-folder">${icon('folder')}Añadir carpeta</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-act="open-ws" data-tip="Abre tu carpeta en el Explorador: lo que cambies ahí también cuenta">${icon('external')}Abrir carpeta</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-act="rescan" data-tip="Vuelve a mirar qué cambió en la carpeta">${icon('refresh')}Comprobar</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-act="content-more">${icon('more')}</button>
           <input class="input" id="ffilter" placeholder="Filtrar…" value="${esc(filter)}" style="margin-left:auto">
         </div>
+        <div class="files__summary">${ch.total
+          ? `${icon('alert')}<span><b>${ch.total}</b> cambio(s) sin publicar:</span>${ch.added ? `<span class="state state--added">${ch.added} nuevo(s)</span>` : ''}${ch.modified ? `<span class="state state--modified">${ch.modified} modificado(s)</span>` : ''}${ch.removed ? `<span class="state state--removed">${ch.removed} se quitará(n)</span>` : ''}`
+          : `${icon('check')}<span>Tu carpeta está igual que la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}.</span>`}</div>
         <div id="flist"></div>
       </div>
-      <p class="field__hint">Arrastra archivos aquí para añadirlos. <b>Sobrescribir</b> = se reemplaza en cada actualización. <b>Solo la primera vez</b> = el jugador puede cambiarlo (ideal para <code>options.txt</code>). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
+      <div class="panel" style="margin-top:14px">
+        <div class="panel__title"><span>Qué se publica de tu carpeta</span></div>
+        <div class="chips-list" id="incl"></div>
+        ${w.candidates?.length ? `<p class="field__hint" style="margin-top:12px">Estas carpetas están en tu PC pero <b>no</b> se publican (por ejemplo mundos o mapas de minimapas). Añádelas solo si quieres repartirlas:</p><div class="chips-list" id="cand" style="margin-top:8px"></div>` : ''}
+      </div>
+      <p class="field__hint">Arrastra archivos aquí para añadirlos. <b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que cambies tú y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
     drawFiles(body);
+    drawIncl(body);
     body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
     const zone = body.querySelector('#files');
     zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drop-hint'); });
@@ -408,21 +463,42 @@ function renderEditor(root, id, app) {
     });
   };
 
+  const drawIncl = (body) => {
+    const w = ws();
+    const box = body.querySelector('#incl');
+    if (box) {
+      const present = new Set((w.files || []).map((f) => f.path.split('/')[0].toLowerCase()));
+      const shown = (w.include || []).filter((n) => present.has(n.toLowerCase()));
+      box.innerHTML = shown.map((n) => `<span class="chip">${icon('folder')}${esc(n)}<button class="chip__x" type="button" data-excl="${esc(n)}" data-tip="No publicar">${icon('close')}</button></span>`).join('') || '<span class="field__hint">Aún no hay nada en tu carpeta.</span>';
+    }
+    const cand = body.querySelector('#cand');
+    if (cand) {
+      cand.innerHTML = w.candidates.map((c) => `<button class="chip chip--add" type="button" data-incl="${esc(c.name)}" data-tip="Publicar también">${icon(c.dir ? 'folder' : 'file')}${esc(c.name)} <small>${c.dir ? `${c.count} archivos · ` : ''}${bytes(c.size)}</small>${icon('plus')}</button>`).join('');
+    }
+    hydrateIcons(body);
+  };
+
   const addPaths = async (paths, target) => {
     const t = toast(`Añadiendo ${paths.length} elemento(s)…`, { timeout: 0 });
     try {
       const r = await call('admin:addPaths', id, paths, target);
-      d = r.draft;
-      toast(`${r.added} archivo(s) añadidos.`, { kind: 'success' });
-      draw();
+      setWs(r.workspace);
+      toast(`${r.added} archivo(s) añadidos a tu carpeta.`, { kind: 'success' });
+      drawTab();
+      paintBar();
     } catch (er) { toastError(er); } finally { t(); }
   };
 
   const drawFiles = (body) => {
     const list = body.querySelector('#flist');
-    const files = d.files.filter((f) => !filter || f.path.toLowerCase().includes(filter) || (f.title || '').toLowerCase().includes(filter));
-    if (!d.files.length) {
-      list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Instancia vacía</h3><p>Busca mods en Modrinth, sube tus archivos o importa una instancia que ya tengas.</p></div>`;
+    if (!list) return;
+    const w = ws();
+    const all = w.files || [];
+    const match = (f) => !filter || f.path.toLowerCase().includes(filter) || (f.title || '').toLowerCase().includes(filter);
+    const files = all.filter(match);
+    const removed = (w.removed || []).filter(match);
+    if (!all.length && !removed.length) {
+      list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Carpeta vacía</h3><p>Busca mods en Modrinth, añade tus archivos, importa una instancia o abre la carpeta y pon ahí lo que quieras.</p></div>`;
       hydrateIcons(list);
       return;
     }
@@ -430,30 +506,44 @@ function renderEditor(root, id, app) {
       const items = files.filter((f) => (dir ? f.path.startsWith(`${dir}/`) : !FOLDERS.some(([x]) => x && f.path.startsWith(`${x}/`))));
       return { dir, label, ic, items };
     }).filter((g) => g.items.length);
+    const stateBadge = (s) => (s === 'added' ? '<span class="state state--added">Nuevo</span>' : s === 'modified' ? '<span class="state state--modified">Modificado</span>' : '');
     list.innerHTML = groups.map((g) => `
       <div class="files__group">
         <div class="files__ghead">${icon(g.ic)}${esc(g.label)} <span class="muted">${g.items.length} · ${bytes(g.items.reduce((a, f) => a + (f.size || 0), 0))}</span></div>
         ${g.items.sort((a, b) => a.path.localeCompare(b.path)).map((f) => {
           const name = f.title || f.path.split('/').pop();
-          const src = f.source === 'modrinth' ? '<span class="src src--modrinth">Modrinth</span>' : f.source === 'url' ? '<span class="src src--url">Enlace</span>' : f.local ? '<span class="src src--pending">Por subir</span>' : '<span class="src src--upload">Propio</span>';
-          return `<div class="frow">
+          const src = f.source === 'modrinth' ? '<span class="src src--modrinth">Modrinth</span>' : '<span class="src src--upload">Propio</span>';
+          const keys = w.merge?.[f.path];
+          return `<div class="frow ${f.state !== 'same' ? `frow--${f.state}` : ''}">
             <div class="frow__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon(g.ic)}</div>
-            <div class="frow__name"><b>${esc(name)}</b><small>${esc(f.path)}${f.versionName ? ` · ${esc(f.versionName)}` : ''}</small></div>
-            ${src}
+            <div class="frow__name"><b>${esc(name)}</b><small>${esc(f.path)}${f.versionName ? ` · ${esc(f.versionName)}` : ''}${keys ? ` · <a href="#" data-keys="${esc(f.path)}">${keys.length} ajuste(s) cambiado(s)</a>` : ''}</small></div>
+            <span class="frow__badges">${stateBadge(f.state)}${src}</span>
             <span class="frow__size">${bytes(f.size || 0)}</span>
             <span class="field__row" style="gap:2px">
-              <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${f.policy === 'once' ? 'Solo la primera vez (el jugador puede cambiarlo)' : 'Se sobrescribe en cada actualización'}">${icon(f.policy === 'once' ? 'lock' : 'refresh')}</button>
-              <button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar">${icon('trash')}</button>
+              <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${esc(POLICY[f.policy]?.label || '')}">${icon(POLICY[f.policy]?.icon || 'refresh')}</button>
+              ${f.state !== 'same' && d.baseVersion ? `<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Quitar (no estaba publicado)' : 'Deshacer: dejarlo como está publicado'}">${icon('history')}</button>` : ''}
+              <button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>
             </span>
           </div>`;
         }).join('')}
-      </div>`).join('');
+      </div>`).join('') + (removed.length ? `
+      <div class="files__group">
+        <div class="files__ghead">${icon('trash')}Se quitarán al publicar <span class="muted">${removed.length}</span></div>
+        ${removed.map((f) => `<div class="frow frow--removed">
+          <div class="frow__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon('file')}</div>
+          <div class="frow__name"><b>${esc(f.title || f.path.split('/').pop())}</b><small>${esc(f.path)}</small></div>
+          <span class="frow__badges"><span class="state state--removed">Se quitará</span></span>
+          <span class="frow__size">${bytes(f.size || 0)}</span>
+          <span class="field__row" style="gap:2px"><button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="Recuperar">${icon('history')}</button></span>
+        </div>`).join('')}
+      </div>` : '');
     hydrateIcons(list);
   };
 
   // ---------- Permisos ----------
   const tabAccess = (body) => {
     const mt = d.meta;
+    const protectable = PROTECT_LOADERS.includes(mt.loader?.type);
     body.innerHTML = `
       <div class="panel">
         <div class="panel__title"><span>¿Quién puede ver esta instancia?</span></div>
@@ -463,7 +553,16 @@ function renderEditor(root, id, app) {
       <div class="panel" id="allow-box">
         <div class="panel__title"><span>Nicks con permiso</span><span class="muted mono" style="font-size:.8rem" id="allow-count"></span></div>
         <div class="chips-input" id="allow"><input placeholder="Escribe un nick y pulsa Enter (o pega varios separados por comas)"></div>
-        <p class="field__hint" style="margin-top:10px">Vale para cuentas premium y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro.</p>
+        <p class="field__hint" style="margin-top:10px">Vale para cuentas premium y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
+      </div>
+      <div class="panel">
+        <div class="panel__title"><span>Qué ven los jugadores de sus archivos</span></div>
+        <label class="switch"><input type="checkbox" id="show-folder" ${mt.showFolder !== false ? 'checked' : ''}> Mostrar el botón «Carpeta» de la instancia</label>
+        <p class="field__hint" style="margin:6px 0 12px">Si lo quitas, los jugadores no ven el botón para abrir la carpeta de la instancia (siguen pudiendo abrir sus mundos y capturas).</p>
+        <label class="switch ${protectable ? '' : 'is-disabled'}"><input type="checkbox" id="protect-mods" ${mt.protect?.includes('mods') ? 'checked' : ''} ${protectable ? '' : 'disabled'}> Ocultar los mods a los jugadores</label>
+        <p class="field__hint" style="margin-top:6px">${protectable
+          ? 'La carpeta <b>mods</b> se verá vacía: el launcher guarda los mods en otro sitio del PC y el juego los carga igual. Dificulta que se copien los mods privados, aunque nada de lo que se instala en el PC de alguien se puede proteger al 100%. Los administradores y tu carpeta sincronizada lo ven todo.'
+          : `Solo funciona con <b>Fabric</b> o <b>Quilt</b> (esta instancia usa ${esc(loaderLabel(mt.loader))}).`}</p>
       </div>`;
     const drawVis = () => {
       body.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === d.meta.visibility));
@@ -516,75 +615,186 @@ function renderEditor(root, id, app) {
       if (c) setAllow(d.meta.allow.filter((n) => n !== c.dataset.nick));
       else input.focus();
     });
+    body.querySelector('#show-folder').addEventListener('change', (e) => {
+      d.meta.showFolder = e.target.checked;
+      saveMeta({ showFolder: e.target.checked });
+    });
+    body.querySelector('#protect-mods').addEventListener('change', (e) => {
+      d.meta.protect = e.target.checked ? ['mods'] : [];
+      saveMeta({ protect: d.meta.protect });
+    });
     drawVis();
     drawAllow();
   };
 
   // ---------- Acciones ----------
+  const reload = async () => {
+    d = await call('admin:open', id);
+    draw();
+  };
+
+  const doSync = async () => {
+    syncing = true;
+    drawTab();
+    const off = on(`progress:${id}`, () => { if (tab === 'content') { const b = root.querySelector('[data-act="sync"]'); const p = state.progress.get(id); if (b && p) b.lastChild.textContent = `${p.label || 'Descargando…'}${p.percent != null ? ` ${Math.floor(p.percent)}%` : ''}`; } });
+    try {
+      setWs(await call('admin:sync', id));
+      d.legacy = false;
+      toast('Instancia sincronizada: ya puedes cambiarla en tu carpeta.', { kind: 'success' });
+    } catch (er) { toastError(er); } finally {
+      off();
+      syncing = false;
+      draw();
+    }
+  };
+
   root.addEventListener('click', async (e) => {
     const tb = e.target.closest('[data-tab]');
     if (tb) { tab = tb.dataset.tab; drawTab(); return; }
+    const keysLink = e.target.closest('[data-keys]');
+    if (keysLink) { e.preventDefault(); keysModal(keysLink.dataset.keys, ws().merge?.[keysLink.dataset.keys] || []); return; }
     const pol = e.target.closest('[data-policy]');
     if (pol) {
-      const f = d.files.find((x) => x.path === pol.dataset.policy);
-      d = await call('admin:updateFile', id, f.path, { policy: f.policy === 'once' ? 'always' : 'once' }).catch((er) => { toastError(er); return d; });
-      drawFiles(root);
+      const f = (ws().files || []).find((x) => x.path === pol.dataset.policy);
+      const opts = ['always', 'once', ...(/\.(txt|properties|cfg|ini)$/i.test(f.path) ? ['merge'] : [])];
+      menu(pol, opts.map((p) => ({ label: POLICY[p].label, icon: p === f.policy ? 'check' : POLICY[p].icon, onClick: async () => {
+        try { setWs((await call('admin:setPolicy', id, f.path, p)).workspace); drawTab(); paintBar(); } catch (er) { toastError(er); }
+      } })));
       return;
     }
     const del = e.target.closest('[data-del]');
     if (del) {
-      d = await call('admin:removeFiles', id, [del.dataset.del]).catch((er) => { toastError(er); return d; });
-      drawFiles(root);
-      paintBar();
+      try { setWs((await call('admin:removeFiles', id, [del.dataset.del])).workspace); drawTab(); paintBar(); } catch (er) { toastError(er); }
+      return;
+    }
+    const res = e.target.closest('[data-restore]');
+    if (res) {
+      try { setWs((await busy(res, () => call('admin:restoreFiles', id, [res.dataset.restore]))).workspace); drawTab(); paintBar(); } catch (er) { toastError(er); }
+      return;
+    }
+    const inc = e.target.closest('[data-incl], [data-excl]');
+    if (inc) {
+      const name = inc.dataset.incl || inc.dataset.excl;
+      if (inc.dataset.excl) {
+        const ok = await confirm({ title: `¿Dejar de publicar «${name}»?`, text: 'Sus archivos se quitarán a los jugadores en la próxima versión. En tu PC no se borra nada.', ok: 'No publicar', icon: 'eyeOff' });
+        if (!ok) return;
+      }
+      try { setWs((await call('admin:setInclude', id, name, Boolean(inc.dataset.incl))).workspace); drawTab(); paintBar(); } catch (er) { toastError(er); }
       return;
     }
     const b = e.target.closest('[data-act]');
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'back') app.go({ name: 'admin' });
-    if (act === 'modrinth') modrinthModal(id, d, (nd) => { d = nd; drawFiles(root); paintBar(); });
+    if (act === 'sync') doSync();
+    if (act === 'pull') {
+      try {
+        const r = await busy(b, () => call('admin:pull', id));
+        setWs(r.workspace);
+        await reload();
+        toast(r.conflicts.length ? `Versión traída. Se mantuvieron tus cambios en: ${r.conflicts.slice(0, 4).join(', ')}${r.conflicts.length > 4 ? '…' : ''}` : 'Versión traída: tu carpeta está al día.', { kind: 'success', timeout: 8000 });
+      } catch (er) { toastError(er); }
+    }
+    if (act === 'rescan') {
+      try { setWs(await busy(b, () => call('admin:workspace', id))); drawTab(); paintBar(); } catch (er) { toastError(er); }
+    }
+    if (act === 'open-ws') call('admin:openFolder', id).catch(toastError);
+    if (act === 'play-ws') {
+      try { await busy(b, () => call('instances:play', id), 'Iniciando…'); toast('Juego iniciado con tu carpeta. Cuando cierres el juego, pulsa Comprobar para ver los cambios.', { kind: 'success', timeout: 7000 }); } catch (er) { toastError(er); }
+    }
+    if (act === 'test') {
+      try {
+        const tid = await busy(b, () => call('admin:testCopy', id));
+        toast('Instalando la copia de prueba: así la verá un jugador.', { kind: 'success' });
+        await app.refreshInstances(true);
+        app.go({ name: 'instance', id: tid });
+      } catch (er) { toastError(er); }
+    }
+    if (act === 'modrinth') modrinthModal(id, d, (w) => { setWs(w); drawTab(); paintBar(); });
     if (act === 'upload' || act === 'upload-folder') {
       const target = await askFolder(act === 'upload' ? 'mods' : '');
       if (target == null) return;
       try {
         const r = await call('admin:addFiles', id, target, act === 'upload-folder');
-        if (r) { d = r.draft; toast(`${r.added} archivo(s) añadidos.`, { kind: 'success' }); draw(); }
+        if (r) { setWs(r.workspace); toast(`${r.added} archivo(s) añadidos a tu carpeta.`, { kind: 'success' }); drawTab(); paintBar(); }
       } catch (er) { toastError(er); }
     }
-    if (act === 'import-folder') importFolder(id, app, (nd) => { d = nd; draw(); });
-    if (act === 'import-mrpack') importMrpack(id, app, (nd) => { d = nd; draw(); });
-    if (act === 'publish') publish(id, d, app);
+    if (act === 'content-more') {
+      menu(b, [
+        { label: 'Importar instancia (carpeta)', icon: 'download', onClick: () => importFolder(id, (w) => { setWs(w); reload(); }) },
+        { label: 'Importar modpack .mrpack', icon: 'package', onClick: () => importMrpack(id, (w) => { setWs(w); reload(); }) },
+        ...(d.baseVersion && ws().changes?.total ? ['-', { label: 'Deshacer todos los cambios', icon: 'history', danger: true, onClick: async () => {
+          const ok = await confirm({ title: '¿Deshacer todos los cambios?', text: 'Tu carpeta volverá a estar como la versión publicada. Los archivos nuevos van a la Papelera.', ok: 'Deshacer', danger: true, icon: 'history' });
+          if (!ok) return;
+          const w = ws();
+          const paths = [...w.files.filter((f) => f.state !== 'same').map((f) => f.path), ...w.removed.map((f) => f.path)];
+          try { setWs((await call('admin:restoreFiles', id, paths)).workspace); drawTab(); paintBar(); } catch (er) { toastError(er); }
+        } }] : []),
+      ]);
+    }
+    if (act === 'publish') publish(id, d, async () => { await reload(); });
     if (act === 'meta-only') {
       try {
         await busy(b, () => call('admin:updateMeta', id, d.meta));
         toast('Textos y permisos publicados.', { kind: 'success' });
+        await reload();
       } catch (er) { toastError(er); }
     }
     if (act === 'more') {
       menu(b, [
-        { label: 'Descartar borrador', icon: 'refresh', onClick: async () => {
-          const ok = await confirm({ title: '¿Descartar los cambios?', text: d.baseVersion ? 'Se perderán los cambios sin publicar. La instancia publicada no cambia.' : 'Esta instancia nunca se publicó: se borrará el borrador.', ok: 'Descartar', danger: true, icon: 'trash' });
+        ...(d.dirtyMeta && d.baseVersion ? [{ label: 'Descartar cambios de textos e imágenes', icon: 'refresh', onClick: async () => {
+          const ok = await confirm({ title: '¿Descartar los cambios de textos?', text: 'Se recuperan los textos, imágenes y permisos publicados. Tu carpeta no se toca.', ok: 'Descartar', danger: true, icon: 'trash' });
+          if (!ok) return;
+          await call('admin:discard', id);
+          await reload();
+        } }] : []),
+        ...(ws().synced ? [{ label: 'Abrir mi carpeta', icon: 'folder', onClick: () => call('admin:openFolder', id).catch(toastError) }] : []),
+        ...(ws().synced && d.baseVersion ? [{ label: 'Dejar de sincronizar', icon: 'eyeOff', onClick: async () => {
+          const ok = await confirm({ title: '¿Dejar de sincronizar?', text: 'La carpeta se queda como una instancia normal: se actualizará sola como la de cualquier jugador y perderá lo que no hayas publicado.', ok: 'Dejar de sincronizar', danger: true, icon: 'eyeOff' });
+          if (!ok) return;
+          try { await call('admin:unsync', id); await reload(); } catch (er) { toastError(er); }
+        } }] : []),
+        ...(d.baseVersion && can('delete') ? ['-', { label: 'Eliminar del servidor', icon: 'trash', danger: true, onClick: async () => {
+          const ok = await confirm({ title: `¿Eliminar ${d.meta.name}?`, text: 'Desaparecerá para todos los jugadores y se borrarán sus archivos del servidor. Tu carpeta se queda en este PC. No se puede deshacer.', ok: 'Eliminar', danger: true, icon: 'trash' });
+          if (!ok) return;
+          try { await call('admin:remove', id); toast('Instancia eliminada del servidor.', { kind: 'success' }); app.go({ name: 'admin' }); } catch (er) { toastError(er); }
+        } }] : []),
+        ...(!d.baseVersion ? [{ label: 'Descartar instancia nueva', icon: 'trash', danger: true, onClick: async () => {
+          const ok = await confirm({ title: '¿Descartar esta instancia?', text: 'Nunca se publicó: se borra su borrador. Tu carpeta se queda en este PC (puedes desinstalarla desde su página).', ok: 'Descartar', danger: true, icon: 'trash' });
           if (!ok) return;
           await call('admin:discard', id);
           app.go({ name: 'admin' });
-        } },
-        ...(d.baseVersion && can('delete') ? ['-', { label: 'Eliminar del servidor', icon: 'trash', danger: true, onClick: async () => {
-          const ok = await confirm({ title: `¿Eliminar ${d.meta.name}?`, text: 'Desaparecerá para todos los jugadores y se borrarán sus archivos del servidor. No se puede deshacer.', ok: 'Eliminar', danger: true, icon: 'trash' });
-          if (!ok) return;
-          try { await call('admin:remove', id); toast('Instancia eliminada.', { kind: 'success' }); app.go({ name: 'admin' }); } catch (er) { toastError(er); }
         } }] : []),
       ]);
     }
   });
 
-  offs.push(on('admin-progress', () => {}));
-  call('admin:open', id).then((r) => { d = r; draw(); }).catch((e) => {
+  call('admin:open', id).then((r) => {
+    d = r;
+    draw();
+    // venía de "Importar" al crear la instancia
+    const imp = route.import;
+    if (imp === 'mrpack') importMrpack(id, (w) => { setWs(w); reload(); });
+    if (imp === 'folder') importFolder(id, (w) => { setWs(w); reload(); });
+  }).catch((e) => {
     root.innerHTML = `<div class="page"><div class="empty">${icon('alert')}<h3>No se pudo abrir</h3><p>${esc(e.message)}</p><button class="btn" type="button" data-back>Volver</button></div></div>`;
     hydrateIcons(root);
     root.querySelector('[data-back]').addEventListener('click', () => app.go({ name: 'admin' }));
   });
   root.innerHTML = '<div class="page"><div class="empty"><span class="spin"></span><p>Abriendo…</p></div></div>';
   return () => offs.forEach((f) => f());
+}
+
+// Ajustes cambiados en un archivo que se fusiona (options.txt…).
+function keysModal(file, keys) {
+  const m = modal({
+    size: 'lg',
+    html: `<div class="modal__body"><h2 class="modal__title">Ajustes cambiados en ${esc(file)}</h2>
+      <p class="modal__text">Al publicar eliges cuáles se aplican a los jugadores. Los que no se apliquen se quedan solo en tu PC.</p>
+      <div class="keys-list" style="margin-top:14px">${keys.map((k) => `<div class="keys-row"><b class="mono">${esc(k.key)}</b><span class="mono muted">${esc(k.from ?? '(nuevo)')}</span>${icon('arrowRight')}<span class="mono">${esc(k.to)}</span>${k.personal ? '<span class="tag">personal</span>' : ''}</div>`).join('')}</div>
+      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
+  });
+  m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
 // Pide la carpeta de destino dentro de la instancia.
@@ -613,15 +823,16 @@ function askFolder(def = 'mods') {
   });
 }
 
-// Búsqueda en Modrinth
+// Búsqueda en Modrinth (se descarga directamente a tu carpeta)
 function modrinthModal(id, draft, onChange) {
   let type = 'mod';
   let offset = 0;
   let total = 0;
+  let files = draft.workspace?.files || [];
   const m = modal({
     size: 'lg',
     html: `<div class="modal__body"><h2 class="modal__title">Buscar en <span class="grad-text">Modrinth</span></h2>
-      <p class="modal__text">Solo se muestran los compatibles con Minecraft ${esc(draft.meta.mc)}${draft.meta.loader.type !== 'vanilla' ? ` y ${esc(LOADER_NAMES[draft.meta.loader.type])}` : ''}. Las dependencias necesarias se añaden solas.</p>
+      <p class="modal__text">Solo se muestran los compatibles con Minecraft ${esc(draft.meta.mc)}${draft.meta.loader.type !== 'vanilla' ? ` y ${esc(LOADER_NAMES[draft.meta.loader.type])}` : ''}. Se descargan a tu carpeta con sus dependencias.</p>
       <div class="field__row" style="margin-top:16px">
         <div class="segmented" id="mt"><button type="button" data-t="mod" class="is-active">Mods</button><button type="button" data-t="resourcepack">Resource packs</button><button type="button" data-t="shader">Shaders</button></div>
         <input class="input" id="mq" placeholder="Buscar… (sodium, jei, create…)" autofocus>
@@ -630,7 +841,7 @@ function modrinthModal(id, draft, onChange) {
       <div class="field__row" style="justify-content:center;margin-top:10px"><button class="btn btn--sm btn--ghost" type="button" id="more" hidden>Cargar más</button></div></div>`,
   });
   const box = m.content.querySelector('#mr');
-  const inDraft = (pid) => draft.files.some((f) => f.project === pid);
+  const inFolder = (pid) => files.some((f) => f.project === pid);
   const search = async (append = false) => {
     if (!append) { offset = 0; box.innerHTML = '<span class="spin"></span>'; }
     try {
@@ -639,7 +850,7 @@ function modrinthModal(id, draft, onChange) {
       const html = r.hits.map((h) => `<div class="mr-item">
         ${h.icon ? `<img src="${esc(h.icon)}" alt="" loading="lazy">` : '<div class="ph"></div>'}
         <div style="min-width:0"><b>${esc(h.title)}</b><small>${esc(h.description)}</small><small class="mono">por ${esc(h.author)} · ${Number(h.downloads).toLocaleString('es-ES')} descargas${h.clientSide === 'unsupported' ? ' · solo servidor' : ''}</small></div>
-        <button class="btn btn--sm ${inDraft(h.id) ? '' : 'btn--primary'}" type="button" data-add="${esc(h.id)}" ${inDraft(h.id) ? 'disabled' : ''}>${inDraft(h.id) ? 'Añadido' : 'Añadir'}</button>
+        <button class="btn btn--sm ${inFolder(h.id) ? '' : 'btn--primary'}" type="button" data-add="${esc(h.id)}" ${inFolder(h.id) ? 'disabled' : ''}>${inFolder(h.id) ? 'Añadido' : 'Añadir'}</button>
       </div>`).join('');
       if (append) box.insertAdjacentHTML('beforeend', html); else box.innerHTML = html || '<p class="field__hint">Sin resultados.</p>';
       offset += r.hits.length;
@@ -658,8 +869,8 @@ function modrinthModal(id, draft, onChange) {
     if (!b) return;
     try {
       const r = await busy(b, () => call('admin:addModrinth', id, { projectId: b.dataset.add }));
-      draft = r.draft;
-      onChange(r.draft);
+      files = r.workspace?.files || files;
+      onChange(r.workspace);
       b.textContent = 'Añadido';
       b.classList.remove('btn--primary');
       b.disabled = true;
@@ -670,7 +881,7 @@ function modrinthModal(id, draft, onChange) {
   search();
 }
 
-async function importFolder(id, app, onDone) {
+async function importFolder(id, onDone) {
   let scan;
   try { scan = await call('admin:scanFolder'); } catch (e) { toastError(e); return; }
   if (!scan) return;
@@ -678,7 +889,7 @@ async function importFolder(id, app, onDone) {
   const m = modal({
     size: 'lg',
     html: `<div class="modal__body"><h2 class="modal__title">Importar instancia</h2>
-      <p class="modal__text">${det ? `Detectado: <b>${esc(det.source)}</b> · Minecraft ${esc(det.mc || '?')} · ${esc(loaderLabel(det.loader))}` : 'Elige qué quieres incluir.'} Los mods que existan en Modrinth se enlazarán a su CDN; el resto se subirá a tu servidor.</p>
+      <p class="modal__text">${det ? `Detectado: <b>${esc(det.source)}</b> · Minecraft ${esc(det.mc || '?')} · ${esc(loaderLabel(det.loader))}` : 'Elige qué quieres incluir.'} Se copia a tu carpeta; al publicar, los mods que existan en Modrinth se enlazan a su CDN y el resto se sube a tu servidor.</p>
       <div class="check-list" style="margin-top:14px">${scan.entries.map((e, i) => `<label><span class="check"><input type="checkbox" data-i="${i}" ${e.suggested ? 'checked' : ''}> ${icon(e.dir ? 'folder' : 'file')} ${esc(e.name)}</span><small>${e.dir ? `${e.count} archivos · ` : ''}${bytes(e.size)}</small></label>`).join('')}</div>
       ${det?.mc ? `<label class="check" style="margin-top:12px"><input type="checkbox" id="use-ver" checked> Usar la versión detectada (${esc(det.mc)} · ${esc(loaderLabel(det.loader))})</label>` : ''}
       <p class="field__hint" style="margin-top:8px">Los mundos (<code>saves</code>) pueden pesar mucho: inclúyelos solo si quieres repartir un mapa.</p>
@@ -698,10 +909,10 @@ async function importFolder(id, app, onDone) {
       btn.disabled = true;
       if (det?.mc && m.content.querySelector('#use-ver')?.checked) await call('admin:saveMeta', id, { mc: det.mc, loader: det.loader });
       const r = await call('admin:importFolder', id, scan.root, include);
-      toast(`Importados ${r.total} archivos: ${r.fromModrinth} desde Modrinth y ${r.uploads} para subir.`, { kind: 'success', timeout: 7000 });
+      toast(`Importados ${r.total} archivos a tu carpeta.`, { kind: 'success', timeout: 7000 });
       m.setLocked(false);
       m.close();
-      onDone ? onDone(r.draft) : app.go({ name: 'admin', id });
+      onDone?.(r.workspace);
     } catch (er) {
       toastError(er);
       m.setLocked(false);
@@ -711,25 +922,43 @@ async function importFolder(id, app, onDone) {
   });
 }
 
-async function importMrpack(id, app, onDone) {
+async function importMrpack(id, onDone) {
   const t = toast('Importando modpack…', { timeout: 0 });
   try {
     const r = await call('admin:importMrpack', id);
     if (!r) return;
-    toast(`Modpack importado: ${r.total} archivos.`, { kind: 'success' });
-    onDone ? onDone(r.draft) : app.go({ name: 'admin', id });
+    toast(`Modpack importado: ${r.total} archivos en tu carpeta.`, { kind: 'success' });
+    onDone?.(r.workspace);
   } catch (e) { toastError(e); } finally { t(); }
 }
 
-async function publish(id, d, app) {
-  const pending = d.stats?.pendingUpload || 0;
-  const ok = await confirm({
-    title: `¿Publicar versión ${(d.baseVersion || 0) + 1}?`,
-    html: `${esc(d.meta.name)} · ${d.files.length} archivos${pending ? ` · <b>${pending}</b> por subir` : ''}.<br>Los jugadores verán el botón <b>Actualizar</b>. ${d.meta.visibility === 'private' ? `Solo para ${d.meta.allow.length} nick(s).` : 'Visible para todos.'}`,
-    ok: 'Publicar', icon: 'upload',
-  });
-  if (!ok) return;
+async function publish(id, d, onDone) {
+  const w = d.workspace || {};
+  const ch = w.changes || { total: 0 };
+  const merge = Object.entries(w.merge || {});
+  if (!ch.total && !d.dirtyMeta && d.baseVersion) { toast('No hay nada nuevo que publicar.', { kind: 'info' }); return; }
   const m = modal({
+    size: 'lg',
+    html: `<div class="modal__body"><h2 class="modal__title">¿Publicar la versión ${(d.baseVersion || 0) + 1}?</h2>
+      <p class="modal__text">${esc(d.meta.name)} · ${d.meta.visibility === 'private' ? `solo para ${d.meta.allow.length} nick(s)` : 'visible para todos'}. Los jugadores verán el botón <b>Actualizar</b> y solo se les descargará lo que cambió.</p>
+      <div class="files__summary" style="margin-top:14px">${ch.total ? `${ch.added ? `<span class="state state--added">${ch.added} nuevo(s)</span>` : ''}${ch.modified ? `<span class="state state--modified">${ch.modified} modificado(s)</span>` : ''}${ch.removed ? `<span class="state state--removed">${ch.removed} se quitará(n)</span>` : ''}` : '<span>Sin cambios de archivos (solo textos, imágenes o permisos).</span>'}</div>
+      ${merge.map(([file, keys]) => `<div class="panel" style="margin-top:14px"><div class="panel__title"><span>Ajustes de ${esc(file)} que reciben los jugadores</span></div>
+        <p class="field__hint" style="margin-bottom:10px">Cada jugador conserva el resto de sus ajustes. Los desmarcados se quedan solo en tu PC (los «personales» vienen desmarcados).</p>
+        <div class="keys-list">${keys.map((k) => `<label class="keys-row"><input type="checkbox" data-file="${esc(file)}" data-key="${esc(k.key)}" ${k.personal ? '' : 'checked'}><b class="mono">${esc(k.key)}</b><span class="mono muted">${esc(k.from ?? '(nuevo)')}</span>${icon('arrowRight')}<span class="mono">${esc(k.to)}</span>${k.personal ? '<span class="tag">personal</span>' : ''}</label>`).join('')}</div></div>`).join('')}
+      <div class="modal__actions"><button class="btn btn--ghost" type="button" data-cancel>Cancelar</button><button class="btn btn--primary" type="button" data-go>${icon('upload')}Publicar</button></div></div>`,
+  });
+  hydrateIcons(m.content);
+  const go = await new Promise((resolve) => {
+    m.content.querySelector('[data-cancel]').addEventListener('click', () => { m.close(); resolve(null); });
+    m.content.querySelector('[data-go]').addEventListener('click', () => {
+      const mergeKeys = {};
+      for (const [file] of merge) mergeKeys[file] = [...m.content.querySelectorAll(`[data-file="${CSS.escape(file)}"]`)].filter((c) => c.checked).map((c) => c.dataset.key);
+      m.close();
+      resolve({ mergeKeys });
+    });
+  });
+  if (!go) return;
+  const pm = modal({
     size: 'sm', locked: true,
     html: `<div class="modal__body"><h2 class="modal__title">Publicando…</h2>
       <div class="progress-line" style="margin-top:18px"><div class="dl__phase" id="pp">Preparando…</div><div class="dl__bar is-indeterminate" id="pb"><span></span></div><div class="dl__stats" id="ps"></div></div>
@@ -737,22 +966,22 @@ async function publish(id, d, app) {
   });
   const off = on('admin-progress', (p) => {
     if (p.id !== `publish:${id}`) return;
-    m.content.querySelector('#pp').textContent = p.label;
-    const bar = m.content.querySelector('#pb');
+    pm.content.querySelector('#pp').textContent = p.label;
+    const bar = pm.content.querySelector('#pb');
     const pct = p.total > 0 ? Math.min(100, (p.done / p.total) * 100) : null;
     bar.classList.toggle('is-indeterminate', pct == null);
     bar.style.setProperty('--p', `${pct || 0}%`);
-    m.content.querySelector('#ps').innerHTML = p.total > 0 ? `<span><b>${bytes(p.done)}</b> de ${bytes(p.total)}</span><span><b>${speed(p.speed)}</b></span>${p.eta != null ? `<span>quedan <b>${duration(p.eta)}</b></span>` : ''}` : '';
+    pm.content.querySelector('#ps').innerHTML = p.total > 0 ? `<span><b>${bytes(p.done)}</b> de ${bytes(p.total)}</span><span><b>${speed(p.speed)}</b></span>${p.eta != null ? `<span>quedan <b>${duration(p.eta)}</b></span>` : ''}` : '';
   });
   try {
-    const inst = await call('admin:publish', id);
-    m.setLocked(false);
-    m.close();
-    toast(`¡${inst?.name || 'Instancia'} publicada! (versión ${inst?.version})`, { kind: 'success', timeout: 6000 });
-    app.go({ name: 'admin' });
+    const inst = await call('admin:publish', id, go);
+    pm.setLocked(false);
+    pm.close();
+    toast(`¡${inst?.name || 'Instancia'} publicada! (versión ${inst?.version}). Pruébala con «Copia de prueba».`, { kind: 'success', timeout: 7000 });
+    await onDone?.();
   } catch (e) {
-    m.setLocked(false);
-    m.close();
+    pm.setLocked(false);
+    pm.close();
     toastError(e, 'No se pudo publicar: ');
   } finally { off(); }
 }

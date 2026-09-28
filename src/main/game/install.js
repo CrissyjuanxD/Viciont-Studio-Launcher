@@ -35,6 +35,10 @@ async function extractNatives(list, dir) {
  * ctx:  { dirs, signal, repair, javaCustom(major) → ruta|undefined, gameDir }
  */
 async function planGame(spec, ctx) {
+  // Solo en pruebas automáticas (código fuente, nunca en la versión instalada): sin descargar el juego.
+  if (process.env.VSL_TEST_NOGAME === '1' && !require('electron').app.isPackaged) {
+    return { launchId: spec.mc, mc: spec.mc, items: [], posts: [], dispose: () => {} };
+  }
   const { dirs, signal, repair } = ctx;
   const mc = spec.mc;
   const loader = spec.loader?.type && spec.loader.type !== 'vanilla' ? spec.loader : null;

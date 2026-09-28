@@ -27,7 +27,7 @@ function parseServer(address) {
 
 /**
  * plan: resultado de planGame
- * opts: { dirs, account, gameDir, memory, jvmArgs, resolution, server, launcherVersion }
+ * opts: { dirs, account, gameDir, memory, jvmArgs, extraJvm, resolution, server, launcherVersion }
  */
 function buildCommand(plan, opts) {
   const r = plan.resolved;
@@ -97,6 +97,7 @@ function buildCommand(plan, opts) {
   const max = Math.max(min, Number(memory.max) || 2048);
   jvm.push(`-Xms${min}M`, `-Xmx${max}M`);
   jvm.push(...splitArgs(opts.jvmArgs));
+  jvm.push(...(opts.extraJvm || [])); // p. ej. la carpeta de mods ocultos (-Dfabric.addMods)
   if (r.arguments?.jvm) {
     jvm.push(...expand(r.arguments.jvm));
   } else {

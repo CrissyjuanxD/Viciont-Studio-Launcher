@@ -62,6 +62,8 @@ export function render(root, _route, app) {
               <span class="tag">${esc(i.mc || '')}</span>
               <span class="tag">${esc(loaderLabel(i.loader))}</span>
               ${i.visibility === 'private' ? `<span class="tag">${icon('lock')} privada</span>` : ''}
+              ${i.test ? `<span class="tag tag--test">${icon('eye')} copia de prueba</span>` : ''}
+              ${i.workspace ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
             </div>
             ${i.summary ? `<p class="icard__summary">${esc(i.summary)}</p>` : ''}
           </div>

@@ -22,6 +22,10 @@ export function statusChip(i) {
 
 const PLAY_LABEL = { install: 'Descargar', update: 'Actualizar', play: 'Jugar' };
 
+// ¿Puede abrir la carpeta? (Viciont Studios puede ocultarla a los jugadores)
+const folderAllowed = (inst) => inst.showFolder !== false || inst.canManage || Boolean(inst.workspace);
+const adminOn = () => Boolean(state.admin?.unlocked);
+
 function actionHtml(inst) {
   const p = state.progress.get(inst.id);
   switch (inst.status) {
@@ -98,9 +102,10 @@ export function render(root, route, app) {
     root.innerHTML = `
       <section class="inst">
         <div class="inst__top">
-          <div class="inst__chips">${statusChip(inst)}</div>
+          <div class="inst__chips">${statusChip(inst)}${inst.workspace ? `<span class="chip chip--sync">${icon('refresh')}Sincronizada con tu carpeta</span>` : ''}${inst.test ? `<span class="chip chip--test">${icon('eye')}Copia de prueba</span>` : ''}</div>
           <div class="field__row">
-            ${inst.installed ? `<button class="btn btn--sm btn--ghost" type="button" data-act="folder">${icon('folder')}Carpeta</button>` : ''}
+            ${inst.workspace && adminOn() ? `<button class="btn btn--sm btn--ghost" type="button" data-act="edit">${icon('edit')}Editar</button>` : ''}
+            ${inst.installed && folderAllowed(inst) ? `<button class="btn btn--sm btn--ghost" type="button" data-act="folder">${icon('folder')}Carpeta</button>` : ''}
             <button class="btn btn--sm btn--icon btn--ghost" type="button" data-act="more" data-tip="Más opciones" aria-label="Más opciones">${icon('more')}</button>
           </div>
         </div>
@@ -120,10 +125,15 @@ export function render(root, route, app) {
           </div>
           ${inst.summary ? `<p class="inst__summary">${esc(inst.summary)}</p>` : ''}
           ${inst.description ? `<div class="inst__desc rich" id="inst-desc">${richText(inst.description)}</div><button class="inst__more" type="button" id="inst-more">Leer más</button>` : ''}
+          ${inst.test ? `<p class="inst__note">${icon('eye')}Así la ve un jugador: se descarga y se actualiza igual que la de cualquiera${inst.protect?.includes('mods') ? ' (con los mods ocultos)' : ''}. Publica una versión nueva y pulsa Actualizar para probarla.</p>` : ''}
+          ${inst.workspace?.behind ? `<p class="inst__warn">${icon('alert')}Otro administrador publicó una versión más nueva. Tráela desde Administración antes de seguir cambiando cosas.</p>` : ''}
+          ${inst.workspace && !inst.workspace.behind ? `<p class="inst__note">${icon('refresh')}Esta es tu carpeta de trabajo: lo que cambies aquí (mods, configs, options.txt…) es lo que se publica desde Administración.</p>` : ''}
           ${inst.interrupted ? `<p class="inst__warn">${icon('alert')}La descarga anterior no terminó. Pulsa el botón para continuar donde se quedó.</p>` : ''}
           ${!inst.available && inst.installed ? `<p class="inst__warn">${icon('alert')}Esta instancia ya no está en el servidor (o no hay conexión). Puedes seguir jugando la versión instalada.</p>` : ''}
           ${rec && assigned && rec > assigned ? `<p class="inst__warn">${icon('cpu')}Viciont Studios recomienda ${Math.round(rec / 1024 * 10) / 10} GB de RAM y tienes ${Math.round(assigned / 1024 * 10) / 10} GB asignados. Cámbialo en Opciones.</p>` : ''}
           ${inst.status === 'update' && inst.changelog ? `<div class="panel"><div class="panel__title">Novedades de la versión ${esc(inst.version)}</div><div class="rich">${richText(inst.changelog)}</div></div>` : ''}
+        </div>
+        <div class="inst__bottom">
           <div class="inst__actions" id="inst-action">${actionHtml(inst)}</div>
           <div class="inst__meta">
             <span>Versión <b>${esc(inst.version ?? '—')}</b>${inst.installed && inst.installedVersion !== inst.version ? ` (tienes la ${esc(inst.installedVersion)})` : ''}</span>
@@ -195,6 +205,8 @@ export function render(root, route, app) {
       if (ok) call('instances:stop', id);
     } else if (act === 'folder') {
       call('app:openFolder', 'instance', id).catch(toastError);
+    } else if (act === 'edit') {
+      app.go({ name: 'admin', id: inst.baseId || id, tab: 'content' });
     } else if (act === 'more') {
       openMenu(b, inst, app);
     }
@@ -207,13 +219,14 @@ export function render(root, route, app) {
 function openMenu(anchor, inst, app) {
   const items = [];
   if (inst.installed) {
-    items.push({ label: 'Abrir carpeta de la instancia', icon: 'folder', onClick: () => call('app:openFolder', 'instance', inst.id).catch(toastError) });
+    if (folderAllowed(inst)) items.push({ label: 'Abrir carpeta de la instancia', icon: 'folder', onClick: () => call('app:openFolder', 'instance', inst.id).catch(toastError) });
+    else if (inst.test && adminOn()) items.push({ label: 'Abrir carpeta (solo administradores)', icon: 'folder', onClick: () => call('app:openFolder', 'instance', inst.id).catch(toastError) });
     items.push({ label: 'Carpeta de mundos', icon: 'world', onClick: () => call('app:openFolder', 'instance-sub', { id: inst.id, sub: 'saves' }).catch(toastError) });
     items.push({ label: 'Capturas de pantalla', icon: 'image', onClick: () => call('app:openFolder', 'instance-sub', { id: inst.id, sub: 'screenshots' }).catch(toastError) });
     items.push('-');
     items.push({ label: 'Opciones de la instancia', icon: 'gear', onClick: () => optionsModal(inst) });
     if (inst.status === 'running') items.push({ label: 'Ver registro del juego', icon: 'terminal', onClick: () => logModal(inst) });
-    if (inst.available && inst.status !== 'running' && inst.status !== 'installing') {
+    if (inst.available && !inst.workspace && inst.status !== 'running' && inst.status !== 'installing') {
       items.push({ label: 'Reparar (verificar archivos)', icon: 'wrench', onClick: () => call('instances:repair', inst.id).catch(toastError) });
     }
     items.push('-');
@@ -226,8 +239,10 @@ function openMenu(anchor, inst, app) {
 
 async function uninstall(inst, app) {
   const r = await confirm({
-    title: `¿Desinstalar ${inst.name}?`,
-    text: 'Se borrarán sus archivos de este PC. Podrás volver a descargarla cuando quieras.',
+    title: `¿Desinstalar ${inst.name}${inst.test ? ' (copia de prueba)' : ''}?`,
+    text: inst.workspace
+      ? 'Es tu carpeta sincronizada: se borrará de este PC con todo lo que no hayas publicado. Lo publicado sigue en el servidor.'
+      : 'Se borrarán sus archivos de este PC. Podrás volver a descargarla cuando quieras.',
     danger: true, ok: 'Desinstalar', icon: 'trash',
     extra: '<label class="check"><input type="checkbox" name="keepSaves" checked> Guardar una copia de mis mundos</label>',
   });
@@ -326,5 +341,5 @@ export function crashModal(data) {
   });
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
   m.content.querySelector('[data-copy]').addEventListener('click', () => call('app:copy', (data.log || []).join('\n')).then(() => toast('Registro copiado.', { kind: 'success' })));
-  m.content.querySelector('[data-crash]').addEventListener('click', () => call('app:openFolder', 'instance-sub', { id: data.id, sub: 'crash-reports' }).catch(() => call('app:openFolder', 'instance', data.id)));
+  m.content.querySelector('[data-crash]').addEventListener('click', () => call('app:openFolder', 'instance-sub', { id: data.id, sub: 'crash-reports' }).catch(toastError));
 }

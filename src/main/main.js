@@ -13,7 +13,7 @@ const { setUserAgent, getJson, cached } = require('./util/net');
 const { dirSize, rmrf, exists, readJson } = require('./util/fsx');
 const { Backend } = require('./services/backend');
 const { Accounts } = require('./services/accounts');
-const { Instances } = require('./services/instances');
+const { Instances, baseId, isTestId } = require('./services/instances');
 const { Skins } = require('./services/skins');
 const { Media } = require('./services/media');
 const { Admin } = require('./services/admin');
@@ -64,17 +64,18 @@ function start() {
   const instances = new Instances({ dirs, settings, backend, accounts, log, configRoot: paths.CONFIG_ROOT });
   const skins = new Skins({ getDirs, accounts, backend, log });
   const media = new Media({ getDirs, backend, log });
-  const admin = new Admin({ getDirs, backend, accounts, log });
+  const admin = new Admin({ getDirs, backend, accounts, instances, log });
   const updater = new Updater({ log, settings });
   const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
   const track = (type, info) => { try { telemetry.track(type, info); } catch { /* nunca rompe nada */ } };
-  const instName = (id) => instances.remote.get(id)?.name || id;
+  // las copias de prueba ("<id>~test") se registran con la instancia original
+  const instName = (id) => `${instances.remote.get(baseId(id))?.name || baseId(id)}${isTestId(id) ? ' (copia de prueba)' : ''}`;
 
   // ---------- Discord (qué haces en el launcher) ----------
   const discord = new DiscordPresence({ log, version: VERSION });
   const presence = { view: 'home', instanceId: null, playing: null, downloading: null };
   const instInfo = (id) => {
-    const r = instances.remote.get(id) || {};
+    const r = instances.remote.get(baseId(id)) || {};
     const icon = typeof r.media?.icon === 'string' ? r.media.icon : null;
     return {
       id, name: r.name || id, mc: r.mc || '', loader: r.loader || null, loaderName: LOADERS[r.loader?.type]?.name || '',
@@ -233,23 +234,23 @@ function start() {
     if (presence.downloading?.id === d.id) { presence.downloading = null; updatePresence(); }
     if (d.kind === 'launch') return;
     const name = instName(d.id);
-    const v = instances.remote.get(d.id)?.version;
-    if (d.ok) track('instance.installed', { instance: d.id, message: `${d.kind === 'repair' ? 'Reparó' : 'Descargó / actualizó'} ${name}${v ? ` (versión ${v})` : ''}`, data: { version: v || null } });
-    else if (d.cancelled) track('instance.paused', { instance: d.id, message: `Pausó la descarga de ${name}` });
-    else track('instance.error', { level: 'error', instance: d.id, message: `Error al descargar ${name}: ${d.error}`, data: { kind: d.kind } });
+    const v = instances.remote.get(baseId(d.id))?.version;
+    if (d.ok) track('instance.installed', { instance: baseId(d.id), message: `${d.kind === 'repair' ? 'Reparó' : 'Descargó / actualizó'} ${name}${v ? ` (versión ${v})` : ''}`, data: { version: v || null } });
+    else if (d.cancelled) track('instance.paused', { instance: baseId(d.id), message: `Pausó la descarga de ${name}` });
+    else track('instance.error', { level: 'error', instance: baseId(d.id), message: `Error al descargar ${name}: ${d.error}`, data: { kind: d.kind } });
   });
   instances.on('game-start', (d) => {
     send('game', { ...d, state: 'running' });
     presence.playing = { id: d.id, since: Date.now() };
     updatePresence();
     const uuid = telemetry.gameStarted(d.id);
-    const r = instances.remote.get(d.id);
-    track('game.start', { uuid, instance: d.id, message: `Empezó a jugar ${instName(d.id)}`, data: { mc: r?.mc || null, loader: r?.loader?.type || null } });
+    const r = instances.remote.get(baseId(d.id));
+    track('game.start', { uuid, instance: baseId(d.id), message: `Empezó a jugar ${instName(d.id)}`, data: { mc: r?.mc || null, loader: r?.loader?.type || null } });
     const mode = settings.get().onLaunch;
     if (!win) return;
     if (mode === 'minimize') setTimeout(() => win?.minimize(), 1200);
     if (mode === 'hide') {
-      const name = instances.remote.get(d.id)?.name || d.id;
+      const name = instName(d.id);
       ensureTray(`Jugando a ${name}`);
       // cerrar la ventana libera casi toda la memoria del launcher mientras juegas
       setTimeout(() => {
@@ -266,9 +267,9 @@ function start() {
     if (presence.playing?.id === d.id) { presence.playing = null; updatePresence(); }
     const mins = Math.round((d.duration || 0) / 60000);
     if (d.crashed) {
-      track('game.crash', { uuid, level: 'error', instance: d.id, message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min`, data: { code: d.code, minutes: mins, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) } });
+      track('game.crash', { uuid, level: 'error', instance: baseId(d.id), message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min`, data: { code: d.code, minutes: mins, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) } });
     } else {
-      track('game.exit', { uuid, instance: d.id, message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
+      track('game.exit', { uuid, instance: baseId(d.id), message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
     }
     const s = settings.get();
     if (instances.anyRunning()) { send('game', { ...d, state: 'exit' }); return; }
@@ -320,6 +321,11 @@ function start() {
     return shell.openExternal(url);
   });
   on('app:openFolder', async (kind, id) => {
+    if (kind === 'instance' && id) {
+      // Viciont Studios puede ocultar la carpeta de una instancia a los jugadores
+      const d = await instances.get(id);
+      if (d && d.showFolder === false && !d.canManage && !d.workspace && !(d.test && admin.unlocked())) throw new Error('Esta instancia no permite abrir su carpeta.');
+    }
     const map = { data: dataRoot, logs: log.DIR, instance: id ? instances.gameDir(id) : null, config: paths.CONFIG_ROOT };
     const target = kind === 'instance-sub' ? path.join(instances.gameDir(id.id), id.sub.replace(/[^a-z_-]/gi, '')) : map[kind];
     if (!target) throw new Error('Carpeta no válida');
@@ -518,14 +524,14 @@ function start() {
     try {
       return await instances.play(id, { version: VERSION });
     } catch (e) {
-      if (e?.name !== 'AbortError') track('game.launch_error', { level: 'error', instance: id, message: `No se pudo iniciar ${instName(id)}: ${e.message}` });
+      if (e?.name !== 'AbortError') track('game.launch_error', { level: 'error', instance: baseId(id), message: `No se pudo iniciar ${instName(id)}: ${e.message}` });
       throw e;
     }
   });
   on('instances:stop', (id) => { instances.stop(id); return true; });
   on('instances:uninstall', async (id, opts) => {
     const r = await instances.uninstall(id, opts);
-    track('instance.uninstall', { instance: id, message: `Desinstaló ${instName(id)}${opts?.keepSaves ? ' (guardó sus mundos)' : ''}` });
+    track('instance.uninstall', { instance: baseId(id), message: `Desinstaló ${instName(id)}${opts?.keepSaves ? ' (guardó sus mundos)' : ''}` });
     return r;
   });
   on('instances:setOptions', (id, patch) => instances.setOptions(id, patch));
@@ -560,8 +566,37 @@ function start() {
     return admin.addLocal(id, ok, targetDir);
   }));
   on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
-  on('admin:updateFile', needAdmin((id, p, patch) => admin.updateFile(id, p, patch)));
+  on('admin:setPolicy', needAdmin((id, p, policy) => admin.setPolicy(id, p, policy)));
   on('admin:removeFiles', needAdmin((id, list) => admin.removeFiles(id, list)));
+  on('admin:restoreFiles', needAdmin((id, list) => admin.restoreFiles(id, list)));
+  on('admin:setInclude', needAdmin((id, name, onOff) => admin.setInclude(id, name, onOff === true)));
+  on('admin:workspace', needAdmin((id) => admin.wsStatus(id)));
+  on('admin:sync', needAdmin(async (id) => {
+    const r = await admin.sync(id);
+    send('instances', await instances.list());
+    return r;
+  }));
+  on('admin:pull', needAdmin(async (id) => {
+    const r = await admin.pull(id);
+    send('instances', await instances.list());
+    return r;
+  }));
+  on('admin:unsync', needAdmin(async (id) => {
+    await admin.unsync(id);
+    send('instances', await instances.list());
+    return true;
+  }));
+  on('admin:testCopy', needAdmin(async (id) => {
+    const tid = await admin.testCopy(id);
+    send('instances', await instances.list());
+    return tid;
+  }));
+  on('admin:openFolder', needAdmin(async (id, sub) => {
+    const dir = instances.gameDir(id);
+    const target = sub ? path.join(dir, String(sub).replace(/[^a-z0-9_.-]/gi, '')) : dir;
+    await fsp.mkdir(target, { recursive: true });
+    return shell.openPath(target);
+  }));
   on('admin:setMedia', needAdmin((id, kind, data) => admin.setMedia(id, kind, data)));
   on('admin:clearMedia', needAdmin((id, kind) => admin.clearMedia(id, kind)));
   on('admin:scanFolder', needAdmin(async () => {
@@ -579,8 +614,8 @@ function start() {
     if (r.canceled || !r.filePaths[0]) return null;
     return admin.importMrpack(id, r.filePaths[0]);
   }));
-  on('admin:publish', needAdmin(async (id) => {
-    const inst = await admin.publish(id);
+  on('admin:publish', needAdmin(async (id, opts) => {
+    const inst = await admin.publish(id, { mergeKeys: opts?.mergeKeys && typeof opts.mergeKeys === 'object' ? opts.mergeKeys : {} });
     instances.refresh().then((l) => send('instances', l));
     return inst;
   }));
