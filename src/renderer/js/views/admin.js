@@ -39,7 +39,7 @@ export function render(root, route, app) {
 // ======================= LISTA =======================
 function renderList(root, app) {
   root.innerHTML = `
-    <div class="page">
+    <div class="page page--admin">
       <div class="page__head">
         <div><h1 class="title-lg">Administrar <span class="hl">instancias</span></h1><p class="lead">Cada instancia es una carpeta en tu PC: cámbiala como quieras (mods, configs, resource packs…), pruébala jugando y publica solo lo que cambió.</p></div>
         <div class="field__row">
@@ -49,8 +49,18 @@ function renderList(root, app) {
       </div>
       <div id="adm-note"></div>
       <div class="admin-grid" id="adm-grid"><div class="empty"><span class="spin"></span><p>Cargando…</p></div></div>
+      <div id="adm-storage"></div>
     </div>`;
   hydrateIcons(root);
+
+  // Círculo con lo que ocupa el servidor (abajo a la derecha). No aparece si el servidor es anterior a la API v4.
+  let storage = null;
+  const loadStorage = async (fresh = false) => {
+    try { storage = await call('admin:storage', { fresh }); } catch { storage = null; }
+    const box = root.querySelector('#adm-storage');
+    if (box) { box.innerHTML = storage ? storageDock(storage) : ''; hydrateIcons(box); }
+    return storage;
+  };
 
   const load = async () => {
     const grid = root.querySelector('#adm-grid');
@@ -100,9 +110,136 @@ function renderList(root, app) {
     if (!b) return;
     if (b.dataset.act === 'new' && can('create')) newInstanceModal(app);
     if (b.dataset.act === 'players' && can('players')) playersModal();
+    if (b.dataset.act === 'storage' && storage) storageModal(storage, { reload: () => loadStorage(true), onChange: load });
   });
   load();
+  loadStorage();
   return () => {};
+}
+
+// ---------- Almacenamiento del servidor ----------
+const pct = (used, limit) => (limit ? Math.min(1, used / limit) : 0);
+const level = (p) => (p >= 1 ? 'is-full' : p >= 0.8 ? 'is-warn' : '');
+const pctLabel = (used, limit) => {
+  const p = limit ? (used / limit) * 100 : 0;
+  return p > 0 && p < 1 ? '<1 %' : `${Math.round(p)} %`;
+};
+const num = (n) => Number(n || 0).toLocaleString('es-ES');
+
+// Anillos concéntricos: [{ r, w, p (0-1), cls }]
+function ringSvg(parts) {
+  return `<svg class="sring" viewBox="0 0 64 64" aria-hidden="true">${parts.map(({ r, w, p, cls }) => {
+    const len = 2 * Math.PI * r;
+    return `<circle class="sring__bg" cx="32" cy="32" r="${r}" stroke-width="${w}"/><circle class="sring__fg ${cls || ''}" cx="32" cy="32" r="${r}" stroke-width="${w}" stroke-dasharray="${len.toFixed(2)}" stroke-dashoffset="${(len * (1 - p)).toFixed(2)}"/>`;
+  }).join('')}</svg>`;
+}
+
+function storageDock(s) {
+  const pr = pct(s.r2.used, s.r2.limit);
+  const pd = s.d1 ? pct(s.d1.used, s.d1.limit) : 0;
+  return `<button class="storage-dock ${level(Math.max(pr, pd))}" type="button" data-act="storage" data-tip="Almacenamiento del servidor: pulsa para ver el detalle y limpiar">
+    <span class="storage-dock__ring">${ringSvg([{ r: 28, w: 5, p: pr, cls: level(pr) }, ...(s.d1 ? [{ r: 20, w: 3.5, p: pd, cls: `sring__fg--db ${level(pd)}` }] : [])])}<b>${pctLabel(s.r2.used, s.r2.limit)}</b></span>
+    <span class="storage-dock__text"><b>${bytes(s.r2.used)}</b> de ${bytes(s.r2.limit)} en archivos<small>Base de datos: ${s.d1 ? `${bytes(s.d1.used)} de ${bytes(s.d1.limit)}` : '—'}</small></span>
+  </button>`;
+}
+
+function storageModal(initial, { reload, onChange }) {
+  let s = initial;
+  const m = modal({ size: 'xl', html: '<div class="modal__body" id="stg"></div>' });
+  const body = m.content.querySelector('#stg');
+  const draw = () => {
+    const { r2, d1 } = s;
+    const pr = pct(r2.used, r2.limit);
+    const pd = d1 ? pct(d1.used, d1.limit) : 0;
+    const free = (n) => (n ? ` · <span class="stg-free">${bytes(n)} sin usar</span>` : '');
+    const items = [
+      ...r2.instances.map((i) => ({ name: i.name, sub: `${num(i.files)} archivos${free(i.reclaimable)}`, size: i.bytes, del: s.canDeleteInstances ? i.id : null })),
+      ...(r2.otherInstances ? [{ name: 'Otras instancias', sub: 'no tienes permiso sobre ellas', size: r2.otherInstances }] : []),
+      { name: 'Skins de los jugadores', sub: `${num(r2.skins.files)} archivos${free(r2.skins.reclaimable)}`, size: r2.skins.bytes },
+      ...(r2.orphans?.bytes ? [{ name: 'Restos de instancias borradas', sub: `${num(r2.orphans.files)} archivos · <span class="stg-free">se pueden borrar</span>`, size: r2.orphans.bytes }] : []),
+      { name: 'Otros', sub: 'lista de instancias, nicks registrados…', size: r2.other },
+    ].filter((x) => x.size > 0 || x.del);
+    const max = Math.max(1, ...items.map((x) => x.size));
+    body.innerHTML = `
+      <h2 class="modal__title">Almacenamiento del servidor</h2>
+      <p class="modal__text">Lo que ocupa tu servidor de Viciont Studios en Cloudflare. Los mods de Modrinth no cuentan: se descargan de su web.</p>
+      <div class="stg-grid">
+        <section class="stg-card">
+          <div class="stg-head">${ringSvg([{ r: 27, w: 6, p: pr, cls: level(pr) }])}
+            <div><div class="stg-title">Archivos <span class="muted">(Cloudflare R2)</span></div>
+              <div class="stg-big"><b>${bytes(r2.used)}</b> de ${bytes(r2.limit)} gratis · ${pctLabel(r2.used, r2.limit)}</div>
+              <small class="muted">${num(r2.files)} archivos. Si pasas de lo gratis, Cloudflare cobra unos 0,015 USD por GB al mes.</small></div></div>
+          <div class="stg-list">${items.map((x) => `<div class="stg-row">
+            <div class="stg-row__name"><b>${esc(x.name)}</b><small>${x.sub}</small></div>
+            <div class="stg-row__bar"><span style="width:${Math.max(1.5, (x.size / max) * 100).toFixed(1)}%"></span></div>
+            <span class="stg-row__size">${bytes(x.size)}</span>
+            <span class="stg-row__acts">${x.del ? `<button class="icon-btn is-danger" type="button" data-del-inst="${esc(x.del)}" data-name="${esc(x.name)}" data-size="${x.size}" data-tip="Eliminar la instancia del servidor">${icon('trash')}</button>` : ''}</span>
+          </div>`).join('')}</div>
+          <div class="stg-actions">${s.canClean
+            ? (r2.reclaimable > 0 ? `<button class="btn btn--primary" type="button" data-clean>${icon('sparkle')}Limpiar archivos sin usar (libera ${bytes(r2.reclaimable)})</button>` : `<span class="field__hint">${icon('check')} No hay archivos sin usar.</span>`)
+            : '<span class="field__hint">Para limpiar necesitas el permiso de eliminar.</span>'}</div>
+        </section>
+        <section class="stg-card">
+          ${d1 ? `<div class="stg-head">${ringSvg([{ r: 27, w: 6, p: pd, cls: `sring__fg--db ${level(pd)}` }])}
+            <div><div class="stg-title">Base de datos <span class="muted">(Cloudflare D1)</span></div>
+              <div class="stg-big"><b>${bytes(d1.used)}</b> de ${bytes(d1.limit)} gratis · ${pctLabel(d1.used, d1.limit)}</div></div></div>
+          <div class="stg-list">
+            <div class="stg-row stg-row--plain"><div class="stg-row__name"><b>Registros</b><small>${num(d1.logs)}${d1.oldestLog ? ` · desde el ${new Date(d1.oldestLog).toLocaleDateString('es-ES')}` : ''} · se borran solos a los ${d1.logDays} días</small></div></div>
+            <div class="stg-row stg-row--plain"><div class="stg-row__name"><b>Jugadores</b><small>${num(d1.players)} que han usado el launcher</small></div></div>
+          </div>
+          <div class="stg-actions">${s.canClean && s.global
+            ? `<button class="btn" type="button" data-logs="7">${icon('trash')}Borrar los de más de 7 días</button><button class="btn btn--danger" type="button" data-logs="0">Borrar todos</button>`
+            : '<span class="field__hint">Solo un administrador con acceso a todas las instancias y permiso de eliminar puede borrar registros.</span>'}</div>`
+            : '<p class="field__hint">El servidor no tiene base de datos.</p>'}
+        </section>
+      </div>
+      <div class="modal__actions"><span class="field__hint" style="margin-right:auto">Calculado ${esc(timeAgo(s.at))}</span><button class="btn btn--ghost" type="button" data-refresh>${icon('refresh')}Recalcular</button><button class="btn btn--primary" type="button" data-close>Cerrar</button></div>`;
+    hydrateIcons(body);
+  };
+  const refresh = async (btn) => {
+    const next = btn ? await busy(btn, reload) : await reload();
+    if (next) { s = next; draw(); }
+  };
+  body.addEventListener('click', async (e) => {
+    if (e.target.closest('[data-close]')) { m.close(); return; }
+    const rb = e.target.closest('[data-refresh]');
+    if (rb) { try { await refresh(rb); } catch (er) { toastError(er); } return; }
+    const cb = e.target.closest('[data-clean]');
+    if (cb) {
+      const ok = await confirm({ title: '¿Limpiar archivos sin usar?', text: `Se borran ${bytes(s.r2.reclaimable)}: archivos de versiones anteriores, iconos y fondos que cambiaste, restos de instancias borradas y skins que ya no usa nadie. Los jugadores no notan nada.`, ok: 'Limpiar', icon: 'sparkle' });
+      if (!ok) return;
+      try {
+        const r = await busy(cb, () => call('admin:cleanStorage'));
+        toast(`Liberados ${bytes(r.freed)} (${num(r.deleted)} archivos).`, { kind: 'success' });
+        await refresh();
+      } catch (er) { toastError(er); }
+      return;
+    }
+    const lb = e.target.closest('[data-logs]');
+    if (lb) {
+      const days = Number(lb.dataset.logs);
+      const ok = await confirm({ title: days ? `¿Borrar los registros de más de ${days} días?` : '¿Borrar todos los registros?', text: 'Son los que usas en el panel para ayudar a los jugadores cuando algo falla. No se pueden recuperar.', ok: 'Borrar', danger: true, icon: 'trash' });
+      if (!ok) return;
+      try {
+        const r = await busy(lb, () => call('admin:cleanLogs', days));
+        toast(`Borrados ${num(r.deleted)} registros.`, { kind: 'success' });
+        await refresh();
+      } catch (er) { toastError(er); }
+      return;
+    }
+    const db = e.target.closest('[data-del-inst]');
+    if (db) {
+      const ok = await confirm({ title: `¿Eliminar ${db.dataset.name}?`, text: `Desaparecerá para todos los jugadores y se borrarán sus archivos del servidor (${bytes(Number(db.dataset.size))}). Tu carpeta en este PC se queda. No se puede deshacer.`, ok: 'Eliminar', danger: true, icon: 'trash' });
+      if (!ok) return;
+      try {
+        await busy(db, () => call('admin:remove', db.dataset.delInst));
+        toast(`${db.dataset.name} eliminada del servidor.`, { kind: 'success' });
+        onChange?.();
+        await refresh();
+      } catch (er) { toastError(er); }
+    }
+  });
+  draw();
 }
 
 // Selector de versión de Minecraft + cargador + versión del cargador.

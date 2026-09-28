@@ -1303,6 +1303,23 @@ class Admin extends EventEmitter {
   async releaseNick(name) {
     return this.call(`/v1/admin/offline-accounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
   }
+
+  // ---------- Almacenamiento del servidor (R2 + base de datos) ----------
+  // null si el servidor todavía no sabe calcularlo (anterior a la API v4).
+  async storage({ fresh = false } = {}) {
+    const r = await this.call(`/v1/admin/storage${fresh ? '?fresh=1' : ''}`, { timeout: 90000, ok: [404] });
+    return r?.ok ? r : null;
+  }
+
+  // Borra lo que ya no se usa: versiones anteriores, imágenes cambiadas, restos y skins sin usar.
+  async cleanStorage() {
+    return this.call('/v1/admin/storage/clean', { method: 'POST', json: {}, timeout: 120000 });
+  }
+
+  // Borra los registros de más de `days` días (0 = todos).
+  async cleanLogs(days) {
+    return this.call('/v1/admin/storage/logs', { method: 'POST', json: { olderThanDays: Math.max(0, Math.round(Number(days) || 0)) }, timeout: 60000 });
+  }
 }
 
 // Detecta versión y cargador de carpetas de CurseForge, Prism/MultiMC o Modrinth App.
