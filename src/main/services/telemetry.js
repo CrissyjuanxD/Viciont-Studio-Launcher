@@ -4,14 +4,22 @@
 // algo falla. Se envía en lotes al servidor del estudio con la sesión del jugador.
 //
 // Nunca se envían contraseñas, tokens, códigos de recuperación, archivos ni la IP;
-// las rutas del PC se acortan (C:\Users\<usuario> → ~).
+// las rutas del PC se acortan (C:\Users\<usuario> → ~). Cuando el juego se cierra con un
+// error también se envía su informe completo (crash report + registro del juego), limpio igual.
 
 const os = require('node:os');
+const fs = require('node:fs');
+const fsp = fs.promises;
+const path = require('node:path');
+const crypto = require('node:crypto');
 const { readJson, writeJsonAtomic } = require('../util/fsx');
 const { configFile } = require('../core/paths');
 const { redact } = require('../core/log');
 
 const FILE = configFile('activity-queue.json');
+// Informes de error pendientes de enviar (se suben justo antes de su registro "game.crash").
+const CRASH_DIR = configFile('crash-queue');
+const CRASH_MAX = Math.floor(2.5 * 1024 * 1024); // caracteres (el servidor admite hasta 3 MB)
 const MAX_QUEUE = 300;
 const FLUSH_MS = 60 * 1000;
 const HEARTBEAT_MS = 15 * 60 * 1000;
@@ -64,6 +72,7 @@ class Telemetry {
   async init() {
     const q = await readJson(FILE, []);
     this.queue = (Array.isArray(q) ? q : []).filter((e) => e && TYPE_RE.test(e.type || '')).slice(-MAX_QUEUE);
+    this.cleanCrashes().catch(() => {});
     setInterval(() => this.flush(), FLUSH_MS).unref?.();
     setInterval(() => this.heartbeat(), HEARTBEAT_MS).unref?.();
     setTimeout(() => this.flush(), 8000).unref?.();
@@ -74,7 +83,7 @@ class Telemetry {
    * uuid: cuenta a la que pertenece (por defecto, la activa; si no hay ninguna, la próxima que entre).
    */
   track(type, { level = 'info', message, instance, data, uuid } = {}) {
-    if (!TYPE_RE.test(type)) return;
+    if (!TYPE_RE.test(type)) return null;
     const e = {
       ts: Date.now(),
       type,
@@ -88,6 +97,31 @@ class Telemetry {
     if (this.queue.length > MAX_QUEUE) this.queue.splice(0, this.queue.length - MAX_QUEUE);
     this.saveSoon();
     if (URGENT.has(type) || e.level === 'error') this.flushSoon();
+    return e;
+  }
+
+  // El juego se cerró con un error: su registro va con el informe completo (que se sube aparte).
+  trackCrash(info, text) {
+    let name = null;
+    if (text) {
+      try {
+        fs.mkdirSync(CRASH_DIR, { recursive: true });
+        name = `${Date.now()}-${crypto.randomBytes(4).toString('hex')}.txt`;
+        fs.writeFileSync(path.join(CRASH_DIR, name), cleanText(text, CRASH_MAX));
+      } catch { name = null; }
+    }
+    const e = this.track('game.crash', info);
+    if (e && name) e.crash = name;
+    else if (name) fsp.rm(path.join(CRASH_DIR, name), { force: true }).catch(() => {});
+  }
+
+  // Informes que ya no tienen registro en la cola (o muy antiguos).
+  async cleanCrashes() {
+    const inQueue = new Set(this.queue.map((e) => e.crash).filter(Boolean));
+    for (const n of await fsp.readdir(CRASH_DIR).catch(() => [])) {
+      const age = Date.now() - (Number(n.split('-')[0]) || 0);
+      if (!inQueue.has(n) || age > 7 * 86400000) await fsp.rm(path.join(CRASH_DIR, n), { force: true }).catch(() => {});
+    }
   }
 
   gameStarted(id) {
@@ -126,6 +160,28 @@ class Telemetry {
     return this.flushing;
   }
 
+  // Sube el informe completo de un crash. false = hay que reintentarlo más tarde (sin conexión…).
+  async sendCrash(e, token, acc) {
+    const file = path.join(CRASH_DIR, e.crash);
+    const text = await fsp.readFile(file, 'utf8').catch(() => null);
+    if (text) {
+      try {
+        const q = e.instance ? `?instance=${encodeURIComponent(e.instance)}` : '';
+        const r = await this.backend.call(`/v1/crash${q}`, {
+          method: 'POST', token, body: text, headers: { 'Content-Type': 'text/plain; charset=utf-8' }, timeout: 60000, retries: 1,
+        });
+        if (r?.id) e.data = { ...(e.data || {}), report: r.id };
+      } catch (err) {
+        if (err.status === 401) { this.accounts.invalidateSession(acc); return false; }
+        if (!err.status || err.status >= 500 || err.status === 429) return false;
+        // 404 = servidor anterior a la API v5: el registro se envía igual, con las últimas líneas
+      }
+    }
+    delete e.crash;
+    await fsp.rm(file, { force: true }).catch(() => {});
+    return true;
+  }
+
   async _flush() {
     if (!this.queue.length || !this.backend.configured()) return;
     const active = this.accounts.active();
@@ -148,10 +204,15 @@ class Telemetry {
       if (!token) continue;
       for (let i = 0; i < events.length; i += 100) {
         const batch = events.slice(i, i + 100);
+        let later = false;
+        for (const e of batch) {
+          if (e.crash && !(await this.sendCrash(e, token, acc))) { later = true; break; }
+        }
+        if (later) break;
         try {
           await this.backend.call('/v1/logs', {
             method: 'POST', token, timeout: 15000, retries: 0,
-            json: { version: this.version, events: batch.map(({ uuid: _, ...rest }) => rest) },
+            json: { version: this.version, events: batch.map(({ uuid: _, crash: __, ...rest }) => rest) },
           });
         } catch (e) {
           if (e.status === 401) this.accounts.invalidateSession(acc);

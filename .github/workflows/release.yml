@@ -35,3 +35,14 @@ jobs:
       - run: npx electron-builder --win --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      # Copia con nombre fijo: .../releases/latest/download/Viciont-Studios-Launcher-Setup.exe
+      # descarga siempre la última versión (es el botón de la web del estudio).
+      - name: Enlace fijo a la última versión
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = $env:GITHUB_REF_NAME
+          $v = $tag.TrimStart('v')
+          Copy-Item "dist/Viciont-Studios-Launcher-Setup-$v.exe" "dist/Viciont-Studios-Launcher-Setup.exe"
+          gh release upload $tag "dist/Viciont-Studios-Launcher-Setup.exe" --clobber

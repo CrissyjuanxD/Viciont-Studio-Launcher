@@ -24,6 +24,7 @@ const modrinth = require('./services/modrinth');
 const { getVersionManifest } = require('./game/versions');
 const { listLoaderVersions, supportedGameVersions, LOADERS } = require('./game/loaders');
 const { probeJava } = require('./game/java');
+const { crashText } = require('./game/crash');
 
 // Modo desarrollo solo al ejecutar el código fuente (nunca en la versión instalada).
 const isDev = !app.isPackaged;
@@ -267,7 +268,15 @@ function start() {
     if (presence.playing?.id === d.id) { presence.playing = null; updatePresence(); }
     const mins = Math.round((d.duration || 0) / 60000);
     if (d.crashed) {
-      track('game.crash', { uuid, level: 'error', instance: baseId(d.id), message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min`, data: { code: d.code, minutes: mins, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) } });
+      // el informe completo (crash report + registro) se sube aparte y el panel lo muestra entero
+      const head = `Viciont Studios Launcher ${VERSION} · ${instName(d.id)} · código ${d.code} · ${mins} min · ${new Date().toISOString()}`;
+      try {
+        telemetry.trackCrash({
+          uuid, level: 'error', instance: baseId(d.id),
+          message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min${d.crash?.report ? ' (con crash report)' : ''}`,
+          data: { code: d.code, minutes: mins, crashReport: d.crash?.report?.name || null, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) },
+        }, d.crash ? crashText(d.crash, head) : '');
+      } catch { /* nunca rompe nada */ }
     } else {
       track('game.exit', { uuid, instance: baseId(d.id), message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
     }
@@ -326,13 +335,29 @@ function start() {
       const d = await instances.get(id);
       if (d && d.showFolder === false && !d.canManage && !d.workspace && !(d.test && admin.unlocked())) throw new Error('Esta instancia no permite abrir su carpeta.');
     }
-    const map = { data: dataRoot, logs: log.DIR, instance: id ? instances.gameDir(id) : null, config: paths.CONFIG_ROOT };
-    const target = kind === 'instance-sub' ? path.join(instances.gameDir(id.id), id.sub.replace(/[^a-z_-]/gi, '')) : map[kind];
+    // (instance-sub recibe { id, sub }: la carpeta se calcula solo para el tipo pedido)
+    const targets = {
+      data: () => dataRoot,
+      logs: () => log.DIR,
+      config: () => paths.CONFIG_ROOT,
+      instance: () => instances.gameDir(String(id)),
+      'instance-sub': () => path.join(instances.gameDir(String(id?.id)), String(id?.sub || '').replace(/[^a-z_-]/gi, '')),
+    };
+    const target = targets[kind]?.();
     if (!target) throw new Error('Carpeta no válida');
     await fsp.mkdir(target, { recursive: true });
     return shell.openPath(target);
   });
-  on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 5000)); return true; });
+  // (los informes de error pueden ser largos: se copian enteros)
+  on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 12 * 1024 * 1024)); return true; });
+  // Guarda un texto (p. ej. un informe de error) donde elija el usuario.
+  on('app:saveText', async (name, text) => {
+    const safe = String(name || 'informe.txt').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 120) || 'informe.txt';
+    const r = await dialog.showSaveDialog(parentWin(), { title: 'Guardar informe', defaultPath: path.join(app.getPath('desktop'), safe), filters: [{ name: 'Texto', extensions: ['txt'] }] });
+    if (r.canceled || !r.filePath) return null;
+    await fsp.writeFile(r.filePath, String(text ?? ''), 'utf8');
+    return r.filePath;
+  });
   // qué pantalla está viendo el jugador (para Discord)
   on('app:presence', (p) => {
     const view = ['home', 'instance', 'skins', 'admin', 'login'].includes(p?.view) ? p.view : 'home';
@@ -571,6 +596,7 @@ function start() {
   on('admin:restoreFiles', needAdmin((id, list) => admin.restoreFiles(id, list)));
   on('admin:setInclude', needAdmin((id, name, onOff) => admin.setInclude(id, name, onOff === true)));
   on('admin:workspace', needAdmin((id) => admin.wsStatus(id)));
+  on('admin:fileDiff', needAdmin((id, rel) => admin.fileDiff(id, rel)));
   on('admin:sync', needAdmin(async (id) => {
     const r = await admin.sync(id);
     send('instances', await instances.list());
@@ -726,6 +752,8 @@ function start() {
     admin.load();
     await backend.init();
     await instances.loadCache();
+    // config/resourcepacks ocultos que quedaran puestos (el launcher se cerró con el juego abierto…)
+    instances.recoverStaged().catch((e) => log.warn('No se pudieron revisar los archivos ocultos:', e.message));
     updater.init();
     await telemetry.init();
     track('launcher.start', {

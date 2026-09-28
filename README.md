@@ -12,7 +12,7 @@
 <p align="center">
   <a href="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest"><b>⬇ Descargar para Windows</b></a>
   ·
-  <a href="https://viciontstudios.pages.dev/">Web de Viciont Studios</a>
+  <a href="https://viciontstudios.pages.dev/#launcher">Web de Viciont Studios</a>
 </p>
 
 ---
@@ -62,14 +62,22 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Importar desde Modrinth App** sin exportar nada: sale la lista de tus instancias de Modrinth App con su versión, su cargador y su icono. También se puede importar un modpack `.mrpack` o una carpeta de CurseForge, Prism o `.minecraft`. Al publicar, los mods que existen en Modrinth se enlazan a su CDN en vez de subirlos.
 - **Icono y fondo** (PNG, JPG, WEBP, GIF o vídeo MP4/WEBM). Las imágenes se optimizan solas.
 - Instancias **públicas** o **privadas** (solo para los nicks que elijas).
-- **Publicar versiones**: solo se suben los archivos nuevos o cambiados. Los jugadores ven **Actualizar** y el texto de novedades.
+- **Publicar versiones**: solo se suben los archivos nuevos o cambiados (los pequeños en lotes, así que publicar miles de archivos es rápido). Los jugadores ven **Actualizar** y el texto de novedades.
+- **Qué cambió exactamente**: antes de publicar, **Ver cambios** lista los archivos nuevos, modificados y los que se quitan, y los textos o permisos que cambiaste. En las configs se ven las **líneas que cambiaron** (lo nuevo en verde, lo quitado en rojo), como en Git.
 - Cada archivo elige cómo se actualiza: se reemplaza siempre, solo la primera vez o, en `options.txt` y parecidos, **se fusionan los ajustes**: el jugador recibe solo los que cambiaste (por ejemplo, el resource pack activado) y conserva los suyos (teclas, volumen, FOV…). Al publicar eliges qué ajustes se aplican.
 - **Copia de prueba**: instala la instancia como la vería un jugador cualquiera, para probar cada actualización.
-- **Qué ven los jugadores**: se puede quitar el botón «Carpeta» y, con Fabric o Quilt, **ocultar los mods**: la carpeta `mods` se ve vacía y el juego los carga desde otro sitio del PC. Dificulta copiar los mods privados (nada de lo que se instala en un PC se puede proteger al 100%).
+- **Qué ven los jugadores** (todo viene desactivado): se puede quitar el botón «Carpeta» y ocultar:
+  - los **mods** (con Fabric o Quilt): la carpeta `mods` se ve vacía y el juego los carga desde otro sitio del PC;
+  - el contenido de **`config`** y los **resource packs**: se guardan aparte y el launcher los pone en su sitio solo mientras se juega (con enlaces duros: no ocupan el doble ni tardan). Al cerrar el juego se quitan y se guarda lo que el jugador cambió. Los resource packs y las carpetas de config quedan ocultos en el Explorador incluso mientras se juega.
+
+  Dificulta copiar el contenido privado o ver antes de tiempo las sorpresas de un evento (nada de lo que se instala en un PC se puede proteger al 100%).
 - Gestionar los nicks no premium registrados, por ejemplo liberar el de alguien que perdió su código.
-- **Panel web** para el equipo de confianza (usuario, contraseña y verificación en dos pasos): permisos por nick y **registros** de todo lo que pasa (quién entra, quién está jugando, cambios de skin, descargas, actualizaciones y errores con el final del registro del juego) para ayudar a los jugadores cuando algo falla.
+- **Panel web** para el equipo de confianza (usuario, contraseña y verificación en dos pasos): permisos por nick y **registros** de todo lo que pasa (quién entra, quién está jugando, cambios de skin, descargas, actualizaciones y errores) para ayudar a los jugadores cuando algo falla. Los crashes del juego llevan su **informe completo** (crash report de Minecraft + registro del juego), que se lee, se copia o se descarga entero.
+
+**Si el juego se cierra con un error**, el launcher enseña el **crash report completo** y el registro del juego (y el error de Java si lo hubo), con botones para copiarlo todo, guardarlo o abrir la carpeta de informes.
 
 **Optimizado**
+- Las descargas y las comprobaciones de archivos (SHA-1) van en un **hilo aparte**: la ventana sigue fluida aunque se descargue o compruebe una instancia muy pesada.
 - El fondo animado (espiral, figuras flotantes, partículas y glitch) se dibuja a media resolución y con límite de FPS. Se **detiene por completo** cuando la ventana está minimizada, tapada o en segundo plano.
 - Con la opción **"Cerrar la ventana"** al jugar, el launcher libera casi toda su memoria mientras juegas, se queda en la bandeja y vuelve a abrirse al cerrar el juego.
 
@@ -112,7 +120,7 @@ Las instancias, los permisos, los archivos privados, las skins no premium, los r
 
 ### Privacidad
 
-Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Studios un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo de Viciont Studios en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
+Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Studios un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo de Viciont Studios en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
 
 ## Desarrollo
 

@@ -8,8 +8,10 @@ const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
 const { once, setMaxListeners } = require('node:events');
+const { isMainThread } = require('node:worker_threads');
 const { statOrNull, ensureDir, hashFile, renameRetry } = require('./fsx');
 const { HttpError, sleep, abortError, userAgent } = require('./net');
+const offload = require('./offload');
 
 const RESUME_MIN = 8 * 1024 * 1024;
 const IDLE_TIMEOUT = 30000;
@@ -169,7 +171,13 @@ async function downloadOne(item, ctx) {
  */
 const SMALL = 256 * 1024;
 
-async function downloadAll(items, { concurrency = 8, signal, progress, verify = 'size' } = {}) {
+// En el proceso principal las descargas van a un hilo aparte (así la ventana no se traba).
+async function downloadAll(items, opts = {}) {
+  if (isMainThread && items.length && offload.available()) return offload.download(items, opts, downloadAllLocal);
+  return downloadAllLocal(items, opts);
+}
+
+async function downloadAllLocal(items, { concurrency = 8, signal, progress, verify = 'size' } = {}) {
   const needed = [];
   await pool(items, 48, async (it) => {
     if (!(await isValid(it, verify))) needed.push(it);
@@ -209,4 +217,4 @@ async function downloadAll(items, { concurrency = 8, signal, progress, verify = 
   return { downloaded: needed.length - failedOptional.length, skipped: items.length - needed.length, failedOptional };
 }
 
-module.exports = { downloadAll, downloadOne, pool, isValid };
+module.exports = { downloadAll, downloadAllLocal, downloadOne, pool, isValid };

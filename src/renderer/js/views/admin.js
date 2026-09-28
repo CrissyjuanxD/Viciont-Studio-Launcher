@@ -8,6 +8,7 @@ import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce } from '../util.js';
 import { modal, toast, toastError, confirm, menu, busy } from '../ui.js';
+import { diffLines, prettyIfJson } from '../linediff.js';
 
 const FOLDERS = [
   ['mods', 'Mods', 'package'],
@@ -23,6 +24,11 @@ const POLICY = {
   merge: { label: 'Fusionar ajustes: el jugador solo recibe los que cambies tú', short: 'Fusionar', icon: 'layers' },
 };
 const PROTECT_LOADERS = ['fabric', 'quilt'];
+// Archivos que no son de texto (no se pueden comparar línea a línea).
+const BIN_RE = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
+const DIFF_MAX = 2 * 1024 * 1024;
+const fileIcon = (p) => (FOLDERS.find(([dir]) => dir && p.startsWith(`${dir}/`)) || FOLDERS[FOLDERS.length - 1])[2];
+const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <= DIFF_MAX && (f.oldSize || 0) <= DIFF_MAX;
 
 const can = (perm) => (state.admin?.perms || []).includes(perm);
 
@@ -157,6 +163,7 @@ function storageModal(initial, { reload, onChange }) {
       ...(r2.otherInstances ? [{ name: 'Otras instancias', sub: 'no tienes permiso sobre ellas', size: r2.otherInstances }] : []),
       { name: 'Skins de los jugadores', sub: `${num(r2.skins.files)} archivos${free(r2.skins.reclaimable)}`, size: r2.skins.bytes },
       ...(r2.orphans?.bytes ? [{ name: 'Restos de instancias borradas', sub: `${num(r2.orphans.files)} archivos · <span class="stg-free">se pueden borrar</span>`, size: r2.orphans.bytes }] : []),
+      ...(r2.crash?.bytes ? [{ name: 'Informes de error del juego', sub: `${num(r2.crash.files)} informes · se borran solos a los ${d1?.logDays || 30} días, con los registros`, size: r2.crash.bytes }] : []),
       { name: 'Otros', sub: 'lista de instancias, nicks registrados…', size: r2.other },
     ].filter((x) => x.size > 0 || x.del);
     const max = Math.max(1, ...items.map((x) => x.size));
@@ -218,11 +225,11 @@ function storageModal(initial, { reload, onChange }) {
     const lb = e.target.closest('[data-logs]');
     if (lb) {
       const days = Number(lb.dataset.logs);
-      const ok = await confirm({ title: days ? `¿Borrar los registros de más de ${days} días?` : '¿Borrar todos los registros?', text: 'Son los que usas en el panel para ayudar a los jugadores cuando algo falla. No se pueden recuperar.', ok: 'Borrar', danger: true, icon: 'trash' });
+      const ok = await confirm({ title: days ? `¿Borrar los registros de más de ${days} días?` : '¿Borrar todos los registros?', text: 'Son los que usas en el panel para ayudar a los jugadores cuando algo falla (también se borran sus informes de error). No se pueden recuperar.', ok: 'Borrar', danger: true, icon: 'trash' });
       if (!ok) return;
       try {
         const r = await busy(lb, () => call('admin:cleanLogs', days));
-        toast(`Borrados ${num(r.deleted)} registros.`, { kind: 'success' });
+        toast(`Borrados ${num(r.deleted)} registros${r.crashes ? ` y ${num(r.crashes)} informes de error` : ''}.`, { kind: 'success' });
         await refresh();
       } catch (er) { toastError(er); }
       return;
@@ -414,6 +421,7 @@ function renderEditor(root, id, app, route = {}) {
   let d = null;
   let tab = route.tab || 'general';
   let filter = '';
+  let only = ''; // '' = todo · 'added' | 'modified' | 'removed' = solo esos cambios
   let syncing = false;
   const offs = [];
   const ws = () => d?.workspace || { synced: false };
@@ -460,7 +468,7 @@ function renderEditor(root, id, app, route = {}) {
     const ch = w.changes || { total: 0 };
     const pending = ch.total > 0 || d.dirtyMeta;
     info.innerHTML = `${w.synced ? `<span><b>${files.length}</b> archivos</span><span><b>${bytes(files.reduce((a, f) => a + (f.size || 0), 0))}</b></span><span><b>${files.filter((f) => f.path.startsWith('mods/')).length}</b> mods</span>` : '<span>Sin sincronizar en este PC</span>'}
-      ${pending ? `<span class="chip chip--hot">${ch.total ? `${ch.total} cambio(s) de archivos` : ''}${ch.total && d.dirtyMeta ? ' + ' : ''}${d.dirtyMeta && d.baseVersion ? 'textos o permisos' : ''}${!d.baseVersion ? 'sin publicar' : ''}</span>` : `<span>${icon('check')} Todo publicado</span>`}
+      ${pending ? `<button type="button" class="chip chip--hot" data-act="changes" data-tip="Ver qué cambió">${ch.total ? `${ch.total} cambio(s) de archivos` : ''}${ch.total && d.dirtyMeta ? ' + ' : ''}${d.dirtyMeta && d.baseVersion ? 'textos o permisos' : ''}${!d.baseVersion ? 'sin publicar' : ''}</button>` : `<span>${icon('check')} Todo publicado</span>`}
       <span>${d.meta.visibility === 'private' ? `${icon('lock')} privada · ${d.meta.allow.length} nick(s)` : `${icon('globe')} pública`}</span>`;
     const acts = root.querySelector('#ed-actions');
     const canPub = can(d.baseVersion ? 'edit' : 'create');
@@ -608,7 +616,7 @@ function renderEditor(root, id, app, route = {}) {
           <input class="input" id="ffilter" placeholder="Filtrar…" value="${esc(filter)}" style="margin-left:auto">
         </div>
         <div class="files__summary">${ch.total
-          ? `${icon('alert')}<span><b>${ch.total}</b> cambio(s) sin publicar:</span>${ch.added ? `<span class="state state--added">${ch.added} nuevo(s)</span>` : ''}${ch.modified ? `<span class="state state--modified">${ch.modified} modificado(s)</span>` : ''}${ch.removed ? `<span class="state state--removed">${ch.removed} se quitará(n)</span>` : ''}`
+          ? `${icon('alert')}<span><b>${ch.total}</b> cambio(s) sin publicar:</span>${ch.added ? `<button type="button" class="state state--added ${only === 'added' ? 'is-on' : ''}" data-only="added" data-tip="Ver solo estos">${ch.added} nuevo(s)</button>` : ''}${ch.modified ? `<button type="button" class="state state--modified ${only === 'modified' ? 'is-on' : ''}" data-only="modified" data-tip="Ver solo estos">${ch.modified} modificado(s)</button>` : ''}${ch.removed ? `<button type="button" class="state state--removed ${only === 'removed' ? 'is-on' : ''}" data-only="removed" data-tip="Ver solo estos">${ch.removed} se quitará(n)</button>` : ''}${only ? `<button type="button" class="chip chip--add" data-only="">${icon('close')}Mostrar todo</button>` : ''}<button class="btn btn--sm" type="button" data-act="changes">${icon('eye')}Ver cambios</button>`
           : `${icon('check')}<span>Tu carpeta está igual que la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}.</span>`}</div>
         <div id="flist"></div>
       </div>
@@ -667,10 +675,15 @@ function renderEditor(root, id, app, route = {}) {
     const w = ws();
     const all = w.files || [];
     const match = (f) => !filter || f.path.toLowerCase().includes(filter) || (f.title || '').toLowerCase().includes(filter);
-    const files = all.filter(match);
-    const removed = (w.removed || []).filter(match);
-    if (!all.length && !removed.length) {
+    const files = only === 'removed' ? [] : all.filter((f) => match(f) && (!only || f.state === only));
+    const removed = !only || only === 'removed' ? (w.removed || []).filter(match) : [];
+    if (!all.length && !(w.removed || []).length) {
       list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Carpeta vacía</h3><p>Busca mods en Modrinth, añade tus archivos, importa una instancia o abre la carpeta y pon ahí lo que quieras.</p></div>`;
+      hydrateIcons(list);
+      return;
+    }
+    if (!files.length && !removed.length) {
+      list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('search')}<p>No hay archivos con este filtro.</p></div>`;
       hydrateIcons(list);
       return;
     }
@@ -692,6 +705,7 @@ function renderEditor(root, id, app, route = {}) {
             <span class="frow__badges">${stateBadge(f.state)}${src}</span>
             <span class="frow__size">${bytes(f.size || 0)}</span>
             <span class="field__row" style="gap:2px">
+              ${f.state !== 'same' && canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Ver su contenido' : 'Ver qué cambió'}">${icon('eye')}</button>` : ''}
               <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${esc(POLICY[f.policy]?.label || '')}">${icon(POLICY[f.policy]?.icon || 'refresh')}</button>
               ${f.state !== 'same' && d.baseVersion ? `<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Quitar (no estaba publicado)' : 'Deshacer: dejarlo como está publicado'}">${icon('history')}</button>` : ''}
               <button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>
@@ -706,7 +720,7 @@ function renderEditor(root, id, app, route = {}) {
           <div class="frow__name"><b>${esc(f.title || f.path.split('/').pop())}</b><small>${esc(f.path)}</small></div>
           <span class="frow__badges"><span class="state state--removed">Se quitará</span></span>
           <span class="frow__size">${bytes(f.size || 0)}</span>
-          <span class="field__row" style="gap:2px"><button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="Recuperar">${icon('history')}</button></span>
+          <span class="field__row" style="gap:2px">${canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="Ver lo que se quita">${icon('eye')}</button>` : ''}<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="Recuperar">${icon('history')}</button></span>
         </div>`).join('')}
       </div>` : '');
     hydrateIcons(list);
@@ -716,6 +730,7 @@ function renderEditor(root, id, app, route = {}) {
   const tabAccess = (body) => {
     const mt = d.meta;
     const protectable = PROTECT_LOADERS.includes(mt.loader?.type);
+    const v5 = (d.apiVersion || 0) >= 5; // ocultar config y resourcepacks necesita el servidor nuevo
     body.innerHTML = `
       <div class="panel">
         <div class="panel__title"><span>¿Quién puede ver esta instancia?</span></div>
@@ -731,10 +746,24 @@ function renderEditor(root, id, app, route = {}) {
         <div class="panel__title"><span>Qué ven los jugadores de sus archivos</span></div>
         <label class="switch"><input type="checkbox" id="show-folder" ${mt.showFolder !== false ? 'checked' : ''}> Mostrar el botón «Carpeta» de la instancia</label>
         <p class="field__hint" style="margin:6px 0 12px">Si lo quitas, los jugadores no ven el botón para abrir la carpeta de la instancia (siguen pudiendo abrir sus mundos y capturas).</p>
-        <label class="switch ${protectable ? '' : 'is-disabled'}"><input type="checkbox" id="protect-mods" ${mt.protect?.includes('mods') ? 'checked' : ''} ${protectable ? '' : 'disabled'}> Ocultar los mods a los jugadores</label>
-        <p class="field__hint" style="margin-top:6px">${protectable
-          ? 'La carpeta <b>mods</b> se verá vacía: el launcher guarda los mods en otro sitio del PC y el juego los carga igual. Dificulta que se copien los mods privados, aunque nada de lo que se instala en el PC de alguien se puede proteger al 100%. Los administradores y tu carpeta sincronizada lo ven todo.'
-          : `Solo funciona con <b>Fabric</b> o <b>Quilt</b> (esta instancia usa ${esc(loaderLabel(mt.loader))}).`}</p>
+        <div class="protect-list">
+          <div>
+            <label class="switch ${protectable ? '' : 'is-disabled'}"><input type="checkbox" data-protect="mods" ${mt.protect?.includes('mods') ? 'checked' : ''} ${protectable ? '' : 'disabled'}> Ocultar la carpeta «mods»</label>
+            <p class="field__hint" style="margin-top:6px">${protectable
+              ? 'La carpeta <b>mods</b> se ve vacía: el launcher guarda los mods en otro sitio del PC y el juego los carga igual.'
+              : `Solo funciona con <b>Fabric</b> o <b>Quilt</b> (esta instancia usa ${esc(loaderLabel(mt.loader))}).`}</p>
+          </div>
+          <div>
+            <label class="switch ${v5 ? '' : 'is-disabled'}"><input type="checkbox" data-protect="config" ${mt.protect?.includes('config') ? 'checked' : ''} ${v5 ? '' : 'disabled'}> Ocultar el contenido de «config»</label>
+            <p class="field__hint" style="margin-top:6px">Las configs de los mods (y lo que guarden ahí, como vídeos o imágenes) se guardan en otro sitio del PC y el launcher solo las pone en su sitio mientras se juega; al cerrar el juego se quitan y se guarda lo que el jugador cambió (por ejemplo sus ajustes de vídeo). Las carpetas de config quedan ocultas en el Explorador también mientras se juega.</p>
+          </div>
+          <div>
+            <label class="switch ${v5 ? '' : 'is-disabled'}"><input type="checkbox" data-protect="resourcepacks" ${mt.protect?.includes('resourcepacks') ? 'checked' : ''} ${v5 ? '' : 'disabled'}> Ocultar los resource packs</label>
+            <p class="field__hint" style="margin-top:6px">Igual que config: solo están mientras se juega y no se ven en la carpeta <b>resourcepacks</b> del Explorador (ni desde el botón «Abrir carpeta de paquetes» del juego). Los packs que añada el jugador siguen funcionando.</p>
+          </div>
+          ${v5 ? '' : `<p class="inst__warn">${icon('alert')}Para ocultar config y resource packs, primero actualiza el servidor (pega el código nuevo en Cloudflare y pulsa Deploy).</p>`}
+          <p class="field__hint">Dificulta que se copie el contenido privado o que se vean antes de tiempo las sorpresas de un evento, aunque nada de lo que se instala en el PC de alguien se puede proteger al 100%. Todo viene desactivado; los administradores, su carpeta sincronizada y los jugadores con el launcher antiguo lo ven todo. Usa «Copia de prueba» para verlo como un jugador.</p>
+        </div>
       </div>`;
     const drawVis = () => {
       body.querySelectorAll('[data-v]').forEach((b) => b.classList.toggle('is-active', b.dataset.v === d.meta.visibility));
@@ -791,10 +820,10 @@ function renderEditor(root, id, app, route = {}) {
       d.meta.showFolder = e.target.checked;
       saveMeta({ showFolder: e.target.checked });
     });
-    body.querySelector('#protect-mods').addEventListener('change', (e) => {
-      d.meta.protect = e.target.checked ? ['mods'] : [];
+    body.querySelectorAll('[data-protect]').forEach((c) => c.addEventListener('change', () => {
+      d.meta.protect = [...body.querySelectorAll('[data-protect]')].filter((x) => x.checked).map((x) => x.dataset.protect).sort();
       saveMeta({ protect: d.meta.protect });
-    });
+    }));
     drawVis();
     drawAllow();
   };
@@ -825,6 +854,15 @@ function renderEditor(root, id, app, route = {}) {
     if (tb) { tab = tb.dataset.tab; drawTab(); return; }
     const keysLink = e.target.closest('[data-keys]');
     if (keysLink) { e.preventDefault(); keysModal(keysLink.dataset.keys, ws().merge?.[keysLink.dataset.keys] || []); return; }
+    const onlyBtn = e.target.closest('[data-only]');
+    if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; drawTab(); return; }
+    const fd = e.target.closest('[data-fdiff]');
+    if (fd) {
+      const w = ws();
+      const f = [...(w.files || []), ...(w.removed || []).map((x) => ({ ...x, state: 'removed' }))].find((x) => x.path === fd.dataset.fdiff);
+      if (f) diffModal(id, f);
+      return;
+    }
     const pol = e.target.closest('[data-policy]');
     if (pol) {
       const f = (ws().files || []).find((x) => x.path === pol.dataset.policy);
@@ -858,6 +896,7 @@ function renderEditor(root, id, app, route = {}) {
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'back') app.go({ name: 'admin' });
+    if (act === 'changes') changesModal(id, d);
     if (act === 'sync') doSync();
     if (act === 'pull') {
       try {
@@ -969,6 +1008,114 @@ function keysModal(file, keys) {
       <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
   });
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
+}
+
+// ---------- Qué cambió exactamente (antes de publicar) ----------
+// Lista de cambios sin publicar: textos y permisos, archivos modificados, nuevos y los que se quitan.
+// Los archivos de texto (configs…) se despliegan para ver las líneas que cambiaron.
+function changesHtml(d, { compact = false } = {}) {
+  const w = d.workspace || {};
+  const files = w.files || [];
+  const added = files.filter((f) => f.state === 'added');
+  const modified = files.filter((f) => f.state === 'modified');
+  const removed = (w.removed || []).map((f) => ({ ...f, state: 'removed' }));
+  const meta = d.baseVersion ? d.metaChanges || [] : [];
+  const row = (f) => {
+    const name = f.title || f.path.split('/').pop();
+    const keys = f.state === 'modified' ? w.merge?.[f.path] : null;
+    let detail = '';
+    if (f.state === 'modified') {
+      if (f.policyOnly) detail = `solo cambió cómo se actualiza: ${POLICY[f.oldPolicy]?.short || f.oldPolicy} → ${POLICY[f.policy]?.short || f.policy}`;
+      else if (f.oldVersionName && f.versionName && f.oldVersionName !== f.versionName) detail = `versión ${f.oldVersionName} → ${f.versionName}`;
+      else if (keys) detail = `${keys.length} ajuste(s) cambiado(s)`;
+    }
+    const size = f.state === 'modified' && f.oldSize != null && f.oldSize !== f.size ? `<b>${bytes(f.oldSize)}</b> → ${bytes(f.size)}` : bytes(f.size || 0);
+    const action = keys
+      ? `<button class="btn btn--sm btn--ghost" type="button" data-chg-keys="${esc(f.path)}">${icon('layers')}Ajustes</button>`
+      : canDiff(f) ? `<button class="btn btn--sm btn--ghost" type="button" data-diff="${esc(f.path)}">${icon('eye')}${f.state === 'modified' ? 'Diferencias' : 'Ver'}</button>` : '<span></span>';
+    return `<div class="chg"><div class="chg__row">
+        <div class="chg__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon(fileIcon(f.path))}</div>
+        <div class="chg__name"><b>${esc(name)}</b><small>${esc(f.path)}${detail ? ` · ${esc(detail)}` : ''}</small></div>
+        <span class="chg__size">${size}</span>${action}
+      </div></div>`;
+  };
+  const group = (title, ic, cls, list) => (list.length ? `<div class="changes__group"><div class="changes__title">${icon(ic)}${title} <span class="state state--${cls}">${list.length}</span></div>${[...list].sort((a, b) => a.path.localeCompare(b.path)).map(row).join('')}</div>` : '');
+  const metaHtml = meta.length ? `<div class="changes__group"><div class="changes__title">${icon('edit')}Textos, imágenes y permisos <span class="state state--modified">${meta.length}</span></div>
+    <div class="chg"><dl class="meta-chg">${meta.map((c) => `<dt>${esc(c.label)}</dt><dd>${c.added || c.removed
+      ? [c.added?.length ? `+ ${c.added.map(esc).join(', ')}` : '', c.removed?.length ? `<s>− ${c.removed.map(esc).join(', ')}</s>` : ''].filter(Boolean).join(' · ') || `${esc(c.from)} → ${esc(c.to)}`
+      : `<s>${esc(c.from)}</s> → ${esc(c.to)}`}</dd>`).join('')}</dl></div></div>` : '';
+  const body = metaHtml + group('Modificados', 'edit', 'modified', modified) + group('Nuevos', 'plus', 'added', added) + group('Se quitarán', 'trash', 'removed', removed);
+  return `<div class="changes ${compact ? 'changes--compact' : ''}">${body || '<p class="field__hint">No hay cambios sin publicar.</p>'}</div>`;
+}
+
+// Las líneas que cambiaron (en verde lo nuevo, en rojo lo que se quita).
+function diffHtml(r) {
+  const note = (t) => `<div class="chg__note">${t}</div>`;
+  if (r.kind === 'binary') return note('No es un archivo de texto: no se pueden mostrar sus líneas.');
+  if (r.kind === 'large') return note('El archivo es demasiado grande para compararlo aquí.');
+  if (r.oldText == null) return note(`No se pudo descargar la versión publicada para compararla${r.oldError ? ` (${esc(r.oldError)})` : ''}.`);
+  const p = prettyIfJson(r.path, r.oldText, r.newText);
+  const res = diffLines(p.a, p.b);
+  if (res.tooMany) return note(`Cambió casi todo el archivo (${res.added} líneas nuevas y ${res.removed} quitadas): son demasiados cambios para mostrarlos línea a línea.`);
+  if (!res.hunks.length) return note('El contenido es el mismo (quizá solo cambiaron los saltos de línea).');
+  const lines = res.hunks.map((h, i) => {
+    const before = i === 0 ? (h.lines[0].a ?? h.lines[0].b ?? 1) - 1 : -1;
+    const gap = i === 0 ? (before > 0 ? `<div class="diff__gap">··· ${before} línea(s) sin cambios ···</div>` : '') : '<div class="diff__gap">···</div>';
+    return gap + h.lines.map((l) => `<div class="diff__line ${l.t === '+' ? 'diff__line--add' : l.t === '-' ? 'diff__line--del' : ''}"><span class="diff__n">${l.a ?? ''}</span><span class="diff__n">${l.b ?? ''}</span><span class="diff__m">${l.t === ' ' ? '' : l.t === '-' ? '−' : '+'}</span><span class="diff__t">${esc(l.text)}</span></div>`).join('');
+  }).join('');
+  return `<div class="diff__stats"><span class="add">+${res.added} línea(s)</span><span class="del">−${res.removed} línea(s)</span>${p.formatted ? '<span>JSON formateado para compararlo</span>' : ''}${res.truncated ? '<span>(solo las primeras líneas)</span>' : ''}</div><div class="diff">${lines}</div>`;
+}
+
+// Despliega (o recoge) las diferencias de un archivo dentro de una lista de cambios.
+function bindChanges(box, id, d) {
+  box.addEventListener('click', async (e) => {
+    const kb = e.target.closest('[data-chg-keys]');
+    if (kb) { keysModal(kb.dataset.chgKeys, d.workspace?.merge?.[kb.dataset.chgKeys] || []); return; }
+    const b = e.target.closest('[data-diff]');
+    if (!b) return;
+    const card = b.closest('.chg');
+    const open = card.querySelector('.chg__diff');
+    if (open) { open.remove(); return; }
+    const pane = document.createElement('div');
+    pane.className = 'chg__diff';
+    pane.innerHTML = '<div class="chg__note"><span class="spin"></span> Comparando con lo publicado…</div>';
+    card.appendChild(pane);
+    try {
+      pane.innerHTML = diffHtml(await call('admin:fileDiff', id, b.dataset.diff));
+    } catch (er) {
+      pane.innerHTML = `<div class="chg__note">${esc(er.message)}</div>`;
+    }
+    hydrateIcons(pane);
+  });
+}
+
+function changesModal(id, d) {
+  const w = d.workspace || {};
+  const ch = w.changes || { total: 0 };
+  const metaN = d.baseVersion ? (d.metaChanges || []).length : 0;
+  const m = modal({
+    size: 'xl',
+    html: `<div class="modal__body"><h2 class="modal__title">Cambios sin publicar</h2>
+      <p class="modal__text">Lo que cambia respecto a la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}: ${ch.total} archivo(s)${metaN ? ` y ${metaN} cambio(s) de textos o permisos` : ''}. Pulsa <b>Diferencias</b> para ver las líneas que cambiaron en una config.</p>
+      ${changesHtml(d)}
+      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
+  });
+  bindChanges(m.content, id, d);
+  m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
+}
+
+// Diferencias de un solo archivo (desde la lista de la carpeta).
+function diffModal(id, f) {
+  const m = modal({
+    size: 'xl',
+    html: `<div class="modal__body"><h2 class="modal__title">${f.state === 'added' ? 'Archivo nuevo' : 'Qué cambió'}</h2>
+      <p class="modal__text mono">${esc(f.path)}</p>
+      <div class="chg" style="margin-top:14px"><div class="chg__diff"><div class="chg__note"><span class="spin"></span> Comparando con lo publicado…</div></div></div>
+      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
+  });
+  m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
+  const pane = m.content.querySelector('.chg__diff');
+  call('admin:fileDiff', id, f.path).then((r) => { pane.innerHTML = diffHtml(r); }).catch((e) => { pane.innerHTML = `<div class="chg__note">${esc(e.message)}</div>`; }).finally(() => hydrateIcons(pane));
 }
 
 // Pide la carpeta de destino dentro de la instancia.
@@ -1162,12 +1309,14 @@ async function publish(id, d, onDone) {
     html: `<div class="modal__body"><h2 class="modal__title">¿Publicar la versión ${(d.baseVersion || 0) + 1}?</h2>
       <p class="modal__text">${esc(d.meta.name)} · ${d.meta.visibility === 'private' ? `solo para ${d.meta.allow.length} nick(s)` : 'visible para todos'}. Los jugadores verán el botón <b>Actualizar</b> y solo se les descargará lo que cambió.</p>
       <div class="files__summary" style="margin-top:14px">${ch.total ? `${ch.added ? `<span class="state state--added">${ch.added} nuevo(s)</span>` : ''}${ch.modified ? `<span class="state state--modified">${ch.modified} modificado(s)</span>` : ''}${ch.removed ? `<span class="state state--removed">${ch.removed} se quitará(n)</span>` : ''}` : '<span>Sin cambios de archivos (solo textos, imágenes o permisos).</span>'}</div>
+      ${changesHtml(d, { compact: true })}
       ${merge.map(([file, keys]) => `<div class="panel" style="margin-top:14px"><div class="panel__title"><span>Ajustes de ${esc(file)} que reciben los jugadores</span></div>
         <p class="field__hint" style="margin-bottom:10px">Cada jugador conserva el resto de sus ajustes. Los desmarcados se quedan solo en tu PC (los «personales» vienen desmarcados).</p>
         <div class="keys-list">${keys.map((k) => `<label class="keys-row"><input type="checkbox" data-file="${esc(file)}" data-key="${esc(k.key)}" ${k.personal ? '' : 'checked'}><b class="mono">${esc(k.key)}</b><span class="mono muted">${esc(k.from ?? '(nuevo)')}</span>${icon('arrowRight')}<span class="mono">${esc(k.to)}</span>${k.personal ? '<span class="tag">personal</span>' : ''}</label>`).join('')}</div></div>`).join('')}
       <div class="modal__actions"><button class="btn btn--ghost" type="button" data-cancel>Cancelar</button><button class="btn btn--primary" type="button" data-go>${icon('upload')}Publicar</button></div></div>`,
   });
   hydrateIcons(m.content);
+  bindChanges(m.content, id, d);
   const go = await new Promise((resolve) => {
     m.content.querySelector('[data-cancel]').addEventListener('click', () => { m.close(); resolve(null); });
     m.content.querySelector('[data-go]').addEventListener('click', () => {

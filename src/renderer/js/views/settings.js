@@ -486,7 +486,7 @@ const PANES = {
         <ul class="plain-list">
           <li><b>Tu contraseña de Microsoft</b> solo se escribe en la página oficial de Microsoft (igual que en Modrinth o el launcher oficial). El launcher nunca la ve ni la guarda.</li>
           <li><b>Tus sesiones</b> se guardan cifradas con Windows en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
-          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
+          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego, sin tu nombre de usuario de Windows). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
           <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
         </ul>
       </div>

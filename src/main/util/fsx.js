@@ -6,6 +6,7 @@ const fs = require('node:fs');
 const fsp = fs.promises;
 const path = require('node:path');
 const crypto = require('node:crypto');
+const { isMainThread } = require('node:worker_threads');
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -73,7 +74,17 @@ function writeFileAtomicSync(p, data) {
 const writeJsonAtomic = (p, obj) => writeFileAtomic(p, JSON.stringify(obj, null, 2));
 const writeJsonAtomicSync = (p, obj) => writeFileAtomicSync(p, JSON.stringify(obj, null, 2));
 
+// En el proceso principal el SHA-1 se calcula en el hilo de descargas (no traba la ventana).
+let offload = null;
 function hashFile(p, algo = 'sha1') {
+  if (isMainThread) {
+    offload ??= require('./offload');
+    if (offload.available()) return offload.hash(p, algo, hashFileLocal);
+  }
+  return hashFileLocal(p, algo);
+}
+
+function hashFileLocal(p, algo = 'sha1') {
   return new Promise((resolve, reject) => {
     const h = crypto.createHash(algo);
     const s = fs.createReadStream(p, { highWaterMark: 1 << 20 });
@@ -155,5 +166,5 @@ async function linkOrCopy(src, dest) {
 module.exports = {
   sleep, exists, statOrNull, ensureDir, readJson, readJsonSync, renameRetry,
   writeFileAtomic, writeFileAtomicSync, writeJsonAtomic, writeJsonAtomicSync,
-  hashFile, hashBuffer, rmrf, safeJoin, normalizeRel, dirSize, listFiles, linkOrCopy,
+  hashFile, hashFileLocal, hashBuffer, rmrf, safeJoin, normalizeRel, dirSize, listFiles, linkOrCopy,
 };

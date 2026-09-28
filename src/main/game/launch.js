@@ -156,8 +156,19 @@ class GameProcess extends EventEmitter {
     child.on('error', (e) => this.emit('error', e));
     child.on('exit', (code, signal) => {
       this.exitCode = code;
-      this.log.end();
-      this.emit('exit', { code, signal, duration: Date.now() - this.startedAt });
+      // se espera a recibir las últimas líneas y a que el registro quede guardado (para el informe de error)
+      const duration = Date.now() - this.startedAt;
+      let closed = false;
+      const finish = () => {
+        if (closed) return;
+        closed = true;
+        let sent = false;
+        const emit = () => { if (!sent) { sent = true; this.emit('exit', { code, signal, duration }); } };
+        try { this.log.end(emit); } catch { emit(); }
+        setTimeout(emit, 1500).unref?.();
+      };
+      child.once('close', finish);
+      setTimeout(finish, 3000).unref?.();
     });
   }
 
@@ -170,12 +181,21 @@ class GameProcess extends EventEmitter {
 }
 
 async function launchGame(plan, opts) {
-  const cmd = buildCommand(plan, opts);
   await ensureDir(opts.gameDir);
   await ensureDir(path.join(opts.gameDir, 'logs'));
-  const args = await argFileIfNeeded(cmd, opts.gameDir);
   const logFile = path.join(opts.gameDir, 'logs', 'vsl-latest.log');
   await fsp.rename(logFile, path.join(opts.gameDir, 'logs', 'vsl-previous.log')).catch(() => {});
+  // Solo en pruebas automáticas (código fuente, nunca en la versión instalada): un "juego" de
+  // mentira que se ejecuta con el Node de Electron en la carpeta de la instancia.
+  const fake = !require('electron').app.isPackaged && process.env.VSL_TEST_FAKEGAME;
+  if (fake) {
+    const child = spawn(process.execPath, [fake, opts.gameDir, ...(opts.extraJvm || [])], {
+      cwd: opts.gameDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    return new GameProcess(child, logFile);
+  }
+  const cmd = buildCommand(plan, opts);
+  const args = await argFileIfNeeded(cmd, opts.gameDir);
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
   delete env.ELECTRON_NO_ATTACH_CONSOLE;

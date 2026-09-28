@@ -125,7 +125,7 @@ export function render(root, route, app) {
           </div>
           ${inst.summary ? `<p class="inst__summary">${esc(inst.summary)}</p>` : ''}
           ${inst.description ? `<div class="inst__desc rich" id="inst-desc">${richText(inst.description)}</div><button class="inst__more" type="button" id="inst-more">Leer más</button>` : ''}
-          ${inst.test ? `<p class="inst__note">${icon('eye')}Así la ve un jugador: se descarga y se actualiza igual que la de cualquiera${inst.protect?.includes('mods') ? ' (con los mods ocultos)' : ''}. Publica una versión nueva y pulsa Actualizar para probarla.</p>` : ''}
+          ${inst.test ? `<p class="inst__note">${icon('eye')}Así la ve un jugador: se descarga y se actualiza igual que la de cualquiera${inst.protect?.length ? ` (con ${inst.protect.map((p) => ({ mods: 'los mods', config: 'config', resourcepacks: 'los resource packs' }[p] || p)).join(', ')} ocultos)` : ''}. Publica una versión nueva y pulsa Actualizar para probarla.</p>` : ''}
           ${inst.workspace?.behind ? `<p class="inst__warn">${icon('alert')}Otro administrador publicó una versión más nueva. Tráela desde Administración antes de seguir cambiando cosas.</p>` : ''}
           ${inst.workspace && !inst.workspace.behind ? `<p class="inst__note">${icon('refresh')}Esta es tu carpeta de trabajo: lo que cambies aquí (mods, configs, options.txt…) es lo que se publica desde Administración.</p>` : ''}
           ${inst.interrupted ? `<p class="inst__warn">${icon('alert')}La descarga anterior no terminó. Pulsa el botón para continuar donde se quedó.</p>` : ''}
@@ -324,22 +324,58 @@ async function logModal(inst) {
   m.content.querySelector('[data-folder]').addEventListener('click', () => call('app:openFolder', 'instance-sub', { id: inst.id, sub: 'logs' }).catch(toastError));
 }
 
+// El juego se cerró con un error: el crash report, el error de Java (si lo hubo) y el registro, enteros.
 export function crashModal(data) {
   const inst = instance(data.id);
+  const c = data.crash || {};
+  const tabs = [
+    c.report && { key: 'report', label: 'Crash report', ...c.report },
+    c.jvm && { key: 'jvm', label: 'Error de Java', ...c.jvm },
+    c.log && { key: 'log', label: 'Registro del juego', ...c.log },
+  ].filter(Boolean);
+  if (!tabs.length) tabs.push({ key: 'log', label: 'Registro del juego', name: '', text: (data.log || []).join('\n') || 'Sin registro' });
+  // "Description: ..." del crash report: la causa en una línea
+  const cause = /^Description:\s*(.+)$/m.exec(c.report?.text || '')?.[1]?.trim() || '';
+  const exc = c.report ? (/^\s*((?:[\w$]+\.)+[\w$]*(?:Exception|Error)\b[^\n]*)/m.exec(c.report.text.split(/\n\n/).slice(1, 3).join('\n'))?.[1] || '') : '';
+  const all = tabs.map((t) => `===== ${t.name || t.label} =====\n${t.text}`).join('\n\n');
+  const header = `${inst?.name || data.id} · código ${data.code} · ${new Date().toLocaleString('es-ES')}`;
+  let cur = tabs[0].key;
   const m = modal({
-    size: 'lg',
+    size: 'xl',
     html: `<div class="modal__body">
       <h2 class="modal__title">El juego se cerró con un error</h2>
-      <p class="modal__text">${esc(inst?.name || data.id)} terminó con el código ${esc(data.code)}. Estas son las últimas líneas del registro:</p>
-      <pre class="code-box selectable" style="margin-top:14px;max-height:46vh;overflow:auto;white-space:pre-wrap;font-size:0.74rem;letter-spacing:0">${esc((data.log || []).join('\n') || 'Sin registro')}</pre>
-      <p class="field__hint" style="margin-top:10px">Si pasa a menudo, prueba "Reparar" en el menú ⋯ de la instancia o dale más memoria en sus opciones.</p>
+      <p class="modal__text">${esc(inst?.name || data.id)} terminó con el código ${esc(data.code)}.${c.report ? ' Minecraft guardó un crash report con todos los detalles:' : ' Este es el registro completo del juego:'}</p>
+      ${cause || exc ? `<div class="crash__cause">${icon('alert')}<div>${cause ? `<b>${esc(cause)}</b>` : ''}${exc ? `<small class="mono">${esc(exc.slice(0, 300))}</small>` : ''}</div></div>` : ''}
+      ${tabs.length > 1 ? `<div class="segmented crash__tabs">${tabs.map((t) => `<button type="button" data-tab="${t.key}" class="${t.key === cur ? 'is-active' : ''}">${esc(t.label)}</button>`).join('')}</div>` : ''}
+      <div class="crash__file mono" data-file></div>
+      <pre class="code-box selectable crash__text" data-text></pre>
+      <p class="field__hint" style="margin-top:10px">Si pasa a menudo, prueba "Reparar" en el menú ⋯ de la instancia o dale más memoria en sus opciones. Para pedir ayuda, usa <b>Copiar todo</b> o <b>Guardar</b> y envíalo al equipo de Viciont Studios (también les llega una copia).</p>
       <div class="modal__actions">
         <button class="btn btn--ghost" data-crash type="button">${icon('folder')}Informes de error</button>
-        <button class="btn btn--ghost" data-copy type="button">${icon('copy')}Copiar registro</button>
+        <button class="btn btn--ghost" data-save type="button">${icon('download')}Guardar</button>
+        <button class="btn btn--ghost" data-copy type="button">${icon('copy')}Copiar todo</button>
         <button class="btn btn--primary" data-close type="button">Entendido</button>
       </div></div>`,
   });
+  const show = (key) => {
+    cur = key;
+    const t = tabs.find((x) => x.key === key) || tabs[0];
+    m.content.querySelectorAll('[data-tab]').forEach((b) => b.classList.toggle('is-active', b.dataset.tab === key));
+    m.content.querySelector('[data-file]').textContent = `${t.name || ''}${t.truncated ? ' · muy largo: se muestran el principio y el final (el archivo está completo en la carpeta)' : ''}`;
+    const pre = m.content.querySelector('[data-text]');
+    pre.textContent = t.text || 'Sin contenido';
+    pre.scrollTop = key === 'log' ? pre.scrollHeight : 0; // el registro importa sobre todo al final
+  };
+  show(cur);
+  m.content.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
-  m.content.querySelector('[data-copy]').addEventListener('click', () => call('app:copy', (data.log || []).join('\n')).then(() => toast('Registro copiado.', { kind: 'success' })));
+  m.content.querySelector('[data-copy]').addEventListener('click', () => call('app:copy', `${header}\n\n${all}`).then(() => toast('Informe completo copiado.', { kind: 'success' })).catch(toastError));
+  m.content.querySelector('[data-save]').addEventListener('click', async () => {
+    const stamp = new Date().toISOString().slice(0, 16).replace(/[:T]/g, '-');
+    try {
+      const file = await call('app:saveText', `crash-${inst?.baseId || data.id}-${stamp}.txt`.replace(/~/g, '-'), `${header}\n\n${all}`);
+      if (file) toast('Informe guardado.', { kind: 'success' });
+    } catch (e) { toastError(e); }
+  });
   m.content.querySelector('[data-crash]').addEventListener('click', () => call('app:openFolder', 'instance-sub', { id: data.id, sub: 'crash-reports' }).catch(toastError));
 }

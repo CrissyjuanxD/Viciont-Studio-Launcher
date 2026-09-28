@@ -17,7 +17,7 @@ const { EventEmitter } = require('node:events');
 const { shell } = require('electron');
 const { readJson, writeJsonAtomic, exists, statOrNull, hashFile, hashBuffer, ensureDir, normalizeRel, safeJoin, rmrf, listFiles, linkOrCopy } = require('../util/fsx');
 const { pool, downloadAll } = require('../util/downloader');
-const { getText } = require('../util/net');
+const { getText, getBuffer } = require('../util/net');
 const { TaskProgress } = require('../util/progress');
 const { send, readSlice } = require('../util/upload');
 const { openZip } = require('../util/zip');
@@ -34,6 +34,14 @@ const KEY_FILE = configFile('admin.dat');
 const SINGLE_MAX = 64 * 1024 * 1024;
 const PART = 48 * 1024 * 1024;
 const MIN_API = 3; // versión del servidor que entiende todo lo de la 1.1.0
+const BATCH_API = 5; // subida por lotes y ocultar config/resourcepacks (1.1.3)
+// Los archivos pequeños se suben en lotes (una sola petición para muchos): mucho más rápido.
+const BATCH_FILE_MAX = 4 * 1024 * 1024;
+const BATCH_BYTES = 16 * 1024 * 1024;
+const BATCH_COUNT = 300;
+// Vista de diferencias de los archivos de texto que cambiaste.
+const DIFF_MAX = 2 * 1024 * 1024;
+const BINARY_EXT = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
 const TYPE_DIRS = { mod: 'mods', resourcepack: 'resourcepacks', shader: 'shaderpacks', datapack: 'datapacks' };
 // Se fusionan por claves al actualizar: el jugador solo recibe los ajustes que cambies tú.
 const MERGE_FILES = new Set(['options.txt', 'optionsof.txt', 'optionsshaders.txt']);
@@ -41,7 +49,7 @@ const MERGE_FILES = new Set(['options.txt', 'optionsof.txt', 'optionsshaders.txt
 const ONCE_FILES = new Set(['servers.dat']);
 const UUID_RE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 const MEDIA_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' };
-const PROTECTABLE = ['mods'];
+const PROTECTABLE = ['mods', 'config', 'resourcepacks'];
 
 // Carpetas y archivos de la instancia que nunca se publican (registros, cachés, cosas del launcher…).
 const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', '.cache', 'cache', 'local', 'downloads', 'backups', '.vsl',
@@ -79,9 +87,9 @@ function cleanMeta(m = {}, id) {
     featured: Boolean(m.featured),
     accent: /^#[0-9a-f]{6}$/i.test(m.accent || '') ? m.accent : '',
     changelog: str(m.changelog, 2000),
-    // lo que ven los jugadores: el botón "Carpeta" y los mods (se pueden ocultar con Fabric o Quilt)
+    // lo que ven los jugadores: el botón "Carpeta" y las carpetas ocultas (mods con Fabric o Quilt, config, resourcepacks)
     showFolder: m.showFolder !== false,
-    protect: [...new Set((Array.isArray(m.protect) ? m.protect : []).filter((x) => PROTECTABLE.includes(x)))],
+    protect: [...new Set((Array.isArray(m.protect) ? m.protect : []).filter((x) => PROTECTABLE.includes(x)))].sort(),
   };
 }
 
@@ -251,14 +259,20 @@ class Admin extends EventEmitter {
     }
   }
 
+  // Versión de la API del servidor (se recuerda 10 minutos).
+  async serverVersion({ fresh = false } = {}) {
+    if (!fresh && this.apiVer && Date.now() - this.apiOk < 10 * 60 * 1000) return this.apiVer;
+    const h = await this.backend.call('/v1/health', { timeout: 10000, retries: 1 });
+    this.apiVer = Number(h?.version) || 0;
+    this.apiOk = Date.now();
+    return this.apiVer;
+  }
+
   // El servidor tiene que estar actualizado para sincronizar, publicar y hacer copias de prueba.
   async ensureServer() {
-    if (Date.now() - this.apiOk < 10 * 60 * 1000) return;
-    const h = await this.backend.call('/v1/health', { timeout: 10000, retries: 1 });
-    if (!(Number(h?.version) >= MIN_API)) {
+    if (!((await this.serverVersion()) >= MIN_API)) {
       throw err('El servidor de Viciont Studios necesita actualizarse para esta versión del launcher: pega el código nuevo del servidor en Cloudflare y pulsa Deploy.', 'EOLDSERVER');
     }
-    this.apiOk = Date.now();
   }
 
   // Las rutas del PC solo se aceptan si el usuario las eligió (diálogo o arrastrar y soltar).
@@ -322,6 +336,47 @@ class Admin extends EventEmitter {
     return ['icon', 'background'].some((k) => d.media?.[k]?.local || (d.media?.[k]?.key || null) !== (pub[k]?.key || null));
   }
 
+  // Qué textos, imágenes y permisos cambiaron respecto a lo publicado (para mostrarlo antes de publicar).
+  metaChanges(d, inst) {
+    if (!inst?.version) return [];
+    const a = cleanMeta(inst, d.id);
+    const b = cleanMeta(d.meta, d.id);
+    const LABEL = {
+      name: 'Nombre', summary: 'Resumen', description: 'Descripción', mc: 'Versión de Minecraft', loader: 'Cargador',
+      visibility: 'Visibilidad', allow: 'Nicks con permiso', memory: 'RAM recomendada', server: 'Servidor', tags: 'Etiquetas',
+      order: 'Orden en la lista', featured: 'Destacada', accent: 'Color', changelog: 'Novedades', showFolder: 'Botón «Carpeta»', protect: 'Carpetas ocultas',
+    };
+    const short = (v) => { const s = String(v ?? '').replace(/\s+/g, ' ').trim(); return s.length > 160 ? `${s.slice(0, 160)}…` : (s || '—'); };
+    const fmt = (k, v) => {
+      if (k === 'loader') return v.type === 'vanilla' ? 'Vanilla' : `${LOADERS[v.type]?.name || v.type} ${v.version}`;
+      if (k === 'visibility') return v === 'private' ? 'Privada' : 'Pública';
+      if (k === 'allow') return `${v.length} nick(s)`;
+      if (k === 'memory') return v.recommended ? `${v.recommended} MB` : 'sin recomendar';
+      if (k === 'tags') return v.join(', ') || '—';
+      if (k === 'featured' || k === 'showFolder') return v ? 'Sí' : 'No';
+      if (k === 'protect') return v.length ? v.join(', ') : 'ninguna';
+      return short(v);
+    };
+    const out = [];
+    for (const k of Object.keys(LABEL)) {
+      if (JSON.stringify(a[k]) === JSON.stringify(b[k])) continue;
+      const c = { key: k, label: LABEL[k], from: fmt(k, a[k]), to: fmt(k, b[k]) };
+      if (k === 'allow') {
+        const A = new Set(a.allow);
+        const B = new Set(b.allow);
+        c.added = b.allow.filter((n) => !A.has(n)).slice(0, 50);
+        c.removed = a.allow.filter((n) => !B.has(n)).slice(0, 50);
+      }
+      out.push(c);
+    }
+    const pub = mediaFrom(inst);
+    for (const k of ['icon', 'background']) {
+      const m = d.media?.[k];
+      if (m?.local || (m?.key || null) !== (pub[k]?.key || null)) out.push({ key: k, label: k === 'icon' ? 'Icono' : 'Fondo', from: pub[k] ? 'el publicado' : 'sin imagen', to: m ? 'uno nuevo' : 'sin imagen' });
+    }
+    return out;
+  }
+
   // Solo se guarda un borrador si de verdad hay algo distinto de lo publicado.
   async persistMeta(d, inst) {
     if (Array.isArray(d.files) || this.metaDirty(d, inst)) await this.writeDraft(d);
@@ -336,6 +391,8 @@ class Admin extends EventEmitter {
       baseVersion: inst?.version || 0,
       published: Boolean(inst?.version),
       dirtyMeta: this.metaDirty(d, inst),
+      metaChanges: this.metaChanges(d, inst),
+      apiVersion: await this.serverVersion().catch(() => this.apiVer || 0),
       legacy: legacy || Array.isArray(d.files),
       ...(ws ? { workspace: await this.wsStatus(id).catch((e) => ({ synced: false, error: e.message })) } : {}),
     };
@@ -573,12 +630,19 @@ class Admin extends EventEmitter {
     };
     const files = [...scan.files.values()].map((f) => {
       const m = infoOf(f.path, f.sha1);
+      const b = ws.base?.[f.path];
+      const state = diff.added.has(f.path) ? 'added' : diff.modified.has(f.path) ? 'modified' : 'same';
       return {
         path: f.path, size: f.size,
-        state: diff.added.has(f.path) ? 'added' : diff.modified.has(f.path) ? 'modified' : 'same',
+        state,
         policy: effPolicy(ws, f.path),
         source: m?.url ? 'modrinth' : 'local',
         project: m?.project || null, title: m?.title || null, icon: m?.icon || null, versionName: m?.versionName || null,
+        // qué había publicado (para enseñar qué cambió)
+        ...(state === 'modified' && b ? {
+          oldSize: b.size || 0, oldPolicy: b.policy || 'always', policyOnly: b.sha1 === f.sha1,
+          oldTitle: b.title || null, oldVersionName: b.versionName || null,
+        } : {}),
       };
     });
     const removed = diff.removed.map((rel) => ({ path: rel, size: ws.base[rel].size || 0, title: ws.base[rel].title || null, icon: ws.base[rel].icon || null }));
@@ -837,6 +901,64 @@ class Admin extends EventEmitter {
     try { if (items.length) await downloadAll(items, { concurrency: 4, progress }); } finally { this.stopProgress(key); }
     await this.saveWs(id, ws);
     return { workspace: await this.wsStatus(id) };
+  }
+
+  // Enlace de descarga de un archivo publicado (el de subida propia lleva un permiso que dura horas).
+  async publishedUrl(id, b) {
+    if (b.source !== 'upload' && b.url) return b.url;
+    this.dlTokens ||= new Map();
+    let t = this.dlTokens.get(id);
+    if (!t || Date.now() - t.at > 30 * 60 * 1000) {
+      t = { at: Date.now(), token: (await this.instances.fetchManifest(id)).downloadToken || '' };
+      this.dlTokens.set(id, t);
+    }
+    return this.instances.blobUrl(id, b.sha1, t.token);
+  }
+
+  // Lo publicado de un archivo y lo que hay ahora en tu carpeta, para ver qué cambió (solo texto).
+  async fileDiff(id, rel) {
+    const { st, dir } = await this.mustWs(id);
+    const ws = st.workspace;
+    const clean = normalizeRel(rel);
+    if (!clean) throw err('Ruta no válida');
+    const b = ws.base?.[clean] || null;
+    const abs = safeJoin(dir, clean);
+    const s = await statOrNull(abs);
+    const out = { path: clean, oldSize: b ? b.size || 0 : null, newSize: s?.isFile() ? s.size : null, policy: effPolicy(ws, clean), oldPolicy: b?.policy || null };
+    if (BINARY_EXT.test(clean)) return { ...out, kind: 'binary' };
+    if ((b?.size || 0) > DIFF_MAX || (s?.size || 0) > DIFF_MAX) return { ...out, kind: 'large' };
+    const isText = (buf) => !buf.subarray(0, 8192).includes(0);
+    const cur = s?.isFile() ? await fsp.readFile(abs) : null;
+    if (cur && !isText(cur)) return { ...out, kind: 'binary' };
+    let old = null;
+    let oldError = null;
+    if (b) {
+      this.oldTexts ||= new Map();
+      old = this.oldTexts.get(b.sha1) || null;
+      if (!old && effPolicy(ws, clean) === 'merge') {
+        const t = await this.baseText(id, clean);
+        if (t != null) old = Buffer.from(t, 'utf8');
+      }
+      if (!old) {
+        try {
+          old = await getBuffer(await this.publishedUrl(id, b), { timeout: 30000, retries: 1 });
+        } catch (e) {
+          oldError = e.message;
+        }
+      }
+      if (old) {
+        if (!isText(old)) return { ...out, kind: 'binary' };
+        this.oldTexts.set(b.sha1, old);
+        if (this.oldTexts.size > 40) this.oldTexts.delete(this.oldTexts.keys().next().value);
+      }
+    }
+    return {
+      ...out,
+      kind: 'text',
+      oldText: b ? (old ? old.toString('utf8') : null) : '',
+      newText: cur ? cur.toString('utf8') : '',
+      oldError,
+    };
   }
 
   async setPolicy(id, rel, policy) {
@@ -1116,20 +1238,21 @@ class Admin extends EventEmitter {
       const { missing = [] } = sha1s.length
         ? await this.call(`/v1/admin/instances/${id}/blobs/missing`, { method: 'POST', json: { sha1s }, timeout: 60000 })
         : {};
+      const bySha = new Map();
+      for (const e of uploads) if (e.local && !bySha.has(e.sha1.toLowerCase())) bySha.set(e.sha1.toLowerCase(), e);
+      if (missing.length) progress.setPhase('check', `Comprobando ${missing.length} archivo(s)…`);
       const todo = [];
-      for (const sha of missing) {
-        const e = uploads.find((x) => x.sha1.toLowerCase() === sha && x.local);
-        if (!e || !(await exists(e.local))) throw err(`Falta el archivo "${uploads.find((x) => x.sha1 === sha)?.path || sha}" en tu carpeta.`, 'EMISSINGFILE');
+      await pool(missing, 8, async (sha) => {
+        const e = bySha.get(sha);
+        const s = e ? await statOrNull(e.local) : null;
+        if (!s) throw err(`Falta el archivo "${uploads.find((x) => x.sha1.toLowerCase() === sha)?.path || sha}" en tu carpeta.`, 'EMISSINGFILE');
         if ((await hashFile(e.local)) !== sha) throw err(`"${e.path}" cambió mientras se publicaba. Vuelve a intentarlo.`, 'ECHANGED');
-        todo.push({ sha, file: e.local, size: (await statOrNull(e.local)).size, name: e.path });
-      }
+        todo.push({ sha, file: e.local, size: s.size, name: e.path });
+      });
       const mediaTodo = ['icon', 'background'].map((k) => [k, d.media?.[k]]).filter(([, m]) => m?.local);
       progress.addTotal(todo.reduce((a, t) => a + t.size, 0) + mediaTodo.reduce((a, [, m]) => a + (m.size || 0), 0), todo.length);
       progress.setPhase('upload', todo.length ? `Subiendo ${todo.length} archivo(s)…` : 'Subiendo imágenes…');
-      await pool(todo, 3, async (t) => {
-        await this.uploadBlob(id, t, progress);
-        progress.fileDone();
-      });
+      await this.uploadAll(id, todo, progress);
       await this.uploadMedia(id, d, progress);
       progress.setPhase('publish', 'Publicando…');
       const files = entries.map(({ local, ...e }) => e);
@@ -1186,6 +1309,59 @@ class Admin extends EventEmitter {
     const s = acc && this.sessions.get(acc.uuid);
     if (!s) throw err('Activa el modo administrador para continuar.', 'ELOCKED');
     return this.headers(acc, s.key);
+  }
+
+  // Sube lo que falta: los archivos pequeños en lotes (una petición para cientos de ellos) y los
+  // grandes de uno en uno. Con un servidor anterior a la API v5, todos de uno en uno.
+  async uploadAll(id, todo, progress) {
+    const batchable = (await this.serverVersion().catch(() => 0)) >= BATCH_API;
+    const small = batchable ? todo.filter((t) => t.size <= BATCH_FILE_MAX) : [];
+    const large = batchable ? todo.filter((t) => t.size > BATCH_FILE_MAX) : todo;
+    const batches = [];
+    let cur = null;
+    for (const t of small) {
+      if (!cur || cur.bytes + t.size > BATCH_BYTES || cur.items.length >= BATCH_COUNT) { cur = { items: [], bytes: 0 }; batches.push(cur); }
+      cur.items.push(t);
+      cur.bytes += t.size;
+    }
+    const results = await Promise.allSettled([
+      pool(batches, 3, async (b) => { await this.uploadBatch(id, b.items, progress); progress.fileDone(b.items.length); }),
+      pool(large, batchable ? 3 : 6, async (t) => { await this.uploadBlob(id, t, progress); progress.fileDone(); }),
+    ]);
+    const failed = results.find((r) => r.status === 'rejected');
+    if (failed) throw failed.reason;
+  }
+
+  // Un lote: [4 bytes: tamaño de la cabecera][cabecera JSON][archivos seguidos]. El servidor comprueba el SHA-1 de cada uno.
+  async uploadBatch(id, items, progress) {
+    const head = Buffer.from(JSON.stringify({ files: items.map((t) => ({ sha1: t.sha, size: t.size })) }), 'utf8');
+    const len = Buffer.alloc(4);
+    len.writeUInt32BE(head.length);
+    const parts = [len, head];
+    for (const t of items) {
+      const b = await fsp.readFile(t.file);
+      if (b.length !== t.size) throw err(`"${t.name}" cambió mientras se publicaba. Vuelve a intentarlo.`, 'ECHANGED');
+      parts.push(b);
+    }
+    const body = Buffer.concat(parts);
+    const data = body.length - 4 - head.length;
+    const url = this.backend.url(`/v1/admin/instances/${id}/blobs/batch`);
+    for (let attempt = 0; ; attempt++) {
+      let counted = 0;
+      const onBytes = (n) => { const add = Math.min(n, data - counted); if (add > 0) { counted += add; progress.addDone(add); } };
+      try {
+        const headers = { ...(await this.uploadHeaders()), 'Content-Type': 'application/octet-stream' };
+        await send(url, { method: 'POST', headers, body, onBytes, timeout: 300000 });
+        return;
+      } catch (e) {
+        progress.addDone(-counted);
+        if (attempt >= 2 || (e.status && e.status < 500 && e.status !== 429)) {
+          const what = items.length > 1 ? `${items.length} archivos (${items[0].name}, …)` : `"${items[0].name}"`;
+          throw err(`No se pudieron subir ${what}: ${e.message}`);
+        }
+        await new Promise((r) => setTimeout(r, 1500 * (attempt + 1)));
+      }
+    }
   }
 
   async uploadBlob(id, t, progress) {

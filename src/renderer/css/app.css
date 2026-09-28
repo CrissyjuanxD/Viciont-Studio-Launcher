@@ -633,3 +633,53 @@
 .mr-pick > .i { width: 18px; height: 18px; color: var(--muted); }
 .mr-pick .ph { display: grid; place-items: center; overflow: hidden; }
 .mr-pick .ph > * { width: 100%; height: 100%; }
+
+/* ---------- informe de error del juego ---------- */
+.crash__cause { display: flex; gap: 12px; align-items: flex-start; margin-top: 14px; padding: 12px 14px; border-radius: 12px; border: 1px solid rgba(248, 113, 113, 0.4); background: rgba(248, 113, 113, 0.08); }
+.crash__cause > .i { width: 20px; height: 20px; flex: none; color: #fca5a5; margin-top: 1px; }
+.crash__cause b { display: block; color: #fff; font-size: 0.92rem; }
+.crash__cause small { display: block; margin-top: 4px; font-size: 0.74rem; color: #fecaca; word-break: break-word; }
+.crash__tabs { margin-top: 14px; }
+.crash__file { margin-top: 12px; font-size: 0.72rem; color: var(--muted); min-height: 1em; word-break: break-all; }
+.crash__text { margin-top: 6px; height: clamp(180px, calc(100vh - 460px), 60vh); overflow: auto; white-space: pre; font-size: 0.72rem; line-height: 1.5; letter-spacing: 0; word-break: normal; user-select: text; tab-size: 4; }
+
+/* ---------- cambios sin publicar ---------- */
+.files__summary button.state { cursor: pointer; }
+.files__summary button.state:hover, .files__summary button.state.is-on { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.18); }
+.pubbar__info button.chip { cursor: pointer; }
+.files__summary .btn { margin-left: auto; }
+.changes { display: grid; gap: 14px; margin-top: 14px; max-height: 58vh; overflow-y: auto; padding-right: 4px; }
+.changes--compact { max-height: 34vh; }
+.changes__group { display: grid; gap: 6px; }
+.changes__title { display: flex; align-items: center; gap: 8px; font: 600 0.74rem var(--font-ui); letter-spacing: 0.12em; text-transform: uppercase; color: #f0abfc; }
+.chg { border: 1px solid var(--line); border-radius: 12px; background: rgba(255, 255, 255, 0.02); overflow: hidden; }
+.chg__row { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto auto; gap: 10px; align-items: center; padding: 8px 10px; }
+.chg__icon { width: 30px; height: 30px; border-radius: 8px; overflow: hidden; background: rgba(255, 255, 255, 0.04); display: grid; place-items: center; color: var(--muted); }
+.chg__icon img { width: 100%; height: 100%; object-fit: cover; }
+.chg__icon .i { width: 15px; height: 15px; }
+.chg__name { min-width: 0; }
+.chg__name b { display: block; color: #fff; font-size: 0.86rem; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chg__name small { display: block; font: 400 0.72rem var(--font-mono); color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.chg__size { font: 400 0.74rem var(--font-mono); color: var(--muted); white-space: nowrap; }
+.chg__size b { color: var(--text-2); font-weight: 400; }
+.chg__diff { border-top: 1px solid var(--line); background: rgba(6, 1, 14, 0.7); }
+.chg__note { padding: 10px 12px; font-size: 0.8rem; color: var(--text-2); }
+.diff { font: 400 0.72rem/1.55 var(--font-mono); max-height: 42vh; overflow: auto; }
+.diff__line { display: grid; grid-template-columns: 44px 44px 16px minmax(0, 1fr); white-space: pre; }
+.diff__line span { padding: 0 6px; }
+.diff__n { color: rgba(255, 255, 255, 0.28); text-align: right; user-select: none; }
+.diff__m { user-select: none; text-align: center; }
+.diff__t { white-space: pre-wrap; word-break: break-all; }
+.diff__line--add { background: rgba(27, 217, 106, 0.1); }
+.diff__line--add .diff__m, .diff__line--add .diff__t { color: #b9f6ca; }
+.diff__line--del { background: rgba(248, 113, 113, 0.1); }
+.diff__line--del .diff__m, .diff__line--del .diff__t { color: #fecaca; }
+.diff__gap { padding: 3px 10px; color: var(--muted); background: rgba(168, 85, 247, 0.07); font-style: italic; }
+.diff__stats { display: flex; gap: 12px; padding: 7px 12px; border-bottom: 1px solid var(--line); font: 400 0.72rem var(--font-mono); color: var(--muted); }
+.diff__stats .add { color: #b9f6ca; }
+.diff__stats .del { color: #fecaca; }
+.meta-chg { display: grid; grid-template-columns: minmax(120px, auto) minmax(0, 1fr); gap: 6px 14px; padding: 10px 12px; font-size: 0.82rem; }
+.meta-chg dt { color: var(--muted); }
+.meta-chg dd { color: var(--text); word-break: break-word; }
+.meta-chg dd s { color: #fecaca; opacity: 0.8; }
+.protect-list { display: grid; gap: 10px; }
