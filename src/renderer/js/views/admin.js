@@ -290,7 +290,17 @@ function versionPicker(container, initial = {}) {
   container.querySelectorAll('[data-l]').forEach((b) => b.addEventListener('click', () => { st.loader = b.dataset.l; drawLoader(); }));
   q('lv').addEventListener('change', () => { st.loaderVersion = q('lv').value; });
   call('catalog:mcVersions').then((l) => { mcList = l; drawMc(); drawLoader(); }).catch((e) => { q('mc').innerHTML = `<option>${esc(e.message)}</option>`; });
-  return { value: () => ({ mc: st.mc, loader: { type: st.loader, version: st.loader === 'vanilla' ? '' : st.loaderVersion } }) };
+  return {
+    value: () => ({ mc: st.mc, loader: { type: st.loader, version: st.loader === 'vanilla' ? '' : st.loaderVersion } }),
+    // Rellena la versión (p. ej. con la de una instancia de Modrinth App)
+    set: (v) => {
+      if (v.mc) st.mc = v.mc;
+      if (v.loader?.type) st.loader = v.loader.type;
+      st.loaderVersion = v.loader?.version || '';
+      if (mcList.length) drawMc();
+      drawLoader();
+    },
+  };
 }
 
 function newInstanceModal(app) {
@@ -298,8 +308,12 @@ function newInstanceModal(app) {
     size: 'lg',
     html: `<div class="modal__body">
       <h2 class="modal__title">Nueva instancia</h2>
-      <p class="modal__text">Se crea una carpeta en tu PC para esta instancia. Empieza desde cero o importa un modpack que ya tengas (CurseForge, Prism, Modrinth…).</p>
+      <p class="modal__text">Se crea una carpeta en tu PC para esta instancia. Empieza desde cero o importa una que ya tengas (Modrinth App, CurseForge, Prism…).</p>
       <form id="nf" style="display:grid;gap:16px;margin-top:18px">
+        <div class="mr-app-row" id="nf-mr">
+          <span>${icon('download')}<b>¿La tienes en Modrinth App?</b> Elígela y se rellena todo sola.</span>
+          <button class="btn btn--sm" type="button" data-mrapp>${icon('search')}Elegir de Modrinth App</button>
+        </div>
         <div class="editor__cols">
           <label class="field"><span class="field__label">Nombre <em>*</em></span><input class="input" name="name" maxlength="60" required placeholder="Viciont Hardcore 4" autofocus></label>
           <label class="field"><span class="field__label">Identificador <em>*</em></span><input class="input mono" name="id" maxlength="48" required placeholder="viciont-hardcore-4"><span class="field__hint">Minúsculas, números y guiones. No se puede cambiar después.</span></label>
@@ -316,8 +330,29 @@ function newInstanceModal(app) {
   const f = m.content.querySelector('#nf');
   const vp = versionPicker(m.content.querySelector('#vp'));
   let idTouched = false;
+  let fromMr = null; // instancia de Modrinth App elegida
   f.name.addEventListener('input', () => { if (!idTouched) f.id.value = slugify(f.name.value); });
   f.id.addEventListener('input', () => { idTouched = true; f.id.value = slugify(f.id.value); });
+  const drawMr = () => {
+    const row = m.content.querySelector('#nf-mr');
+    row.classList.toggle('is-picked', Boolean(fromMr));
+    row.innerHTML = fromMr
+      ? `<span>${fromMr.iconData ? `<img src="${fromMr.iconData}" alt="">` : icon('check')}Se importará <b>${esc(fromMr.name)}</b> de Modrinth App · Minecraft ${esc(fromMr.mc)} · ${esc(loaderLabel(fromMr.loader))}</span><button class="btn btn--sm btn--ghost" type="button" data-mrapp-clear>Quitar</button>`
+      : `<span>${icon('download')}<b>¿La tienes en Modrinth App?</b> Elígela y se rellena todo sola.</span><button class="btn btn--sm" type="button" data-mrapp>${icon('search')}Elegir de Modrinth App</button>`;
+    f.querySelector('[type="submit"]').innerHTML = `${icon('plus')}${fromMr ? 'Crear e importar' : 'Crear'}`;
+    hydrateIcons(m.content);
+  };
+  m.content.querySelector('#nf-mr').addEventListener('click', async (e) => {
+    if (e.target.closest('[data-mrapp-clear]')) { fromMr = null; drawMr(); return; }
+    if (!e.target.closest('[data-mrapp]')) return;
+    const inst = await pickModrinthInstance();
+    if (!inst) return;
+    fromMr = inst;
+    f.name.value = inst.name;
+    if (!idTouched) f.id.value = slugify(inst.name);
+    if (inst.mc) vp.set({ mc: inst.mc, loader: inst.loader });
+    drawMr();
+  });
   const create = async (btn) => {
     const v = vp.value();
     const id = slugify(f.id.value || f.name.value);
@@ -333,7 +368,7 @@ function newInstanceModal(app) {
     try {
       const id = await create(e.submitter);
       m.close();
-      app.go({ name: 'admin', id, tab: 'content' });
+      app.go(fromMr ? { name: 'admin', id, tab: 'content', import: 'modrinth-app', mr: fromMr } : { name: 'admin', id, tab: 'content' });
     } catch (er) { err(er); }
   });
   m.content.querySelectorAll('[data-import]').forEach((b) => b.addEventListener('click', async () => {
@@ -858,7 +893,8 @@ function renderEditor(root, id, app, route = {}) {
     }
     if (act === 'content-more') {
       menu(b, [
-        { label: 'Importar instancia (carpeta)', icon: 'download', onClick: () => importFolder(id, (w) => { setWs(w); reload(); }) },
+        { label: 'Importar de Modrinth App', icon: 'download', onClick: async () => { const inst = await pickModrinthInstance(); if (inst) importFolder(id, (w) => { setWs(w); reload(); }, inst); } },
+        { label: 'Importar instancia (carpeta)', icon: 'folder', onClick: () => importFolder(id, (w) => { setWs(w); reload(); }) },
         { label: 'Importar modpack .mrpack', icon: 'package', onClick: () => importMrpack(id, (w) => { setWs(w); reload(); }) },
         ...(d.baseVersion && ws().changes?.total ? ['-', { label: 'Deshacer todos los cambios', icon: 'history', danger: true, onClick: async () => {
           const ok = await confirm({ title: '¿Deshacer todos los cambios?', text: 'Tu carpeta volverá a estar como la versión publicada. Los archivos nuevos van a la Papelera.', ok: 'Deshacer', danger: true, icon: 'history' });
@@ -913,6 +949,7 @@ function renderEditor(root, id, app, route = {}) {
     const imp = route.import;
     if (imp === 'mrpack') importMrpack(id, (w) => { setWs(w); reload(); });
     if (imp === 'folder') importFolder(id, (w) => { setWs(w); reload(); });
+    if (imp === 'modrinth-app' && route.mr) importFolder(id, (w) => { setWs(w); reload(); }, route.mr);
   }).catch((e) => {
     root.innerHTML = `<div class="page"><div class="empty">${icon('alert')}<h3>No se pudo abrir</h3><p>${esc(e.message)}</p><button class="btn" type="button" data-back>Volver</button></div></div>`;
     hydrateIcons(root);
@@ -1018,18 +1055,63 @@ function modrinthModal(id, draft, onChange) {
   search();
 }
 
-async function importFolder(id, onDone) {
+// Instancias de Modrinth App de este PC: resuelve con la elegida (o null).
+async function pickModrinthInstance() {
+  let list;
+  const t = toast('Buscando instancias de Modrinth App…', { timeout: 0 });
+  try { list = await call('admin:modrinthInstances'); } catch (e) { toastError(e); return null; } finally { t(); }
+  if (!list.length) {
+    toast('No se encontró ninguna instancia de Modrinth App en este PC.', { kind: 'info', timeout: 6000 });
+    return null;
+  }
+  return new Promise((resolve) => {
+    const m = modal({
+      size: 'lg',
+      onClose: (r) => resolve(r || null),
+      html: `<div class="modal__body"><h2 class="modal__title">Importar de <span class="grad-text">Modrinth App</span></h2>
+        <p class="modal__text">Instancias de Modrinth App en este PC. Se copian a tu carpeta: Modrinth App no se toca.</p>
+        <input class="input" id="mrf" placeholder="Filtrar…" style="margin-top:14px">
+        <div class="mr-results" id="mrl" style="margin-top:12px"></div></div>`,
+    });
+    const box = m.content.querySelector('#mrl');
+    const draw = (q = '') => {
+      const shown = list.map((i, n) => ({ i, n })).filter(({ i }) => !q || i.name.toLowerCase().includes(q));
+      box.innerHTML = shown.map(({ i, n }) => `<button class="mr-item mr-pick" type="button" data-pick="${n}">
+          ${i.iconData ? `<img src="${i.iconData}" alt="">` : `<div class="ph">${coverMini(i.name)}</div>`}
+          <div style="min-width:0"><b>${esc(i.name)}</b><small>Minecraft ${esc(i.mc || '?')} · ${esc(loaderLabel(i.loader))}${i.lastPlayed ? ` · jugada ${esc(timeAgo(i.lastPlayed))}` : ''}${i.installed ? '' : ' · sin terminar de instalar'}</small></div>
+          ${icon('arrowRight')}</button>`).join('') || '<p class="field__hint">Ninguna coincide.</p>';
+      hydrateIcons(box);
+    };
+    m.content.querySelector('#mrf').addEventListener('input', (e) => draw(e.target.value.trim().toLowerCase()));
+    box.addEventListener('click', (e) => {
+      const b = e.target.closest('[data-pick]');
+      if (b) m.close(list[Number(b.dataset.pick)]);
+    });
+    draw();
+  });
+}
+
+// Usa el icono de una instancia de Modrinth App (se optimiza igual que uno elegido a mano).
+async function useModrinthIcon(id, file) {
+  const ic = await call('admin:modrinthIcon', file);
+  const out = await processMedia(new File([ic.bytes], ic.name, { type: ic.type }), 'icon');
+  await call('admin:setMedia', id, 'icon', out);
+}
+
+// preset: instancia de Modrinth App (sin elegir carpeta; trae su versión y su icono)
+async function importFolder(id, onDone, preset = null) {
   let scan;
-  try { scan = await call('admin:scanFolder'); } catch (e) { toastError(e); return; }
+  try { scan = preset ? await call('admin:scanPath', preset.dir) : await call('admin:scanFolder'); } catch (e) { toastError(e); return; }
   if (!scan) return;
-  const det = scan.detected;
+  const det = preset ? { source: 'Modrinth App', name: preset.name, mc: preset.mc, loader: preset.loader } : scan.detected;
   const m = modal({
     size: 'lg',
-    html: `<div class="modal__body"><h2 class="modal__title">Importar instancia</h2>
-      <p class="modal__text">${det ? `Detectado: <b>${esc(det.source)}</b> · Minecraft ${esc(det.mc || '?')} · ${esc(loaderLabel(det.loader))}` : 'Elige qué quieres incluir.'} Se copia a tu carpeta; al publicar, los mods que existan en Modrinth se enlazan a su CDN y el resto se sube a tu servidor.</p>
+    html: `<div class="modal__body"><h2 class="modal__title">Importar ${preset ? `<span class="grad-text">${esc(preset.name)}</span>` : 'instancia'}</h2>
+      <p class="modal__text">${det ? `Detectado: <b>${esc(det.source)}</b> · Minecraft ${esc(det.mc || '?')} · ${esc(loaderLabel(det.loader))}.` : 'Elige qué quieres incluir.'} Se copia a tu carpeta; al publicar, los mods que existan en Modrinth se enlazan a su CDN y el resto se sube a tu servidor.</p>
       <div class="check-list" style="margin-top:14px">${scan.entries.map((e, i) => `<label><span class="check"><input type="checkbox" data-i="${i}" ${e.suggested ? 'checked' : ''}> ${icon(e.dir ? 'folder' : 'file')} ${esc(e.name)}</span><small>${e.dir ? `${e.count} archivos · ` : ''}${bytes(e.size)}</small></label>`).join('')}</div>
       ${det?.mc ? `<label class="check" style="margin-top:12px"><input type="checkbox" id="use-ver" checked> Usar la versión detectada (${esc(det.mc)} · ${esc(loaderLabel(det.loader))})</label>` : ''}
-      <p class="field__hint" style="margin-top:8px">Los mundos (<code>saves</code>) pueden pesar mucho: inclúyelos solo si quieres repartir un mapa.</p>
+      ${preset?.icon ? `<label class="check" style="margin-top:8px"><input type="checkbox" id="use-icon" checked> Usar su icono</label>` : ''}
+      <p class="field__hint" style="margin-top:8px">Los mundos (<code>saves</code>) pueden pesar mucho: inclúyelos solo si quieres repartir un mapa. Los mods desactivados no se copian.</p>
       <div class="modal__actions"><button class="btn btn--ghost" type="button" data-cancel>Cancelar</button><button class="btn btn--primary" type="button" data-go>${icon('download')}Importar</button></div></div>`,
   });
   m.content.querySelector('[data-cancel]').addEventListener('click', () => m.close());
@@ -1046,6 +1128,7 @@ async function importFolder(id, onDone) {
       btn.disabled = true;
       if (det?.mc && m.content.querySelector('#use-ver')?.checked) await call('admin:saveMeta', id, { mc: det.mc, loader: det.loader });
       const r = await call('admin:importFolder', id, scan.root, include);
+      if (preset?.icon && m.content.querySelector('#use-icon')?.checked) await useModrinthIcon(id, preset.icon).catch((er) => toastError(er, 'No se pudo usar su icono: '));
       toast(`Importados ${r.total} archivos a tu carpeta.`, { kind: 'success', timeout: 7000 });
       m.setLocked(false);
       m.close();

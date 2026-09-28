@@ -26,6 +26,7 @@ const { readSecure, writeSecure } = require('../core/secure');
 const { configFile } = require('../core/paths');
 const { NICK_RE } = require('../auth/offline');
 const modrinth = require('./modrinth');
+const modrinthApp = require('./modrinthApp');
 const { LOADERS } = require('../game/loaders');
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,47}$/;
@@ -913,7 +914,7 @@ class Admin extends EventEmitter {
       let total = 0;
       await pool(list, 6, async ([rel, src]) => {
         const r = normalizeRel(rel);
-        if (!r || IGNORE_FILE_RE.test(r)) return;
+        if (!r || IGNORE_FILE_RE.test(r) || /\.disabled$/i.test(r)) return; // los mods desactivados no se importan
         const dest = safeJoin(dir, r);
         await ensureDir(path.dirname(dest));
         await fsp.copyFile(src, dest);
@@ -926,6 +927,32 @@ class Admin extends EventEmitter {
     } finally {
       this.stopProgress(key);
     }
+  }
+
+  // Instancias de Modrinth App en este PC (con su icono ya listo para mostrarlo en la lista).
+  async modrinthInstances() {
+    const list = await modrinthApp.listInstances(this.log);
+    this.mrIcons = new Set();
+    const out = [];
+    for (const i of list) {
+      this.grant(i.dir); // se podrá importar sin volver a elegir la carpeta
+      let iconData = null;
+      if (i.icon) {
+        this.mrIcons.add(path.resolve(i.icon).toLowerCase());
+        const ic = await modrinthApp.readIcon(i.icon).catch(() => null);
+        if (ic && ic.bytes.length <= 512 * 1024) iconData = `data:${ic.type};base64,${ic.bytes.toString('base64')}`;
+      }
+      out.push({ name: i.name, dir: i.dir, mc: i.mc, loader: i.loader, lastPlayed: i.lastPlayed, installed: i.installed, icon: i.icon, iconData });
+    }
+    return out;
+  }
+
+  // Icono de una instancia de Modrinth App de la lista (para usarlo como icono de la tuya).
+  async modrinthIcon(file) {
+    if (!this.mrIcons?.has(path.resolve(String(file || '')).toLowerCase())) throw err('Ese icono no es de una instancia de Modrinth App.');
+    const ic = await modrinthApp.readIcon(file);
+    if (!ic) throw err('No se pudo leer el icono.');
+    return ic;
   }
 
   // Descarga un modpack de Modrinth (.mrpack) en la carpeta sincronizada.

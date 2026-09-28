@@ -609,6 +609,13 @@ function start() {
     if (!admin.granted(root)) throw new Error('Vuelve a elegir la carpeta.');
     return admin.importFolder(id, root, include);
   }));
+  // instancias de Modrinth App de este PC (sin exportar .mrpack)
+  on('admin:modrinthInstances', needAdmin(() => admin.modrinthInstances()));
+  on('admin:modrinthIcon', needAdmin((file) => admin.modrinthIcon(file)));
+  on('admin:scanPath', needAdmin((dir) => {
+    if (!admin.granted(dir)) throw new Error('Vuelve a elegir la instancia.');
+    return admin.scanFolder(dir);
+  }));
   on('admin:importMrpack', needAdmin(async (id) => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Modpack de Modrinth', properties: ['openFile'], filters: [{ name: 'Modpack de Modrinth', extensions: ['mrpack'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
