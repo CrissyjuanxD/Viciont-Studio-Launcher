@@ -71,7 +71,6 @@ function cleanMeta(m = {}, id) {
     server: str(m.server, 120),
     tags: (Array.isArray(m.tags) ? m.tags : []).map((t) => str(t, 24)).filter(Boolean).slice(0, 6),
     order: Math.max(-9999, Math.min(9999, Math.round(Number(m.order) || 0))),
-    featured: Boolean(m.featured),
     accent: /^#[0-9a-f]{6}$/i.test(m.accent || '') ? m.accent : '',
     changelog: str(m.changelog, 2000),
     showFolder: m.showFolder !== false,
@@ -319,7 +318,7 @@ class Admin extends EventEmitter {
     const LABEL = {
       name: 'Nombre', summary: 'Resumen', description: 'Descripción', mc: 'Versión de Minecraft', loader: 'Cargador',
       visibility: 'Visibilidad', allow: 'Nicks con permiso', memory: 'RAM recomendada', server: 'Servidor', tags: 'Etiquetas',
-      order: 'Orden en la lista', featured: 'Destacada', accent: 'Color', changelog: 'Novedades', showFolder: 'Botón «Carpeta»', protect: 'Carpetas ocultas',
+      order: 'Orden en la lista', accent: 'Color', changelog: 'Novedades', showFolder: 'Botón «Carpeta»', protect: 'Carpetas ocultas',
     };
     const short = (v) => { const s = String(v ?? '').replace(/\s+/g, ' ').trim(); return s.length > 160 ? `${s.slice(0, 160)}…` : (s || '—'); };
     const fmt = (k, v) => {
@@ -328,7 +327,7 @@ class Admin extends EventEmitter {
       if (k === 'allow') return `${v.length} nick(s)`;
       if (k === 'memory') return v.recommended ? `${v.recommended} MB` : 'sin recomendar';
       if (k === 'tags') return v.join(', ') || '—';
-      if (k === 'featured' || k === 'showFolder') return v ? 'Sí' : 'No';
+      if (k === 'showFolder') return v ? 'Sí' : 'No';
       if (k === 'protect') return v.length ? v.join(', ') : 'ninguna';
       return short(v);
     };

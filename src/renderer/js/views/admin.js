@@ -499,7 +499,6 @@ function renderEditor(root, id, app, route = {}) {
         <label class="field"><span class="field__label">Etiquetas</span><input class="input" data-m="tags" value="${esc((mt.tags || []).join(', '))}" placeholder="Hardcore, Evento, Serie"><span class="field__hint">Separadas por comas (máximo 6).</span></label>
         <label class="field"><span class="field__label">Orden en la lista</span><input class="input mono" data-m="order" type="number" value="${mt.order || 0}"><span class="field__hint">Las de número más bajo salen primero.</span></label>
       </div>
-      <label class="switch"><input type="checkbox" data-m="featured" ${mt.featured ? 'checked' : ''}> Destacar en el inicio</label>
       <label class="field"><span class="field__label">Novedades de esta versión</span><textarea class="input textarea" data-m="changelog" rows="3" maxlength="2000" placeholder="Qué cambia para los jugadores al actualizar (se muestra en el botón Actualizar).">${esc(mt.changelog)}</textarea></label>`;
     const vp = versionPicker(body.querySelector('#ed-vp'), { mc: mt.mc, loader: mt.loader });
     body.querySelectorAll('[data-m]').forEach((el) => el.addEventListener(el.type === 'checkbox' ? 'change' : 'input', () => {
