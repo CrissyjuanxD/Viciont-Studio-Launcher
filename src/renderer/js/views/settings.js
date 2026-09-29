@@ -471,6 +471,7 @@ const PANES = {
 
   about(pane) {
     const info = state.info;
+    const privacyUrl = `${String(info.site || 'https://viciontstudios.pages.dev/').replace(/\/?$/, '/')}privacidad`;
     pane.innerHTML = `
       <div class="settings__section" style="justify-items:start">
         <img src="img/logo-full.webp" alt="Viciont Studios" style="width:260px;filter:drop-shadow(0 0 20px rgba(168,85,247,.6))">
@@ -493,6 +494,9 @@ const PANES = {
           <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego, sin tu nombre de usuario del sistema). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
           <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
         </ul>
+        <div class="field__row">
+          <button class="btn btn--sm" type="button" data-link="${esc(privacyUrl)}">${icon('shield')}Ver la política de privacidad completa</button>
+        </div>
       </div>
       <div class="settings__section">
         <h3>Créditos y licencias</h3>

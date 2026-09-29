@@ -27,7 +27,7 @@ export function render(root, _route, app) {
         <div class="grid-cards" id="home-grid"></div>
       </div>
       <footer class="home__footer">
-        <span>Launcher oficial de <b>Viciont Studios</b> · creado por <b>CrissyjuanxD</b></span>
+        <span>Launcher oficial de <b>Viciont Studios</b> · Creado por <b>CrissyjuanxD</b></span>
         <div class="socials" id="home-socials"></div>
       </footer>
     </section>`;
