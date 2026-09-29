@@ -35,7 +35,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 | ![Inicio de sesión](docs/screens/login.webp) | ![Inicio](docs/screens/inicio.webp) |
 | ![Instancia](docs/screens/instancia.webp) | ![Descargando](docs/screens/descargando.webp) |
 | ![Jugando](docs/screens/jugando.webp) | ![Skins](docs/screens/skins.webp) |
-| ![Administración: contenido](docs/screens/admin-contenido.webp) | ![Administración: Modrinth](docs/screens/admin-modrinth.webp) |
+| ![Ajustes](docs/screens/ajustes.webp) | |
 
 ## Qué hace
 
@@ -45,7 +45,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
-- **Inicio** con todas las instancias que puedes jugar: en cada una se ve cuándo jugaste por última vez y cuánto tiempo llevas jugado.
+- **Inicio** con todas las instancias que puedes jugar: en cada una se ve cuándo jugaste por última vez y cuánto tiempo llevas jugado. Abajo siempre queda el pie con las redes de Viciont Studios, aunque haya muchas instancias.
 - **Barra lateral** con las instancias que tienes permiso para ver, la casita para volver al inicio, las skins, los ajustes, tu cabeza de la skin (al pasar el cursor dice qué cuenta tienes) y el botón de cerrar sesión.
 - **Un solo botón** que cambia según el estado: **Descargar → Actualizar → Jugar → Jugando**. Mientras descarga se convierte en una tarjeta con la imagen de la instancia, el progreso, los MB/s y el tiempo que queda.
 - Cada instancia tiene su **fondo propio**: imagen, GIF o vídeo.
@@ -61,7 +61,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Tu carpeta es la instancia**: cada instancia se sincroniza con una carpeta de tu PC. La cambias desde el launcher, desde el Explorador de Windows o jugando, y al publicar solo se sube lo que cambió (lo nuevo, lo modificado y lo que quitaste). A los jugadores solo se les actualizan esos archivos. Si otro administrador publica antes, **Traer cambios** respeta lo tuyo.
 - Añadir **mods, resource packs y shaders de Modrinth** (se descargan a tu carpeta con sus dependencias) o **archivos propios**: mods, `config`, `options.txt`, `kubejs`, mapas, etc.
 - **Importar desde Modrinth App** sin exportar nada: sale la lista de tus instancias de Modrinth App con su versión, su cargador y su icono. También se puede importar un modpack `.mrpack` o una carpeta de CurseForge, Prism o `.minecraft`. Al publicar, los mods que existen en Modrinth se enlazan a su CDN en vez de subirlos.
-- **Icono y fondo** (PNG, JPG, WEBP, GIF o vídeo MP4/WEBM). Las imágenes se optimizan solas.
+- **Icono, fondo y banner** (la imagen de la tarjeta en *Instancias disponibles*): PNG, JPG, WEBP o GIF, y el fondo también en vídeo MP4/WEBM. Las imágenes se optimizan solas. El banner necesita el servidor v6.
 - Instancias **públicas** o **privadas** (solo para los nicks que elijas).
 - **Publicar versiones**: solo se suben los archivos nuevos o cambiados (los pequeños en lotes, así que publicar miles de archivos es rápido). Los jugadores ven **Actualizar** y el texto de novedades.
 - **Qué cambió exactamente**: antes de publicar, **Ver cambios** lista los archivos nuevos, modificados y los que se quitan, y los textos o permisos que cambiaste. En las configs se ven las **líneas que cambiaron** (lo nuevo en verde, lo quitado en rojo), como en Git.

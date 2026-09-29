@@ -526,9 +526,11 @@ function renderEditor(root, id, app, route = {}) {
     const src = (m) => (m?.local ? `vsl-media://local/admin/${m.name}` : mediaUrl(m?.key));
     const iconM = d.media?.icon;
     const bgM = d.media?.background;
+    const bannerM = d.media?.banner;
     const bgIsVideo = bgM && isVideo(bgM.type, bgM.name || bgM.key);
+    const bannerOk = (d.apiVersion || 0) >= 6;
     body.innerHTML = `
-      <div class="editor__cols" style="grid-template-columns:auto 1fr;align-items:start">
+      <div class="look-grid">
         <div class="field"><span class="field__label">Icono</span>
           <div class="media-pick media-pick--icon ${iconM ? 'has-media' : ''}" data-pick="icon">
             ${iconM ? `<img src="${src(iconM)}" alt="">` : ''}
@@ -543,6 +545,14 @@ function renderEditor(root, id, app, route = {}) {
           </div>
           <div class="field__row">${bgM ? '<button class="btn btn--sm btn--ghost" type="button" data-clear="background">Quitar</button>' : ''}<span class="field__hint">Se ve detrás del botón Jugar. Las imágenes se optimizan solas; para vídeo usa algo corto que se pueda repetir en bucle.</span></div>
         </div>
+        <div class="field"><span class="field__label">Banner de la tarjeta</span>
+          <div class="media-pick media-pick--banner ${bannerM ? 'has-media' : ''} ${bannerOk ? '' : 'is-disabled'}" ${bannerOk ? 'data-pick="banner"' : ''}>
+            ${bannerM ? `<img src="${src(bannerM)}" alt="">` : ''}
+            <span class="media-pick__label">${icon('image')}Elegir banner<small>PNG, JPG, WEBP o GIF</small></span>
+          </div>
+          <div class="field__row">${bannerM ? '<button class="btn btn--sm btn--ghost" type="button" data-clear="banner">Quitar</button>' : ''}<span class="field__hint">Es la imagen de la tarjeta en <b>Inicio → Instancias disponibles</b> (se ve recortada a 16:9). Si no eliges ninguno, se usa el fondo.</span></div>
+          ${bannerOk ? '' : `<p class="inst__warn">${icon('alert')}Para usarlo hay que actualizar el servidor de Viciont Studios (versión 6 o más nueva).</p>`}
+        </div>
       </div>`;
     body.querySelectorAll('[data-pick]').forEach((el) => el.addEventListener('click', () => pickMedia(el.dataset.pick)));
     body.querySelectorAll('[data-clear]').forEach((el) => el.addEventListener('click', async () => {
@@ -554,7 +564,7 @@ function renderEditor(root, id, app, route = {}) {
   const pickMedia = (kind) => {
     const inp = document.createElement('input');
     inp.type = 'file';
-    inp.accept = kind === 'icon' ? 'image/png,image/jpeg,image/webp,image/gif' : 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm';
+    inp.accept = kind === 'background' ? 'image/png,image/jpeg,image/webp,image/gif,video/mp4,video/webm' : 'image/png,image/jpeg,image/webp,image/gif';
     inp.addEventListener('change', async () => {
       const file = inp.files[0];
       if (!file) return;
@@ -1326,7 +1336,7 @@ async function publish(id, d, onDone) {
 async function processMedia(file, kind) {
   const type = file.type || '';
   if (/^video\//.test(type)) {
-    if (kind === 'icon') throw new Error('El icono debe ser una imagen o un GIF.');
+    if (kind !== 'background') throw new Error(`El ${kind === 'icon' ? 'icono' : 'banner'} debe ser una imagen o un GIF.`);
     if (file.size > 80 * 1024 * 1024) throw new Error('El vídeo pesa más de 80 MB. Recórtalo o comprímelo.');
     return { bytes: new Uint8Array(await file.arrayBuffer()), type };
   }
@@ -1347,7 +1357,7 @@ async function processMedia(file, kind) {
       ctx.imageSmoothingQuality = 'high';
       ctx.drawImage(img, (img.width - s) / 2, (img.height - s) / 2, s, s, 0, 0, 256, 256);
     } else {
-      const scale = Math.min(1, 1920 / img.width);
+      const scale = Math.min(1, (kind === 'banner' ? 960 : 1920) / img.width);
       c.width = Math.round(img.width * scale);
       c.height = Math.round(img.height * scale);
       const ctx = c.getContext('2d');

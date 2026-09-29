@@ -467,7 +467,7 @@ const PANES = {
       <div class="settings__section" style="justify-items:start">
         <img src="img/logo-full.webp" alt="Viciont Studios" style="width:260px;filter:drop-shadow(0 0 20px rgba(168,85,247,.6))">
         <h3>Viciont Studios Launcher ${esc(info.version)}</h3>
-        <p class="field__hint">Launcher oficial de Viciont Studios, creado por <b>CrissyjuanxD</b>. Inspirado en el funcionamiento de Modrinth App (código abierto).</p>
+        <p class="field__hint">Launcher oficial de Viciont Studios, creado por <b>CrissyjuanxD</b>. Inspirado en Modrinth App.</p>
         <div class="field__row">
           <button class="btn btn--sm" type="button" data-link="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher">${icon('github')}Código en GitHub</button>
           <button class="btn btn--sm btn--ghost" type="button" data-link="${esc(info.site)}">${icon('globe')}Web de Viciont Studios</button>

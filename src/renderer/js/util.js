@@ -81,6 +81,8 @@ export function instIcon(inst) {
 }
 
 export function instThumb(inst) {
+  const banner = mediaUrl(inst?.media?.banner);
+  if (banner) return `<img src="${banner}" alt="" loading="lazy" decoding="async">`;
   const bg = inst?.media?.background;
   if (bg && !isVideo(inst.media.backgroundType, bg)) return `<img src="${mediaUrl(bg)}" alt="" loading="lazy" decoding="async">`;
   if (inst?.media?.thumb) return `<img src="${mediaUrl(inst.media.thumb)}" alt="" loading="lazy" decoding="async">`;

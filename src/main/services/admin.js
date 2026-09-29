@@ -36,6 +36,8 @@ const MERGE_FILES = new Set(['options.txt', 'optionsof.txt', 'optionsshaders.txt
 const ONCE_FILES = new Set(['servers.dat']);
 const UUID_RE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 const MEDIA_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' };
+const MEDIA_KINDS = ['icon', 'background', 'banner'];
+const MEDIA_LABELS = { icon: 'Icono', background: 'Fondo', banner: 'Banner' };
 const PROTECTABLE = ['mods', 'config', 'resourcepacks'];
 
 const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', '.cache', 'cache', 'local', 'downloads', 'backups', '.vsl',
@@ -80,6 +82,7 @@ function cleanMeta(m = {}, id) {
 const mediaFrom = (inst) => ({
   icon: inst?.media?.icon ? { key: inst.media.icon } : null,
   background: inst?.media?.background ? { key: inst.media.background, type: inst.media.backgroundType } : null,
+  banner: inst?.media?.banner ? { key: inst.media.banner } : null,
 });
 
 const defaultPolicy = (rel) => {
@@ -306,7 +309,7 @@ class Admin extends EventEmitter {
     if (!inst?.version) return true;
     if (JSON.stringify(cleanMeta(d.meta, d.id)) !== JSON.stringify(cleanMeta(inst, d.id))) return true;
     const pub = mediaFrom(inst);
-    return ['icon', 'background'].some((k) => d.media?.[k]?.local || (d.media?.[k]?.key || null) !== (pub[k]?.key || null));
+    return MEDIA_KINDS.some((k) => d.media?.[k]?.local || (d.media?.[k]?.key || null) !== (pub[k]?.key || null));
   }
 
   metaChanges(d, inst) {
@@ -342,9 +345,9 @@ class Admin extends EventEmitter {
       out.push(c);
     }
     const pub = mediaFrom(inst);
-    for (const k of ['icon', 'background']) {
+    for (const k of MEDIA_KINDS) {
       const m = d.media?.[k];
-      if (m?.local || (m?.key || null) !== (pub[k]?.key || null)) out.push({ key: k, label: k === 'icon' ? 'Icono' : 'Fondo', from: pub[k] ? 'el publicado' : 'sin imagen', to: m ? 'uno nuevo' : 'sin imagen' });
+      if (m?.local || (m?.key || null) !== (pub[k]?.key || null)) out.push({ key: k, label: MEDIA_LABELS[k], from: pub[k] ? 'el publicado' : 'sin imagen', to: m ? 'uno nuevo' : 'sin imagen' });
     }
     return out;
   }
@@ -454,10 +457,10 @@ class Admin extends EventEmitter {
   }
 
   async setMedia(id, kind, { bytes, type }) {
-    if (!['icon', 'background'].includes(kind)) throw err('Tipo de imagen no válido');
+    if (!MEDIA_KINDS.includes(kind)) throw err('Tipo de imagen no válido');
     const ext = MEDIA_EXT[type];
     if (!ext) throw err('Formato no admitido. Usa PNG, JPG, WEBP, GIF, MP4 o WEBM.');
-    if (kind === 'icon' && /^video/.test(type)) throw err('El icono debe ser una imagen o un GIF.');
+    if (kind !== 'background' && /^video/.test(type)) throw err(`El ${kind === 'icon' ? 'icono' : 'banner'} debe ser una imagen o un GIF.`);
     const buf = Buffer.from(bytes);
     const max = /^video/.test(type) ? 80 : ext === 'gif' ? 15 : 8;
     if (buf.length > max * 1024 * 1024) throw err(`El archivo es demasiado grande (máximo ${max} MB).`);
@@ -473,6 +476,7 @@ class Admin extends EventEmitter {
   }
 
   async clearMedia(id, kind) {
+    if (!MEDIA_KINDS.includes(kind)) throw err('Tipo de imagen no válido');
     const { d, inst } = await this.metaDraft(id);
     d.media = d.media || {};
     d.media[kind] = null;
@@ -1190,7 +1194,7 @@ class Admin extends EventEmitter {
         if ((await hashFile(e.local)) !== sha) throw err(`"${e.path}" cambió mientras se publicaba. Vuelve a intentarlo.`, 'ECHANGED');
         todo.push({ sha, file: e.local, size: s.size, name: e.path });
       });
-      const mediaTodo = ['icon', 'background'].map((k) => [k, d.media?.[k]]).filter(([, m]) => m?.local);
+      const mediaTodo = MEDIA_KINDS.map((k) => [k, d.media?.[k]]).filter(([, m]) => m?.local);
       progress.addTotal(todo.reduce((a, t) => a + t.size, 0) + mediaTodo.reduce((a, [, m]) => a + (m.size || 0), 0), todo.length);
       progress.setPhase('upload', todo.length ? `Subiendo ${todo.length} archivo(s)…` : 'Subiendo imágenes…');
       await this.uploadAll(id, todo, progress);
@@ -1222,7 +1226,7 @@ class Admin extends EventEmitter {
   }
 
   async uploadMedia(id, d, progress) {
-    for (const kind of ['icon', 'background']) {
+    for (const kind of MEDIA_KINDS) {
       const m = d.media?.[kind];
       if (!m?.local) continue;
       const file = path.join(this.dirs().media, m.name);
@@ -1236,7 +1240,7 @@ class Admin extends EventEmitter {
 
   mediaNames(d) {
     const out = {};
-    for (const kind of ['icon', 'background']) {
+    for (const kind of MEDIA_KINDS) {
       const m = d.media?.[kind];
       out[kind] = m?.key ? m.key.split('/')[1] : null;
     }
