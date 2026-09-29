@@ -230,7 +230,7 @@ async function onUpdateButton() {
     if (state.accounts?.active && !$('shell').hidden) app.openSettings('launcher');
     return;
   }
-  const ok = await confirm({ title: 'Actualizar el launcher', text: `El launcher se cerrará unos segundos para instalar la versión ${u.version} y se volverá a abrir solo. No se abre ningún instalador.`, ok: 'Actualizar ahora', icon: 'download' });
+  const ok = await confirm({ title: 'Actualizar el launcher', text: `El launcher se cerrará unos segundos para instalar la versión ${u.version}: verás el progreso en una ventanita y se volverá a abrir solo.`, ok: 'Actualizar ahora', icon: 'download' });
   if (!ok) return;
   const shownAt = Date.now();
   const close = updatingScreen(u.version);

@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const fsp = fs.promises;
-const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard, Notification } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard } = require('electron');
 const paths = require('./core/paths');
 const log = require('./core/log');
 const { Settings, totalMB, DEFAULT_JVM, recommendedMax } = require('./core/settings');
@@ -397,14 +397,6 @@ function start() {
     if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de actualizar.');
     if (instances.anyRunning()) throw new Error('Cierra el juego antes de actualizar el launcher.');
     quitting = true;
-    if (Notification.isSupported()) {
-      new Notification({
-        title: 'Actualizando Viciont Studios Launcher',
-        body: `Se está instalando la versión ${updater.state.version}. El launcher se volverá a abrir solo en unos segundos.`,
-        icon: path.join(RENDERER, 'img', 'icon.png'),
-        silent: true,
-      }).show();
-    }
     setTimeout(() => updater.install(), 900);
     return true;
   });

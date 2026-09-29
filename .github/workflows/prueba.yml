@@ -164,3 +164,30 @@ jobs:
           name: prueba-windows
           path: smoke-out
           retention-days: 7
+
+  windows-installer:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx electron-builder --win --x64 --publish never
+      - name: Bloquear el servidor de producción
+        shell: pwsh
+        run: Add-Content -Path "$env:SystemRoot\System32\drivers\etc\hosts" -Value "`r`n127.0.0.1 $env:API_HOST"
+      - name: Descargar la versión publicada
+        shell: pwsh
+        run: Invoke-WebRequest -Uri https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest/download/Viciont-Studios-Launcher-Setup.exe -OutFile old-setup.exe
+      - name: Probar el instalador
+        shell: pwsh
+        run: |
+          $setup = (Get-ChildItem dist\*Setup-*.exe | Select-Object -First 1).FullName
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts\installer-shots.ps1 -Setup $setup -Old (Resolve-Path old-setup.exe).Path -Out smoke-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-instalador
+          path: smoke-out
+          retention-days: 7
