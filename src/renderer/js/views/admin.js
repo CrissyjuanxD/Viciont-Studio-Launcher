@@ -1,6 +1,6 @@
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
-import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce } from '../util.js';
+import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce, fileManager } from '../util.js';
 import { modal, toast, toastError, confirm, menu, busy } from '../ui.js';
 import { diffLines, prettyIfJson } from '../linediff.js';
 
@@ -586,7 +586,7 @@ function renderEditor(root, id, app, route = {}) {
           <div class="sync-panel__icon">${icon('refresh')}</div>
           <div>
             <h3 class="title-md">Sincroniza esta instancia con tu PC</h3>
-            <p class="field__hint" style="margin-top:6px">Se ${d.baseVersion ? `descarga la versión publicada (v${d.baseVersion})` : 'crea la carpeta'} en tu PC. Desde ahí la cambias como quieras —desde aquí, desde el Explorador o jugando— y al publicar solo se sube lo que cambió. A los jugadores solo se les actualizan esos archivos.</p>
+            <p class="field__hint" style="margin-top:6px">Se ${d.baseVersion ? `descarga la versión publicada (v${d.baseVersion})` : 'crea la carpeta'} en tu PC. Desde ahí la cambias como quieras —desde aquí, desde el ${fileManager(state.info?.platform)} o jugando— y al publicar solo se sube lo que cambió. A los jugadores solo se les actualizan esos archivos.</p>
             ${d.legacy ? `<p class="inst__warn" style="margin-top:10px">${icon('alert')}Tienes cambios de una versión anterior del launcher: al sincronizar se pasarán a tu carpeta.</p>` : ''}
             ${w.error ? `<div class="form-error" style="margin-top:10px">${esc(w.error)}</div>` : ''}
             <div class="field__row" style="margin-top:14px"><button class="btn btn--primary" type="button" data-act="sync" ${syncing ? 'disabled' : ''}>${syncing ? '<span class="spin"></span>' : icon('download')}${syncing ? esc(p?.label || 'Sincronizando…') : 'Sincronizar con mi PC'}</button></div>
@@ -602,7 +602,7 @@ function renderEditor(root, id, app, route = {}) {
           <button class="btn btn--sm btn--primary" type="button" data-act="modrinth">${icon('search')}Buscar en Modrinth</button>
           <button class="btn btn--sm" type="button" data-act="upload">${icon('upload')}Añadir archivos</button>
           <button class="btn btn--sm" type="button" data-act="upload-folder">${icon('folder')}Añadir carpeta</button>
-          <button class="btn btn--sm btn--ghost" type="button" data-act="open-ws" data-tip="Abre tu carpeta en el Explorador: lo que cambies ahí también cuenta">${icon('external')}Abrir carpeta</button>
+          <button class="btn btn--sm btn--ghost" type="button" data-act="open-ws" data-tip="Abre tu carpeta en el ${fileManager(state.info?.platform)}: lo que cambies ahí también cuenta">${icon('external')}Abrir carpeta</button>
           <button class="btn btn--sm btn--ghost" type="button" data-act="rescan" data-tip="Vuelve a mirar qué cambió en la carpeta">${icon('refresh')}Comprobar</button>
           <button class="btn btn--sm btn--ghost" type="button" data-act="content-more">${icon('more')}</button>
           <input class="input" id="ffilter" placeholder="Filtrar…" value="${esc(filter)}" style="margin-left:auto">
@@ -750,7 +750,7 @@ function renderEditor(root, id, app, route = {}) {
           </div>
           <div>
             <label class="switch ${v5 ? '' : 'is-disabled'}"><input type="checkbox" data-protect="resourcepacks" ${mt.protect?.includes('resourcepacks') ? 'checked' : ''} ${v5 ? '' : 'disabled'}> Ocultar los resource packs</label>
-            <p class="field__hint" style="margin-top:6px">Igual que config: solo están mientras se juega y no se ven en la carpeta <b>resourcepacks</b> del Explorador (ni desde el botón «Abrir carpeta de paquetes» del juego). Los packs que añada el jugador siguen funcionando.</p>
+            <p class="field__hint" style="margin-top:6px">Igual que config: solo están mientras se juega y no se ven en la carpeta <b>resourcepacks</b> del ${fileManager(state.info?.platform)} (ni desde el botón «Abrir carpeta de paquetes» del juego). Los packs que añada el jugador siguen funcionando.</p>
           </div>
           ${v5 ? '' : `<p class="inst__warn">${icon('alert')}Para ocultar config y resource packs, primero actualiza el servidor (pega el código nuevo en Cloudflare y pulsa Deploy).</p>`}
           <p class="field__hint">Dificulta que se copie el contenido privado o que se vean antes de tiempo las sorpresas de un evento, aunque nada de lo que se instala en el PC de alguien se puede proteger al 100%. Todo viene desactivado; los administradores, su carpeta sincronizada y los jugadores con el launcher antiguo lo ven todo. Usa «Copia de prueba» para verlo como un jugador.</p>

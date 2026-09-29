@@ -62,11 +62,19 @@ async function readLegacy(profilesDir) {
   return rows;
 }
 
+function modrinthRoots() {
+  const roots = [app.getPath('appData')];
+  if (process.platform === 'linux') {
+    const home = app.getPath('home');
+    roots.unshift(process.env.XDG_DATA_HOME || path.join(home, '.local', 'share'), path.join(home, '.var', 'app', 'com.modrinth.ModrinthApp', 'data'));
+  }
+  return roots.flatMap((r) => [path.join(r, 'ModrinthApp'), path.join(r, 'com.modrinth.theseus')]);
+}
+
 async function listInstances(log) {
-  const appData = app.getPath('appData');
   const out = [];
   const seen = new Set();
-  for (const base of [path.join(appData, 'ModrinthApp'), path.join(appData, 'com.modrinth.theseus')]) {
+  for (const base of modrinthRoots()) {
     if (!(await exists(base))) continue;
     let profilesDir = path.join(base, 'profiles');
     let rows = [];

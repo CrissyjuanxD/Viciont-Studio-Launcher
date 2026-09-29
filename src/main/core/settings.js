@@ -55,7 +55,7 @@ function sanitize(s) {
     fullscreen: Boolean(s?.resolution?.fullscreen),
   };
   out.javaPaths = typeof s?.javaPaths === 'object' && s.javaPaths ? Object.fromEntries(
-    Object.entries(s.javaPaths).filter(([k, v]) => /^\d{1,2}$/.test(k) && typeof v === 'string' && v.length < 600 && /[\\/]javaw?\.exe$/i.test(v)),
+    Object.entries(s.javaPaths).filter(([k, v]) => /^\d{1,2}$/.test(k) && typeof v === 'string' && v.length < 600 && /[\\/](javaw?\.exe|java)$/i.test(v)),
   ) : {};
   out.onLaunch = ['keep', 'minimize', 'hide'].includes(s?.onLaunch) ? s.onLaunch : d.onLaunch;
   out.reopenOnExit = s?.reopenOnExit !== false;

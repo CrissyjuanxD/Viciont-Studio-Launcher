@@ -38,9 +38,14 @@ const isAlive = (pid) => {
 };
 
 function setHidden(paths, on) {
-  if (process.platform !== 'win32' || !paths.length) return Promise.resolve();
+  if (!paths.length) return Promise.resolve();
+  let cmd = null;
+  if (process.platform === 'win32') cmd = (p) => ['attrib', [on ? '+h' : '-h', on ? '+s' : '-s', p]];
+  else if (process.platform === 'darwin') cmd = (p) => ['chflags', [on ? 'hidden' : 'nohidden', p]];
+  if (!cmd) return Promise.resolve();
   return pool(paths, 4, (p) => new Promise((resolve) => {
-    const c = spawn('attrib', [on ? '+h' : '-h', on ? '+s' : '-s', p], { windowsHide: true, stdio: 'ignore' });
+    const [bin, args] = cmd(p);
+    const c = spawn(bin, args, { windowsHide: true, stdio: 'ignore' });
     c.on('exit', resolve);
     c.on('error', resolve);
   }));
@@ -668,8 +673,9 @@ class Instances extends EventEmitter {
 
   stop(id) {
     const w = this.waiting.get(id);
-    if (w && process.platform === 'win32' && isAlive(w.pid)) {
-      spawn('taskkill', ['/pid', String(w.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+    if (w && isAlive(w.pid)) {
+      if (process.platform === 'win32') spawn('taskkill', ['/pid', String(w.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
+      else { try { process.kill(w.pid); } catch {} }
       return;
     }
     this.running.get(id)?.kill();

@@ -10,6 +10,7 @@ const { openZip, jarMainClass } = require('../util/zip');
 const { mavenPath, libraryArtifact } = require('./rules');
 const { versionJsonPath } = require('./versions');
 const { resolveForgeFull } = require('./loaders');
+const { javaEnv } = require('./java');
 
 const NAMES = { forge: 'Forge', neoforge: 'NeoForge' };
 
@@ -19,7 +20,7 @@ function libFile(dirs, coords) {
 
 function runJava(javaExe, args, cwd, signal) {
   return new Promise((resolve, reject) => {
-    const child = spawn(javaExe, args, { cwd, windowsHide: true });
+    const child = spawn(javaExe, args, { cwd, windowsHide: true, env: javaEnv() });
     let tail = '';
     const keep = (d) => { tail = (tail + d.toString()).slice(-6000); };
     child.stdout.on('data', keep);

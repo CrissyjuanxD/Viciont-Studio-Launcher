@@ -8,6 +8,9 @@ const { app } = require('electron');
 const APP_DIR_NAME = 'ViciontStudioLauncher';
 const TEST_HOME = !app.isPackaged && process.env.VSL_HOME ? path.resolve(process.env.VSL_HOME) : null;
 const CONFIG_ROOT = TEST_HOME || path.join(app.getPath('appData'), APP_DIR_NAME);
+const DEFAULT_DATA_ROOT = TEST_HOME || (process.platform === 'linux'
+  ? path.join(process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share'), APP_DIR_NAME)
+  : CONFIG_ROOT);
 const DATA_MARKER = '.vsl-data';
 
 app.setPath('userData', path.join(CONFIG_ROOT, 'electron'));
@@ -47,4 +50,4 @@ function registerDataDir(root) {
 
 const configFile = (name) => path.join(CONFIG_ROOT, name);
 
-module.exports = { APP_DIR_NAME, CONFIG_ROOT, DATA_MARKER, dataDirs, ensureDataRoot, registerDataDir, configFile };
+module.exports = { APP_DIR_NAME, CONFIG_ROOT, DEFAULT_DATA_ROOT, DATA_MARKER, dataDirs, ensureDataRoot, registerDataDir, configFile };

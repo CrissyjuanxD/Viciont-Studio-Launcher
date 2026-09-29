@@ -8,7 +8,22 @@ permissions:
   contents: write
 
 jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Crear la release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          v="${tag#v}"
+          if ! gh release view "$tag" > /dev/null 2>&1; then
+            gh release create "$tag" --title "Viciont Studios Launcher $v" --notes "Descarga el launcher para tu sistema desde *Assets*: **.exe** para Windows, **.dmg** para macOS y **.AppImage**, **.deb** o **.rpm** para Linux." --latest
+          fi
+
   windows:
+    needs: release
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v5
@@ -16,18 +31,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      - name: Crear la release
-        shell: pwsh
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          $tag = $env:GITHUB_REF_NAME
-          $v = $tag.TrimStart('v')
-          gh release view $tag *> $null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag --title "Viciont Studios Launcher $v" --notes "Descarga **Viciont-Studios-Launcher-Setup-$v.exe** en *Assets* y ábrelo. Los launchers instalados se actualizan solos." --latest
-          }
-          exit 0
       - run: npx electron-builder --win --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -40,3 +43,47 @@ jobs:
           $v = $tag.TrimStart('v')
           Copy-Item "dist/Viciont-Studios-Launcher-Setup-$v.exe" "dist/Viciont-Studios-Launcher-Setup.exe"
           gh release upload $tag "dist/Viciont-Studios-Launcher-Setup.exe" --clobber
+
+  mac:
+    needs: release
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx electron-builder --mac --universal --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enlace fijo a la última versión
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          v="${tag#v}"
+          cp "dist/Viciont-Studios-Launcher-$v-mac.dmg" "dist/Viciont-Studios-Launcher-mac.dmg"
+          gh release upload "$tag" "dist/Viciont-Studios-Launcher-mac.dmg" --clobber
+
+  linux:
+    needs: release
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y rpm
+      - run: npm ci
+      - run: npx electron-builder --linux --x64 --publish always
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Enlaces fijos a la última versión
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          for ext in AppImage deb rpm; do
+            cp dist/*."$ext" "dist/Viciont-Studios-Launcher-linux.$ext"
+            gh release upload "$tag" "dist/Viciont-Studios-Launcher-linux.$ext" --clobber
+          done

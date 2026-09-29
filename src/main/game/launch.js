@@ -7,6 +7,7 @@ const { spawn } = require('node:child_process');
 const { EventEmitter } = require('node:events');
 const { isAllowed } = require('./rules');
 const { ensureDir, writeFileAtomic } = require('../util/fsx');
+const { javaEnv } = require('./java');
 
 function splitArgs(str) {
   const out = [];
@@ -96,7 +97,8 @@ function buildCommand(plan, opts) {
   if (r.arguments?.jvm) {
     jvm.push(...expand(r.arguments.jvm));
   } else {
-    jvm.push('-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump');
+    if (process.platform === 'win32') jvm.push('-XX:HeapDumpPath=MojangTricksIntelDriversForPerformance_javaw.exe_minecraft.exe.heapdump');
+    if (process.platform === 'darwin') jvm.push('-Xdock:name=Minecraft');
     jvm.push(`-Djava.library.path=${plan.nativesDir}`);
     jvm.push('-Dminecraft.launcher.brand=viciont-studio-launcher', `-Dminecraft.launcher.version=${vars.launcher_version}`);
     jvm.push('-cp', classpath);
@@ -147,7 +149,7 @@ class GameProcess extends EventEmitter {
     };
     child.stdout?.on('data', onData);
     child.stderr?.on('data', onData);
-    child.on('error', (e) => this.emit('error', e));
+    child.on('error', (e) => { if (this.listenerCount('error')) this.emit('error', e); });
     child.on('exit', (code, signal) => {
       this.exitCode = code;
       const duration = Date.now() - this.startedAt;
@@ -187,13 +189,18 @@ async function launchGame(plan, opts) {
   }
   const cmd = buildCommand(plan, opts);
   const args = await argFileIfNeeded(cmd, opts.gameDir);
-  const env = { ...process.env };
-  delete env.ELECTRON_RUN_AS_NODE;
-  delete env.ELECTRON_NO_ATTACH_CONSOLE;
   const child = spawn(cmd.java, args, {
-    cwd: opts.gameDir, env, detached: true, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: opts.gameDir, env: javaEnv(), detached: true, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
   });
-  return new GameProcess(child, logFile);
+  const game = new GameProcess(child, logFile);
+  await new Promise((resolve, reject) => {
+    child.once('spawn', resolve);
+    child.once('error', (e) => {
+      if (e.code === 'EBADARCH' || e.errno === -86) reject(new Error('Esta versión de Minecraft necesita Rosetta 2 en los Mac con chip Apple. Instálalo abriendo Terminal y escribiendo: softwareupdate --install-rosetta --agree-to-license'));
+      else reject(new Error(`No se pudo abrir Java (${e.code || e.message}). Prueba a reparar la instancia.`));
+    });
+  });
+  return game;
 }
 
 module.exports = { buildCommand, launchGame, parseServer, splitArgs };

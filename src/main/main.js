@@ -34,7 +34,7 @@ const HIDDEN_TEST = Boolean(TEST_SCRIPT) && process.argv.includes('--hidden');
 
 setUserAgent(`ViciontStudioLauncher/${VERSION} (+https://github.com/CrissyjuanxD/Viciont-Studio-Launcher)`);
 app.setName(APP_NAME);
-app.setAppUserModelId('com.viciontstudios.launcher');
+if (process.platform === 'win32') app.setAppUserModelId('com.viciontstudios.launcher');
 
 if (!app.requestSingleInstanceLock()) {
   app.quit();
@@ -55,7 +55,7 @@ function start() {
     { scheme: 'vsl-media', privileges: { standard: true, secure: true, supportFetchAPI: true, stream: true } },
   ]);
 
-  let dataRoot = settings.get().dataDir || paths.CONFIG_ROOT;
+  let dataRoot = settings.get().dataDir || paths.DEFAULT_DATA_ROOT;
   let dirs = paths.dataDirs(dataRoot);
   const getDirs = () => dirs;
 
@@ -117,7 +117,9 @@ function start() {
       title: `${APP_NAME} ${VERSION}`,
       icon: path.join(RENDERER, 'img', 'icon.png'),
       titleBarStyle: 'hidden',
-      titleBarOverlay: { color: '#07030d', symbolColor: '#e9e0ff', height: 36 },
+      ...(process.platform === 'darwin'
+        ? { trafficLightPosition: { x: 14, y: 11 } }
+        : { titleBarOverlay: { color: '#07030d', symbolColor: '#e9e0ff', height: 36 } }),
       webPreferences: {
         preload: path.join(__dirname, '..', 'preload', 'preload.js'),
         contextIsolation: true,
@@ -138,7 +140,8 @@ function start() {
     });
     wc.on('will-attach-webview', (e) => e.preventDefault());
     wc.on('before-input-event', (e, input) => {
-      if (!isDev && (input.key === 'F5' || (input.control && ['r', 'R'].includes(input.key)) || (input.control && input.shift && ['i', 'I'].includes(input.key)))) e.preventDefault();
+      const mod = input.control || input.meta;
+      if (!isDev && (input.key === 'F5' || (mod && ['r', 'R'].includes(input.key)) || (mod && (input.shift || input.alt) && ['i', 'I'].includes(input.key)))) e.preventDefault();
       if (isDev && input.key === 'F12' && input.type === 'keyDown') wc.toggleDevTools();
     });
     wc.on('render-process-gone', (_, d) => {
@@ -309,7 +312,7 @@ function start() {
     const notice = updateNotice;
     updateNotice = false;
     return {
-      name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
+      name: APP_NAME, version: VERSION, dev: isDev, platform: process.platform, totalMB, recommendedMax: recommendedMax(),
       dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
       news: backend.news(), admin: admin.quickStatus(), update: updater.state, justUpdated: notice, defaultJvm: DEFAULT_JVM,
       discord: { available: Boolean(backend.discordClientId()) }, site: backend.siteUrl(),
@@ -388,6 +391,7 @@ function start() {
     return true;
   });
   on('app:checkUpdates', () => updater.check());
+  on('app:openDownload', () => shell.openExternal(`${backend.siteUrl().replace(/\/?$/, '/')}#launcher`).then(() => true));
   on('app:installUpdate', () => {
     if (!updater.canInstall()) throw new Error('No hay ninguna actualización lista para instalar.');
     if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de actualizar.');
@@ -411,7 +415,7 @@ function start() {
     if (isDev) allowed.push('apiBase');
     const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
     if (clean.javaPaths) {
-      clean.javaPaths = Object.fromEntries(Object.entries(clean.javaPaths || {}).filter(([, v]) => typeof v === 'string' && /^javaw?\.exe$/i.test(path.basename(v)) && path.isAbsolute(v) && fs.existsSync(v)));
+      clean.javaPaths = Object.fromEntries(Object.entries(clean.javaPaths || {}).filter(([, v]) => typeof v === 'string' && /^(javaw?\.exe|java)$/i.test(path.basename(v)) && path.isAbsolute(v) && fs.existsSync(v)));
     }
     const before = settings.get().apiBase;
     const out = settings.set(clean);
@@ -431,7 +435,7 @@ function start() {
   on('settings:moveDataDir', async (target, { move } = {}) => {
     if (instances.busy() || instances.anyRunning()) throw new Error('Cierra el juego y espera a que terminen las descargas.');
     if (target !== null && target !== chosenDataDir) throw new Error('Elige la carpeta con el botón "Cambiar".');
-    const dest = target === null ? paths.CONFIG_ROOT : path.resolve(String(target));
+    const dest = target === null ? paths.DEFAULT_DATA_ROOT : path.resolve(String(target));
     if (path.resolve(dest).toLowerCase() === path.resolve(dataRoot).toLowerCase()) return { dataDir: dataRoot };
     paths.ensureDataRoot(dest);
     if (move) {
@@ -446,7 +450,7 @@ function start() {
         }
       }
     }
-    settings.set({ dataDir: dest === paths.CONFIG_ROOT ? null : dest });
+    settings.set({ dataDir: dest === paths.DEFAULT_DATA_ROOT ? null : dest });
     dataRoot = dest;
     dirs = paths.dataDirs(dataRoot);
     instances.setDirs(dirs);
@@ -464,7 +468,9 @@ function start() {
     return true;
   });
   on('settings:chooseJava', async () => {
-    const r = await dialog.showOpenDialog(parentWin(), { title: 'Elegir java.exe o javaw.exe', properties: ['openFile'], filters: [{ name: 'Java', extensions: ['exe'] }] });
+    const r = await dialog.showOpenDialog(parentWin(), process.platform === 'win32'
+      ? { title: 'Elegir java.exe o javaw.exe', properties: ['openFile'], filters: [{ name: 'Java', extensions: ['exe'] }] }
+      : { title: 'Elegir el archivo java (dentro de la carpeta bin de Java)', properties: ['openFile', 'treatPackageAsDirectory', 'showHiddenFiles'] });
     if (r.canceled || !r.filePaths[0]) return null;
     const info = await probeJava(r.filePaths[0]);
     if (!info) throw new Error('Ese archivo no parece ser Java.');
@@ -572,7 +578,7 @@ function start() {
   }));
   on('admin:addPaths', needAdmin((id, list, targetDir) => {
     const ok = (Array.isArray(list) ? list : []).filter((p) => admin.granted(p));
-    if (!ok.length) throw new Error('Arrastra los archivos desde el Explorador de Windows.');
+    if (!ok.length) throw new Error(`Arrastra los archivos desde ${({ darwin: 'el Finder', linux: 'tu gestor de archivos' })[process.platform] || 'el Explorador de Windows'}.`);
     return admin.addLocal(id, ok, targetDir);
   }));
   on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
@@ -682,13 +688,45 @@ function start() {
   });
 
   app.on('second-instance', showWindow);
-  app.on('before-quit', () => { quitting = true; saveWindowState(); discord.disconnect(); });
+  app.on('before-quit', (e) => {
+    if (!quitting && win && !win.isDestroyed() && (instances.busy() || admin.tasks.size)) {
+      e.preventDefault();
+      showWindow();
+      if (!closeAsked) {
+        closeAsked = true;
+        send('close-requested', { tasks: [...instances.tasks.keys()], admin: admin.tasks.size });
+        setTimeout(() => { closeAsked = false; }, 800);
+      }
+      return;
+    }
+    quitting = true;
+    saveWindowState();
+    discord.disconnect();
+  });
   app.on('window-all-closed', () => {
     if (quitting || !instances.anyRunning()) app.quit();
   });
 
   app.whenReady().then(async () => {
     log.info(`${APP_NAME} ${VERSION} — datos en ${dataRoot}`);
+    if (process.platform === 'darwin') {
+      Menu.setApplicationMenu(Menu.buildFromTemplate([
+        { label: APP_NAME, submenu: [
+          { role: 'about', label: `Acerca de ${APP_NAME}` }, { type: 'separator' },
+          { role: 'services', label: 'Servicios' }, { type: 'separator' },
+          { role: 'hide', label: `Ocultar ${APP_NAME}` }, { role: 'hideOthers', label: 'Ocultar otros' }, { role: 'unhide', label: 'Mostrar todo' }, { type: 'separator' },
+          { role: 'quit', label: `Salir de ${APP_NAME}` },
+        ] },
+        { label: 'Edición', submenu: [
+          { role: 'undo', label: 'Deshacer' }, { role: 'redo', label: 'Rehacer' }, { type: 'separator' },
+          { role: 'cut', label: 'Cortar' }, { role: 'copy', label: 'Copiar' }, { role: 'paste', label: 'Pegar' }, { role: 'selectAll', label: 'Seleccionar todo' },
+        ] },
+        { label: 'Ventana', role: 'window', submenu: [
+          { role: 'minimize', label: 'Minimizar' }, { role: 'zoom', label: 'Zoom' }, { type: 'separator' },
+          { role: 'close', label: 'Cerrar ventana' }, { role: 'front', label: 'Traer todo al frente' },
+        ] },
+      ]));
+    }
     paths.ensureDataRoot(dataRoot);
     paths.registerDataDir(dataRoot);
     media.localRoots.set('admin', path.join(dirs.admin, 'media'));
@@ -741,6 +779,7 @@ function start() {
       data: { os: `${os.version?.() || os.type()} (${os.release()})`, arch: process.arch, ramMB: totalMB, cpus: os.cpus().length, maxMemoryMB: settings.get().memory.max },
     });
     await createWindow();
+    app.on('activate', showWindow);
     updatePresence();
     backend.refreshRemote().then(() => { updatePresence(); return instances.refresh(); }).then((l) => send('instances', l)).catch(() => {});
     if (TEST_SCRIPT) {

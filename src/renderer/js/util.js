@@ -7,6 +7,8 @@ export function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
+export const fileManager = (platform) => ({ darwin: 'Finder', linux: 'gestor de archivos' })[platform] || 'Explorador';
+
 export function richText(text) {
   const parts = String(text || '').trim().split(/\n{2,}/).filter(Boolean);
   return parts.map((p) => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</p>`).join('');

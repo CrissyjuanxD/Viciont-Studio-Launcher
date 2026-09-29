@@ -10,7 +10,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest"><b>⬇ Descargar para Windows</b></a>
+  <a href="https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest"><b>⬇ Descargar para Windows, macOS y Linux</b></a>
   ·
   <a href="https://viciontstudios.pages.dev/#launcher">Web de Viciont Studios</a>
 </p>
@@ -19,14 +19,39 @@
 
 ## Descargar
 
-1. Entra en **[Releases](https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest)** y descarga `Viciont-Studios-Launcher-Setup-X.Y.Z.exe`.
-2. Si el navegador avisa de que el archivo *"no se descarga habitualmente"*, no es un virus: el instalador es nuevo y no está firmado con un certificado de pago, así que Microsoft todavía no lo conoce.
+Descarga la última versión desde **[Releases](https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest)** o desde la **[web de Viciont Studios](https://viciontstudios.pages.dev/#launcher)**, que detecta tu sistema.
+
+| Sistema | Archivo | Actualizaciones |
+| --- | --- | --- |
+| **Windows** 10 u 11 (64 bits) | `Viciont-Studios-Launcher-Setup-X.Y.Z.exe` | Automáticas |
+| **macOS** 13 Ventura o superior, chip Apple e Intel | `Viciont-Studios-Launcher-X.Y.Z-mac.dmg` | Te avisa y la descargas en un clic |
+| **Linux** 64 bits | `.AppImage` (cualquier distribución), `.deb` (Ubuntu, Debian, Linux Mint) o `.rpm` (Fedora, openSUSE) | Automáticas con la AppImage; con `.deb` o `.rpm` te avisa |
+
+No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
+
+### Windows
+
+1. Descarga `Viciont-Studios-Launcher-Setup-X.Y.Z.exe`. Si el navegador avisa de que el archivo *"no se descarga habitualmente"*, no es un virus: el instalador es nuevo y no está firmado con un certificado de pago, así que Microsoft todavía no lo conoce.
    - **Edge:** en Descargas, pulsa la flecha **⌄** junto a *Eliminar* → **Conservar** → **Mostrar más** → **Conservar de todas formas**.
    - **Chrome:** en Descargas, pulsa **Conservar** (o *Descargar archivo no seguro*).
-3. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
-4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cuando hay una versión nueva, arriba a la izquierda sale el botón **Hay una versión disponible** (con el progreso de la descarga). Cuando termina, al pulsarlo el launcher se cierra unos segundos y se vuelve a abrir ya actualizado, sin abrir ningún instalador; si no, se actualiza solo la próxima vez que lo cierres. Cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
+2. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
+3. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cuando hay una versión nueva, arriba a la izquierda sale el botón **Hay una versión disponible** (con el progreso de la descarga). Cuando termina, al pulsarlo el launcher se cierra unos segundos y se vuelve a abrir ya actualizado, sin abrir ningún instalador; si no, se actualiza solo la próxima vez que lo cierres. Cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
 
-Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
+### macOS
+
+1. Descarga `Viciont-Studios-Launcher-X.Y.Z-mac.dmg` (sirve para los Mac con chip Apple y con Intel), ábrelo y arrastra **Viciont Studios Launcher** a **Aplicaciones**.
+2. La primera vez, macOS dirá que no puede comprobar la app: es normal, porque no está firmada con un certificado de pago de Apple. Cierra el aviso sin moverla a la papelera, ve a **Ajustes del Sistema → Privacidad y seguridad**, baja hasta el aviso del launcher y pulsa **Abrir igualmente**. Solo hace falta una vez.
+3. Si dice que *«está dañado y no se puede abrir»*, abre **Terminal** y escribe `xattr -cr "/Applications/Viciont Studios Launcher.app"`.
+4. Cuando hay una versión nueva, arriba a la izquierda sale **Hay una versión disponible**: te lleva a la descarga y reemplazas la app en Aplicaciones (tus instancias y cuentas se conservan). Si después macOS te pide permiso para usar el llavero, pulsa **Permitir siempre**: ahí se guarda tu sesión cifrada.
+5. Las versiones de Minecraft anteriores a la 1.19 no existen para chip Apple, así que en esos Mac se abren con **Rosetta 2**, como en el launcher oficial. Si no lo tienes, el launcher te dice cómo instalarlo.
+
+### Linux
+
+- **AppImage** (cualquier distribución): dale permiso para ejecutarse (*Propiedades → Permitir ejecutar como programa* o `chmod +x`) y ábrela. Se actualiza sola.
+- **.deb** (Ubuntu, Debian, Linux Mint, Pop!_OS): `sudo apt install ./Viciont-Studios-Launcher-X.Y.Z-linux-amd64.deb`
+- **.rpm** (Fedora, openSUSE): `sudo dnf install ./Viciont-Studios-Launcher-X.Y.Z-linux-x86_64.rpm`
+- Con `.deb` o `.rpm`, cuando hay una versión nueva el launcher te avisa y la instalas encima de la que tienes.
+- Minecraft 1.12.2 y anteriores necesitan `xrandr` (paquete `x11-xserver-utils` en Ubuntu y Debian, `xrandr` en Fedora), que casi todos los escritorios ya traen.
 
 ## Capturas
 
@@ -58,7 +83,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 **Para Viciont Studios (administración en dos pasos: nick autorizado desde el panel web + clave personal)**
 - Solo los nicks a los que se les da acceso desde el **panel web privado** ven **Ajustes → Administración**, y además tienen que escribir su **clave personal**. Cada uno tiene sus permisos: crear instancias, editar y publicar, eliminar, nicks no premium (y se puede limitar a algunas instancias).
 - Crear instancias **Vanilla, Fabric, Quilt, Forge o NeoForge** en cualquier versión de Minecraft, snapshots incluidas.
-- **Tu carpeta es la instancia**: cada instancia se sincroniza con una carpeta de tu PC. La cambias desde el launcher, desde el Explorador de Windows o jugando, y al publicar solo se sube lo que cambió (lo nuevo, lo modificado y lo que quitaste). A los jugadores solo se les actualizan esos archivos. Si otro administrador publica antes, **Traer cambios** respeta lo tuyo.
+- **Tu carpeta es la instancia**: cada instancia se sincroniza con una carpeta de tu PC. La cambias desde el launcher, desde el Explorador de Windows (o el Finder en Mac) o jugando, y al publicar solo se sube lo que cambió (lo nuevo, lo modificado y lo que quitaste). A los jugadores solo se les actualizan esos archivos. Si otro administrador publica antes, **Traer cambios** respeta lo tuyo.
 - Añadir **mods, resource packs y shaders de Modrinth** (se descargan a tu carpeta con sus dependencias) o **archivos propios**: mods, `config`, `options.txt`, `kubejs`, mapas, etc.
 - **Importar desde Modrinth App** sin exportar nada: sale la lista de tus instancias de Modrinth App con su versión, su cargador y su icono. También se puede importar un modpack `.mrpack` o una carpeta de CurseForge, Prism o `.minecraft`. Al publicar, los mods que existen en Modrinth se enlazan a su CDN en vez de subirlos.
 - **Icono, fondo y banner** (la imagen de la tarjeta en *Instancias disponibles*): PNG, JPG, WEBP o GIF, y el fondo también en vídeo MP4/WEBM. Las imágenes se optimizan solas. El banner necesita el servidor v6.
@@ -84,26 +109,31 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 
 ## Carpetas (como Modrinth App)
 
+| Sistema | Carpeta |
+| --- | --- |
+| Windows | `%APPDATA%\ViciontStudioLauncher` |
+| macOS | `~/Library/Application Support/ViciontStudioLauncher` |
+| Linux | `~/.local/share/ViciontStudioLauncher` (los ajustes y las cuentas, en `~/.config/ViciontStudioLauncher`) |
+
 ```
-%APPDATA%\ViciontStudioLauncher\
-├─ settings.json · accounts.dat (cifrado) · launcher_logs\
-├─ meta\          ← compartido entre instancias
-│  ├─ versions\  libraries\  assets\  natives\  java\
-├─ instances\
-│  └─ <instancia>\   mods · config · saves · resourcepacks · shaderpacks · …
-├─ skins\  ·  caches\  ·  admin\  ·  backups\
+ViciontStudioLauncher/
+├─ settings.json · accounts.dat (cifrado) · launcher_logs/
+├─ meta/          ← compartido entre instancias
+│  ├─ versions/  libraries/  assets/  natives/  java/
+├─ instances/
+│  └─ <instancia>/   mods · config · saves · resourcepacks · shaderpacks · …
+├─ skins/  ·  caches/  ·  admin/  ·  backups/
 ```
 
 La carpeta de datos se puede mover desde **Ajustes → Almacenamiento**.
 
 ## Desinstalar
 
-Desde **Configuración de Windows → Aplicaciones → Viciont Studios Launcher**. El desinstalador pregunta:
+- **Windows:** desde **Configuración de Windows → Aplicaciones → Viciont Studios Launcher**. El desinstalador pregunta si quieres **conservar** instancias, mundos, cuentas y skins (para reinstalar) o **borrarlo todo**: instancias, mundos, cuentas, skins, Java y caché.
+- **macOS:** arrastra la app de **Aplicaciones** a la Papelera. Si quieres borrarlo todo, borra también su carpeta de datos (arriba).
+- **Linux:** si usas la AppImage, borra el archivo; si instalaste el paquete, `sudo apt remove viciont-studios-launcher` o `sudo dnf remove viciont-studios-launcher`. Si quieres borrarlo todo, borra también sus carpetas (arriba).
 
-- **Conservar** instancias, mundos, cuentas y skins, si vas a reinstalar.
-- **Borrarlo todo**: instancias, mundos, cuentas, skins, Java y caché.
-
-Las actualizaciones automáticas nunca borran datos.
+Las actualizaciones nunca borran datos.
 
 ## Servidor
 
@@ -112,16 +142,16 @@ Las instancias, los permisos, los archivos privados, las skins no premium, los r
 ## Seguridad
 
 - **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión, Microsoft también olvida la cuenta en esa ventana.
-- Las sesiones se guardan **cifradas con Windows (DPAPI)** en tu PC. Las cuentas premium se verifican con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
+- Las sesiones se guardan **cifradas por el sistema** en tu PC (DPAPI en Windows, el llavero de macOS y el llavero del sistema en Linux, como GNOME Keyring o KWallet). Las cuentas premium se verifican con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
 - La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta). La versión instalada lleva los "fusibles" de seguridad de Electron activados: no se puede arrancar como Node, ni con depuradores, ni cargar código que no sea el suyo.
 - **Sin servidores falsos**: en la versión instalada el servidor de Viciont Studios sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
 - La administración necesita **dos llaves** (nick autorizado desde el panel + clave personal vinculada a su cuenta) y el servidor comprueba los permisos en cada acción.
 - Todo lo que se descarga se comprueba con **SHA-1**. Rutas peligrosas (`../`), la carpeta interna del launcher, enlaces sin HTTPS, archivos alterados y enlaces caducados se rechazan tanto en el launcher como en el servidor.
-- Java solo se puede elegir entre ejecutables `java.exe`/`javaw.exe` reales, y al subir archivos al servidor solo se aceptan los que eliges tú en el diálogo o arrastras a la ventana.
+- Java solo se puede elegir entre ejecutables de Java reales (`java.exe`/`javaw.exe` en Windows, `java` en macOS y Linux), y al subir archivos al servidor solo se aceptan los que eliges tú en el diálogo o arrastras a la ventana.
 
 ### Privacidad
 
-Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Studios un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu versión de Windows y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` → `~`). Solo lo ve el equipo de Viciont Studios en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
+Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Studios un **registro de actividad** básico: cuándo abres el launcher, entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego). **Nunca** se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP, y las rutas de tu PC se acortan (`C:\Users\tu-usuario` o `/Users/tu-usuario` → `~`). Solo lo ve el equipo de Viciont Studios en su panel privado y se borra a los 30 días. Está explicado también en **Ajustes → Acerca de**.
 
 ## Desarrollo
 
@@ -129,10 +159,14 @@ Para poder ayudarte si algo falla, el launcher envía al servidor de Viciont Stu
 npm install
 npm run vendor   # copia fuentes y el visor 3D de skins a src/renderer
 npm start        # abre el launcher (desde el código es siempre modo desarrollo)
-npm run dist     # crea el instalador en dist/
+npm run dist        # crea el instalador de Windows en dist/
+npm run dist:mac    # en un Mac: crea el .dmg universal (chip Apple e Intel)
+npm run dist:linux  # en Linux: crea la AppImage, el .deb y el .rpm
 ```
 
-Para publicar una versión nueva: sube el número de `version` en `package.json` y crea una etiqueta `vX.Y.Z`. GitHub Actions compila el instalador y lo publica en Releases, y los launchers instalados se actualizan solos.
+Para publicar una versión nueva: sube el número de `version` en `package.json` y crea una etiqueta `vX.Y.Z`. GitHub Actions compila el launcher para Windows, macOS y Linux y lo publica en Releases, y los launchers instalados se actualizan solos (o avisan, en macOS y con los paquetes de Linux).
+
+Antes de publicar se puede lanzar el workflow **Probar en Windows, Mac y Linux** (a mano o subiendo una rama `prueba-…`): compila el launcher en cada sistema, lo abre y arranca Minecraft de verdad con una cuenta offline (vanilla, Fabric, Forge y versiones antiguas) sin tocar el servidor de Viciont Studios, y deja capturas y registros en *Artifacts*.
 
 ## Créditos
 

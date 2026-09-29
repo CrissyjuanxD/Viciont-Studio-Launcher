@@ -82,6 +82,7 @@
   -webkit-app-region: drag;
 }
 .titlebar::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 1px; background: linear-gradient(90deg, transparent, rgba(236, 72, 153, 0.6), rgba(168, 85, 247, 0.6), transparent); opacity: 0.55; }
+.os-mac .titlebar { padding: 0 14px 0 84px; }
 .titlebar__brand { display: flex; align-items: center; gap: 9px; min-width: 0; }
 .titlebar__brand img { width: 22px; filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.8)); }
 .titlebar__name { font: 400 1.08rem/1 var(--font-display); letter-spacing: 0.1em; text-transform: uppercase; color: #fff; }

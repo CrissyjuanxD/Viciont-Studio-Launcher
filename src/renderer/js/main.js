@@ -187,16 +187,16 @@ let tooltips = null;
 function paintUpdateButton() {
   const b = $('upd-btn');
   const u = state.update;
-  const shown = u?.status === 'downloading' || u?.status === 'ready';
+  const shown = ['downloading', 'ready', 'available'].includes(u?.status);
   b.hidden = !shown;
   if (!shown) return;
-  const ready = u.status === 'ready';
+  const ready = u.status === 'ready' || u.status === 'available';
   const pct = ready ? 100 : Math.max(0, Math.min(100, Math.round(u.percent || 0)));
   b.classList.toggle('is-ready', ready);
   b.style.setProperty('--p', `${pct}%`);
-  b.dataset.tipSub = ready
-    ? `La versión ${u.version} ya está descargada: pulsa para actualizar.`
-    : `Descargando la versión ${u.version || 'nueva'}… ${pct}%`;
+  if (u.status === 'available') b.dataset.tipSub = `La versión ${u.version} está en la web de Viciont Studios: pulsa para descargarla.`;
+  else if (ready) b.dataset.tipSub = `La versión ${u.version} ya está descargada: pulsa para actualizar.`;
+  else b.dataset.tipSub = `Descargando la versión ${u.version || 'nueva'}… ${pct}%`;
   tooltips?.refresh();
 }
 
@@ -218,6 +218,14 @@ function updatingScreen(version) {
 
 async function onUpdateButton() {
   const u = state.update;
+  if (u?.status === 'available') {
+    const how = state.info?.platform === 'linux'
+      ? ' e instala el paquete nuevo (.deb o .rpm) encima del que tienes'
+      : ', ábrela y arrastra el launcher a Aplicaciones para reemplazar el que tienes';
+    const ok = await confirm({ title: 'Hay una versión nueva', text: `Descarga la versión ${u.version} desde la web de Viciont Studios${how}. Tus instancias y cuentas se conservan.`, ok: 'Ir a la descarga', icon: 'download' });
+    if (ok) call('app:openDownload').catch(toastError);
+    return;
+  }
   if (u?.status !== 'ready') {
     if (state.accounts?.active && !$('shell').hidden) app.openSettings('launcher');
     return;
@@ -327,6 +335,7 @@ async function boot() {
       call('app:info'), call('settings:get'), call('accounts:get'), call('instances:list'),
     ]);
     state.info = info;
+    document.documentElement.classList.toggle('os-mac', info.platform === 'darwin');
     state.settings = settings;
     state.accounts = accounts;
     state.update = info.update;

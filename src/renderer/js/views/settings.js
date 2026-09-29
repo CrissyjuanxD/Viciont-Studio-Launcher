@@ -4,6 +4,14 @@ import { esc, bytes } from '../util.js';
 import { modal, toast, toastError, confirm, busy } from '../ui.js';
 import { setEffects } from '../fx.js';
 
+const KEYRING = { darwin: 'el llavero de macOS', linux: 'el llavero del sistema' };
+const keyring = () => KEYRING[state.info?.platform] || 'Windows';
+const UNINSTALL = {
+  win32: 'Desinstala el launcher desde <b>Configuración de Windows → Aplicaciones</b>. El desinstalador te preguntará si quieres <b>conservar tus instancias y mundos</b> (para reinstalar más tarde) o <b>borrarlo todo</b>.',
+  darwin: 'Arrastra <b>Viciont Studios Launcher</b> desde <b>Aplicaciones</b> a la Papelera. Tus instancias, mundos y cuentas se quedan en la carpeta de datos de arriba: bórrala también si quieres eliminarlo todo.',
+  linux: 'Si usas la <b>AppImage</b>, borra el archivo. Si instalaste el paquete <b>.deb</b> o <b>.rpm</b>, quítalo desde tu tienda de aplicaciones o con <code>sudo apt remove viciont-studios-launcher</code> (o <code>sudo dnf remove viciont-studios-launcher</code>). Tus instancias y mundos se quedan en la carpeta de datos de arriba y tus cuentas en <code>~/.config/ViciontStudioLauncher</code>: bórralas también si quieres eliminarlo todo.',
+};
+
 const TABS = [
   ['game', 'Juego', 'cpu'],
   ['launcher', 'Launcher', 'zap'],
@@ -61,7 +69,7 @@ const PANES = {
     pane.innerHTML = `
       <div class="settings__section">
         <h3>Memoria (RAM)</h3>
-        <p class="field__hint">Tu PC tiene <b>${(total / 1024).toFixed(1)} GB</b>. Recomendado para modpacks: entre 4 y 8 GB, dejando al menos 2 GB libres para Windows.</p>
+        <p class="field__hint">Tu PC tiene <b>${(total / 1024).toFixed(1)} GB</b>. Recomendado para modpacks: entre 4 y 8 GB, dejando al menos 2 GB libres para el sistema.</p>
         <div class="settings__grid">
           <div class="field"><span class="field__label">Memoria mínima <em>*</em></span>
             <div class="stepper"><button type="button" data-step="min:-512">−</button><input id="mem-min" inputmode="numeric" value="${s.memory.min}"><span class="stepper__unit">MB</span><button type="button" data-step="min:512">+</button></div></div>
@@ -100,7 +108,7 @@ const PANES = {
       range.value = mx;
       range.style.setProperty('--p', `${((mx - range.min) / (range.max - range.min)) * 100}%`);
       const note = pane.querySelector('#mem-note');
-      note.textContent = mx > total - 1536 ? '⚠ Estás dejando muy poca memoria para Windows: el PC podría ir lento.' : `Minecraft podrá usar hasta ${(mx / 1024).toFixed(1)} GB.`;
+      note.textContent = mx > total - 1536 ? '⚠ Estás dejando muy poca memoria para el sistema: el equipo podría ir lento.' : `Minecraft podrá usar hasta ${(mx / 1024).toFixed(1)} GB.`;
     };
     const commit = () => {
       let a = Math.round(Number(min.value) || 1024);
@@ -226,7 +234,7 @@ const PANES = {
     conc.addEventListener('change', () => setConc(Number(conc.value) || 10));
     const upd = pane.querySelector('#upd-state');
     const paintUpd = (u) => {
-      const map = { checking: 'Buscando…', latest: 'Tienes la última versión.', downloading: `Descargando la versión ${u?.version || ''}… ${u?.percent || 0}%`, ready: `La versión ${u?.version} está lista: pulsa «Hay una versión disponible» arriba para actualizar, o se instalará sola al cerrar el launcher.`, error: `No se pudo comprobar (${u?.error || 'error'}).`, dev: 'Modo desarrollo: sin actualizaciones.', unavailable: 'Actualizaciones no disponibles en esta copia.' };
+      const map = { checking: 'Buscando…', latest: 'Tienes la última versión.', downloading: `Descargando la versión ${u?.version || ''}… ${u?.percent || 0}%`, ready: `La versión ${u?.version} está lista: pulsa «Hay una versión disponible» arriba para actualizar, o se instalará sola al cerrar el launcher.`, available: `Hay una versión nueva (${u?.version}): pulsa «Hay una versión disponible» arriba para descargarla desde la web.`, error: `No se pudo comprobar (${u?.error || 'error'}).`, dev: 'Modo desarrollo: sin actualizaciones.', unavailable: 'Actualizaciones no disponibles en esta copia.' };
       upd.textContent = map[u?.status] || '';
     };
     paintUpd(state.update);
@@ -261,7 +269,7 @@ const PANES = {
       </div>
       <div class="settings__section">
         <h3>Desinstalar</h3>
-        <p class="field__hint">Desinstala el launcher desde <b>Configuración de Windows → Aplicaciones</b>. El desinstalador te preguntará si quieres <b>conservar tus instancias y mundos</b> (para reinstalar más tarde) o <b>borrarlo todo</b>.</p>
+        <p class="field__hint">${UNINSTALL[info.platform] || UNINSTALL.win32}</p>
       </div>`;
     const sizes = pane.querySelector('#sizes');
     call('settings:storage').then((s) => {
@@ -422,7 +430,7 @@ const PANES = {
                  <label class="field"><span class="field__label">Servidor</span><input class="input mono" type="text" value="${esc(st.server || 'sin configurar')}" readonly tabindex="-1" style="opacity:.75"></label>
                  <label class="field"><span class="field__label">Clave personal</span><input class="input mono" type="password" name="key" autocomplete="off" spellcheck="false" placeholder="VSL-XXXXX-XXXXX-XXXXX-XXXXX-XXXXX"></label>
                  ${st.hasKey ? '' : `<p class="field__hint">${icon('info')} Todavía no tienes clave: pídele a un responsable del panel que te genere una.</p>`}
-                 <label class="check"><input type="checkbox" name="remember"> Recordar en este PC (se guarda cifrada con Windows)</label>
+                 <label class="check"><input type="checkbox" name="remember"> Recordar en este PC (se guarda cifrada con ${keyring()})</label>
                  <div id="unlock-err"></div>
                  <button class="btn btn--primary" type="submit" ${st.configured ? '' : 'disabled'}>${icon('unlock')}Activar</button>
                </form>`}
@@ -481,8 +489,8 @@ const PANES = {
         <h3>Privacidad y seguridad</h3>
         <ul class="plain-list">
           <li><b>Tu contraseña de Microsoft</b> solo se escribe en la página oficial de Microsoft (igual que en Modrinth o el launcher oficial). El launcher nunca la ve ni la guarda.</li>
-          <li><b>Tus sesiones</b> se guardan cifradas con Windows en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
-          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego, sin tu nombre de usuario de Windows). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
+          <li><b>Tus sesiones</b> se guardan cifradas con ${keyring()} en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta premium se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
+          <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego, sin tu nombre de usuario del sistema). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
           <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
         </ul>
       </div>

@@ -1,6 +1,7 @@
 'use strict';
 
 const net = require('node:net');
+const path = require('node:path');
 const crypto = require('node:crypto');
 
 const OP = { HANDSHAKE: 0, FRAME: 1, CLOSE: 2, PING: 3, PONG: 4 };
@@ -8,6 +9,14 @@ const RETRY_MS = 30 * 1000;
 const MIN_GAP_MS = 5 * 1000;
 const LOGO = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-Studio-Launcher/main/docs/discord-logo.png';
 const DOWNLOAD = 'https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest';
+
+function ipcPaths() {
+  const ids = [...Array(10).keys()];
+  if (process.platform === 'win32') return ids.map((i) => `\\\\?\\pipe\\discord-ipc-${i}`);
+  const base = process.env.XDG_RUNTIME_DIR || process.env.TMPDIR || process.env.TMP || process.env.TEMP || '/tmp';
+  const dirs = process.platform === 'linux' ? ['', 'app/com.discordapp.Discord', 'snap.discord', '.flatpak/dev.vencord.Vesktop/xdg-run'] : [''];
+  return dirs.flatMap((d) => ids.map((i) => path.join(base, d, `discord-ipc-${i}`)));
+}
 
 function frame(op, payload) {
   const data = Buffer.from(JSON.stringify(payload), 'utf8');
@@ -46,9 +55,9 @@ class DiscordPresence {
 
   connect(index = 0) {
     if (!this.enabled || this.sock) return;
-    if (index > 9) { this.scheduleRetry(); return; }
-    const pipe = process.platform === 'win32' ? `\\\\?\\pipe\\discord-ipc-${index}` : `${process.env.XDG_RUNTIME_DIR || process.env.TMPDIR || '/tmp'}/discord-ipc-${index}`;
-    const sock = net.createConnection(pipe);
+    const pipes = ipcPaths();
+    if (index >= pipes.length) { this.scheduleRetry(); return; }
+    const sock = net.createConnection(pipes[index]);
     let opened = false;
     sock.once('connect', () => {
       opened = true;

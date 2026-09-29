@@ -1,7 +1,7 @@
 {
   "name": "viciont-studio-launcher",
   "productName": "Viciont Studios Launcher",
-  "version": "1.1.9",
+  "version": "1.2.0",
   "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas premium y no premium, skins y descargas rápidas.",
   "author": {
     "name": "CrissyjuanxD",
@@ -14,11 +14,14 @@
     "url": "https://github.com/CrissyjuanxD/Viciont-Studio-Launcher.git"
   },
   "main": "src/main/main.js",
+  "desktopName": "viciont-studios-launcher.desktop",
   "private": true,
   "scripts": {
     "start": "electron .",
     "vendor": "node scripts/vendor.js",
     "dist": "electron-builder --win --x64",
+    "dist:mac": "electron-builder --mac --universal",
+    "dist:linux": "electron-builder --linux --x64",
     "release": "electron-builder --win --x64 --publish always"
   },
   "dependencies": {
@@ -60,6 +63,7 @@
     "electronLanguages": [
       "es",
       "es-419",
+      "es_419",
       "en-US"
     ],
     "win": {
@@ -98,6 +102,82 @@
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
       "displayLanguageSelector": false
+    },
+    "mac": {
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "universal"
+          ]
+        },
+        {
+          "target": "zip",
+          "arch": [
+            "universal"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "public.app-category.games",
+      "artifactName": "Viciont-Studios-Launcher-${version}-mac.${ext}",
+      "identity": "-",
+      "hardenedRuntime": false,
+      "gatekeeperAssess": false,
+      "darkModeSupport": true,
+      "extendInfo": {
+        "NSMicrophoneUsageDescription": "Minecraft necesita el micrófono para los mods de chat de voz.",
+        "NSCameraUsageDescription": "Un mod de Minecraft quiere usar la cámara.",
+        "NSLocalNetworkUsageDescription": "Minecraft usa la red local para encontrar y unirse a partidas LAN."
+      }
+    },
+    "dmg": {
+      "title": "Viciont Studios Launcher",
+      "writeUpdateInfo": false
+    },
+    "linux": {
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "deb",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "rpm",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "build/icon.png",
+      "category": "Game",
+      "executableName": "viciont-studios-launcher",
+      "syncDesktopName": true,
+      "artifactName": "Viciont-Studios-Launcher-${version}-linux-${arch}.${ext}",
+      "maintainer": "CrissyjuanxD <113305236+CrissyjuanxD@users.noreply.github.com>",
+      "vendor": "Viciont Studios",
+      "synopsis": "Launcher de Minecraft de Viciont Studios",
+      "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas premium y no premium, skins y descargas rápidas."
+    },
+    "deb": {
+      "packageName": "viciont-studios-launcher",
+      "recommends": [
+        "libappindicator3-1",
+        "x11-xserver-utils"
+      ]
+    },
+    "rpm": {
+      "packageName": "viciont-studios-launcher"
+    },
+    "toolsets": {
+      "appimage": "1.0.3"
     },
     "publish": [
       {

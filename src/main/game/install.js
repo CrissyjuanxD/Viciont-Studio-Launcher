@@ -5,11 +5,26 @@ const fsp = require('node:fs/promises');
 const { exists, readJson, writeJsonAtomic, rmrf, ensureDir, linkOrCopy } = require('../util/fsx');
 const { withZip } = require('../util/zip');
 const { ensureVanillaJson, resolveVersion } = require('./versions');
-const { resolveLibraries, libraryArtifact, libraryNatives, isModernNative } = require('./rules');
+const { resolveLibraries, libraryArtifact, libraryNatives, isModernNative, parseMaven } = require('./rules');
 const { planJava } = require('./java');
 const { planAssets } = require('./assets');
 const { installFabricLike } = require('./loaders');
 const { planForge } = require('./forge');
+
+const NATIVE_FILE = process.platform === 'win32' ? /\.dll$/i : process.platform === 'darwin' ? /\.(dylib|jnilib)$/i : /\.so(\.\d+)*$/i;
+
+function nativeArch(lib) {
+  const c = parseMaven(lib.name).classifier || '';
+  if (/-(arm64|aarch64|aarch_64)$/.test(c)) return 'arm64';
+  if (/-arm(32)?$/.test(c)) return 'arm';
+  if (/-(x86|i386)$/.test(c)) return 'ia32';
+  return 'x64';
+}
+
+function gameArch(libraries) {
+  if (process.platform !== 'darwin' || process.arch !== 'arm64') return process.arch;
+  return libraries.some((l) => /:natives-macos-arm64$/.test(l.name)) ? 'arm64' : 'x64';
+}
 
 async function extractNatives(list, dir) {
   const marker = path.join(dir, '.vsl-natives.json');
@@ -21,7 +36,7 @@ async function extractNatives(list, dir) {
   for (const n of list) {
     if (!(await exists(n.file))) continue;
     await withZip(n.file, (z) => z.extractAll(dir, {
-      filter: (name) => /\.dll$/i.test(name) && !(n.exclude || []).some((ex) => name.startsWith(ex)),
+      filter: (name) => NATIVE_FILE.test(name) && !(n.exclude || []).some((ex) => name.startsWith(ex)),
       map: (rel) => rel.split('/').pop(),
     }));
   }
@@ -63,8 +78,10 @@ async function planGame(spec, ctx) {
   }
 
   const resolved = await resolveVersion(dirs, launchId);
+  const libraries = resolveLibraries(resolved.libraries, {});
+  const arch = gameArch(libraries);
   const javaPlan = await planJava(resolved.javaVersion || vanilla.javaVersion, dirs, {
-    custom: ctx.javaCustom?.((resolved.javaVersion || vanilla.javaVersion)?.majorVersion || 8), signal, repair,
+    custom: ctx.javaCustom?.((resolved.javaVersion || vanilla.javaVersion)?.majorVersion || 8), signal, repair, arch,
   });
   javaPlan.items.forEach(add);
   if (javaPlan.post) posts.push(javaPlan.post);
@@ -72,13 +89,13 @@ async function planGame(spec, ctx) {
 
   const classpath = [];
   const natives = [];
-  for (const lib of resolveLibraries(resolved.libraries, {})) {
+  for (const lib of libraries) {
     const a = libraryArtifact(lib);
     if (a) {
       const dest = path.join(dirs.libraries, ...a.path.split('/'));
       if (a.url) add({ url: a.url, dest, sha1: a.sha1, size: a.size, label: lib.name, optional: lib.clientreq === false });
       classpath.push(dest);
-      if (isModernNative(lib)) natives.push({ file: dest, exclude: ['META-INF/'] });
+      if (isModernNative(lib) && nativeArch(lib) === arch) natives.push({ file: dest, exclude: ['META-INF/'] });
     }
     const n = libraryNatives(lib);
     if (n) {
@@ -112,7 +129,7 @@ async function planGame(spec, ctx) {
   });
 
   return {
-    launchId, resolved, mc,
+    launchId, resolved, mc, arch,
     java: javaPlan.result,
     items: [...items.values()],
     posts,

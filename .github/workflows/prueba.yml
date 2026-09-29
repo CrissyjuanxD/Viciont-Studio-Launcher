@@ -1,0 +1,166 @@
+name: Probar en Windows, Mac y Linux
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['prueba-*']
+
+permissions:
+  contents: read
+
+env:
+  API_HOST: viciont-launcher.pepoavilesg26.workers.dev
+
+jobs:
+  mac-build:
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - run: npx electron-builder --mac --universal --publish never
+      - name: Revisar el paquete
+        run: |
+          APP="dist/mac-universal/Viciont Studios Launcher.app"
+          ls -la dist
+          lipo -archs "$APP/Contents/MacOS/Viciont Studios Launcher"
+          codesign --verify --deep --strict --verbose=2 "$APP"
+          codesign -dv --verbose=2 "$APP" 2>&1 | head -20
+          echo "macOS mínimo: $(/usr/libexec/PlistBuddy -c 'Print :LSMinimumSystemVersion' "$APP/Contents/Info.plist")"
+          spctl -a -vv "$APP" || true
+          hdiutil attach -nobrowse -readonly -mountpoint /tmp/vsl-dmg dist/*.dmg
+          ls -la /tmp/vsl-dmg
+          hdiutil detach /tmp/vsl-dmg
+      - uses: actions/upload-artifact@v4
+        with:
+          name: mac-app
+          path: dist/*-mac.zip
+          retention-days: 3
+
+  mac:
+    needs: mac-build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-26
+            tests: 1.21.1,1.21.1:fabric,1.20.1:forge,1.16.5,1.8.9
+          - os: macos-15-intel
+            tests: 1.21.1,1.8.9
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - uses: actions/download-artifact@v4
+        with:
+          name: mac-app
+          path: app
+      - name: Bloquear el servidor de producción
+        run: |
+          echo "127.0.0.1 $API_HOST" | sudo tee -a /etc/hosts
+          sudo dscacheutil -flushcache
+          sudo killall -HUP mDNSResponder || true
+      - name: Rosetta
+        if: runner.arch == 'ARM64'
+        run: |
+          if /usr/bin/arch -x86_64 /usr/bin/true 2>/dev/null; then echo "Rosetta ya está instalado"; else sudo softwareupdate --install-rosetta --agree-to-license; fi
+      - name: Abrir el launcher empaquetado
+        run: |
+          mkdir -p smoke-out
+          ditto -xk app/*.zip /tmp/vsl-app
+          APP="/tmp/vsl-app/Viciont Studios Launcher.app"
+          "$APP/Contents/MacOS/Viciont Studios Launcher" > smoke-out/launcher-stdout.log 2>&1 &
+          PID=$!
+          sleep 30
+          screencapture -x smoke-out/launcher.png || true
+          cp -R "$HOME/Library/Application Support/ViciontStudioLauncher/launcher_logs" smoke-out/ || true
+          if kill -0 $PID 2>/dev/null; then echo "El launcher sigue abierto"; kill $PID; else echo "El launcher se cerró"; cat smoke-out/launcher-stdout.log; exit 1; fi
+      - name: Minecraft
+        env:
+          VSL_HOME: ${{ runner.temp }}/vsl
+          VSL_SMOKE_TESTS: ${{ matrix.tests }}
+          VSL_SMOKE_NOGL: '1'
+          VSL_SMOKE_OUT: smoke-out
+        run: npx electron scripts/smoke.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-${{ matrix.os }}
+          path: smoke-out
+          retention-days: 7
+
+  linux:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: sudo apt-get update && sudo apt-get install -y rpm xvfb imagemagick libgl1-mesa-dri x11-xserver-utils
+      - run: npm ci
+      - run: npx electron-builder --linux --x64 --publish never
+      - name: Revisar los paquetes
+        run: |
+          ls -la dist
+          dpkg-deb -I dist/*.deb
+          rpm -qip dist/*.rpm
+          echo "userns restringido: $(cat /proc/sys/kernel/apparmor_restrict_unprivileged_userns 2>/dev/null || echo no)"
+      - name: Bloquear el servidor de producción
+        run: echo "127.0.0.1 $API_HOST" | sudo tee -a /etc/hosts
+      - name: Abrir la AppImage
+        run: |
+          mkdir -p smoke-out
+          chmod +x dist/*.AppImage
+          for mode in 0 1; do
+            sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=$mode || true
+            xvfb-run -a -s "-screen 0 1280x800x24" bash -c '"$0" > "smoke-out/appimage-$1.log" 2>&1 & P=$!; sleep 30; import -window root "smoke-out/appimage-$1.png"; if kill -0 $P 2>/dev/null; then echo "AppImage abierta (userns restringido: $1)"; kill $P; else echo "La AppImage se cerró (userns restringido: $1)"; cat "smoke-out/appimage-$1.log"; exit 1; fi' dist/*.AppImage $mode
+          done
+      - name: Instalar y abrir el .deb
+        run: |
+          sudo apt-get install -y ./dist/*.deb
+          ls -la /usr/bin/viciont-studios-launcher /usr/share/applications | head -20
+          cat /usr/share/applications/viciont-studios-launcher.desktop || true
+          xvfb-run -a -s "-screen 0 1280x800x24" bash -c 'viciont-studios-launcher > smoke-out/deb.log 2>&1 & P=$!; sleep 30; import -window root smoke-out/deb.png; if kill -0 $P 2>/dev/null; then echo "El .deb se abre"; kill $P; else cat smoke-out/deb.log; exit 1; fi'
+          cp -r ~/.config/ViciontStudioLauncher/launcher_logs smoke-out/ || true
+      - name: Instalar el .rpm en Fedora
+        run: |
+          docker run --rm -v "$PWD/dist:/d" fedora:latest bash -c 'dnf install -y /d/*.rpm > /dev/null && rpm -ql viciont-studios-launcher | head -5 && if ldd "/opt/Viciont Studios Launcher/viciont-studios-launcher" | grep "not found"; then exit 1; else echo "No falta ninguna librería"; fi'
+      - name: Minecraft
+        env:
+          VSL_HOME: ${{ runner.temp }}/vsl
+          VSL_SMOKE_TESTS: 1.21.1,1.21.1:fabric,1.20.1:forge,1.16.5,1.8.9
+          VSL_SMOKE_OUT: smoke-out
+        run: xvfb-run -a -s "-screen 0 1280x800x24" npx electron --no-sandbox scripts/smoke.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-linux
+          path: smoke-out
+          retention-days: 7
+
+  windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Preparar Minecraft
+        env:
+          VSL_HOME: ${{ runner.temp }}\vsl
+          VSL_SMOKE_TESTS: 1.21.1,1.8.9
+          VSL_SMOKE_LAUNCH: '0'
+          VSL_SMOKE_OUT: smoke-out
+        run: npx electron scripts/smoke.js
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-windows
+          path: smoke-out
+          retention-days: 7
