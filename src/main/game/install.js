@@ -1,6 +1,4 @@
 'use strict';
-// Planifica la instalación completa de una versión (vanilla + cargador + Java +
-// librerías + nativos + recursos) como una sola lista de descargas.
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -30,12 +28,7 @@ async function extractNatives(list, dir) {
   await writeJsonAtomic(marker, { key, at: Date.now() });
 }
 
-/**
- * spec: { mc, loader: { type, version } }
- * ctx:  { dirs, signal, repair, javaCustom(major) → ruta|undefined, gameDir }
- */
 async function planGame(spec, ctx) {
-  // Solo en pruebas automáticas (código fuente, nunca en la versión instalada): sin descargar el juego.
   if (process.env.VSL_TEST_NOGAME === '1' && !require('electron').app.isPackaged) {
     return { launchId: spec.mc, mc: spec.mc, items: [], posts: [], dispose: () => {} };
   }
@@ -123,7 +116,7 @@ async function planGame(spec, ctx) {
     java: javaPlan.result,
     items: [...items.values()],
     posts,
-    dispose: () => disposers.forEach((d) => { try { d(); } catch { /* cerrado */ } }),
+    dispose: () => disposers.forEach((d) => { try { d(); } catch {} }),
     classpath, nativesDir, jarPath, logging,
     assets: assetsPlan.result,
   };

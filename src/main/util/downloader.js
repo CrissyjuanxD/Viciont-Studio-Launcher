@@ -1,7 +1,4 @@
 'use strict';
-// Motor de descargas: varias a la vez, verificación SHA-1, reintentos, reanudación
-// de archivos grandes y escritura segura (.part + renombrado al terminar).
-// Un archivo nunca queda "a medias" en su ruta final.
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -17,8 +14,6 @@ const RESUME_MIN = 8 * 1024 * 1024;
 const IDLE_TIMEOUT = 30000;
 const ATTEMPTS = 5;
 
-// Ejecuta fn sobre items con un límite de concurrencia. Si algo falla, deja
-// terminar lo que está en curso (sin cortar escrituras) y lanza el primer error.
 async function pool(items, limit, fn, signal) {
   let next = 0;
   let failure = null;
@@ -90,7 +85,6 @@ async function attempt(url, item, ctx) {
       throw new HttpError(res.status, url, body);
     }
     if (start && res.status !== 206) {
-      // el servidor no admite reanudar: empezar de cero
       start = 0;
       if (item.sha1) hash = crypto.createHash('sha1');
     }
@@ -126,7 +120,6 @@ async function attempt(url, item, ctx) {
   } catch (e) {
     if (out) { out.destroy(); await once(out, 'close').catch(() => {}); }
     progress?.addDone(-counted);
-    // los archivos pequeños se descartan; los grandes se reanudan en el siguiente intento
     if (item.size == null || item.size < RESUME_MIN || signal?.aborted) {
       if (!(signal?.aborted && item.size >= RESUME_MIN)) await fsp.rm(part, { force: true }).catch(() => {});
     }
@@ -163,15 +156,8 @@ async function downloadOne(item, ctx) {
   throw err;
 }
 
-/**
- * Descarga una lista de archivos.
- * items: { url | urls, dest, sha1?, size?, optional?, label?, headers? }
- * verify: 'size' (rápido) | 'hash' (comprueba SHA-1 de lo que ya existe)
- * Devuelve { downloaded, skipped, failedOptional }.
- */
 const SMALL = 256 * 1024;
 
-// En el proceso principal las descargas van a un hilo aparte (así la ventana no se traba).
 async function downloadAll(items, opts = {}) {
   if (isMainThread && items.length && offload.available()) return offload.download(items, opts, downloadAllLocal);
   return downloadAllLocal(items, opts);
@@ -186,8 +172,6 @@ async function downloadAllLocal(items, { concurrency = 8, signal, progress, veri
   for (const it of needed) bytes += it.size || 0;
   progress?.addTotal(bytes, needed.length);
 
-  // Los archivos pequeños (miles de recursos) van en su propia cola con más
-  // conexiones: así la latencia de cada petición no frena la descarga.
   const small = needed.filter((it) => it.size != null && it.size < SMALL);
   const large = needed.filter((it) => !(it.size != null && it.size < SMALL));
   const inner = new AbortController();

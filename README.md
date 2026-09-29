@@ -24,7 +24,7 @@
    - **Edge:** en Descargas, pulsa la flecha **⌄** junto a *Eliminar* → **Conservar** → **Mostrar más** → **Conservar de todas formas**.
    - **Chrome:** en Descargas, pulsa **Conservar** (o *Descargar archivo no seguro*).
 3. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
-4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
+4. Elige dónde instalarlo y listo. El launcher se **actualiza solo**: cuando hay una versión nueva, arriba a la izquierda sale el botón **Hay una versión disponible** (con el progreso de la descarga). Cuando termina, al pulsarlo el launcher se reinicia ya actualizado; si no, se actualiza solo la próxima vez que lo cierres. Cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
 
 Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
 
@@ -45,6 +45,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
+- **Inicio** con todas las instancias que puedes jugar: en cada una se ve cuándo jugaste por última vez y cuánto tiempo llevas jugado.
 - **Barra lateral** con las instancias que tienes permiso para ver, la casita para volver al inicio, las skins, los ajustes, tu cabeza de la skin (al pasar el cursor dice qué cuenta tienes) y el botón de cerrar sesión.
 - **Un solo botón** que cambia según el estado: **Descargar → Actualizar → Jugar → Jugando**. Mientras descarga se convierte en una tarjeta con la imagen de la instancia, el progreso, los MB/s y el tiempo que queda.
 - Cada instancia tiene su **fondo propio**: imagen, GIF o vídeo.
@@ -65,7 +66,7 @@ Requisitos: Windows 10 u 11 de 64 bits. No necesitas tener Java instalado: el la
 - **Publicar versiones**: solo se suben los archivos nuevos o cambiados (los pequeños en lotes, así que publicar miles de archivos es rápido). Los jugadores ven **Actualizar** y el texto de novedades.
 - **Qué cambió exactamente**: antes de publicar, **Ver cambios** lista los archivos nuevos, modificados y los que se quitan, y los textos o permisos que cambiaste. En las configs se ven las **líneas que cambiaron** (lo nuevo en verde, lo quitado en rojo), como en Git.
 - Cada archivo elige cómo se actualiza: se reemplaza siempre, solo la primera vez o, en `options.txt` y parecidos, **se fusionan los ajustes**: el jugador recibe solo los que cambiaste (por ejemplo, el resource pack activado) y conserva los suyos (teclas, volumen, FOV…). Al publicar eliges qué ajustes se aplican.
-- **Copia de prueba**: instala la instancia como la vería un jugador cualquiera, para probar cada actualización.
+- **Copia de prueba**: instala la instancia como la vería un jugador cualquiera, para probar cada actualización. El aviso de que es una copia de prueba va arriba, junto a su etiqueta, así la descripción se ve exactamente como la verán los jugadores.
 - **Qué ven los jugadores** (todo viene desactivado): se puede quitar el botón «Carpeta» y ocultar:
   - los **mods** (con Fabric o Quilt): la carpeta `mods` se ve vacía y el juego los carga desde otro sitio del PC;
   - el contenido de **`config`** y los **resource packs**: se guardan aparte y el launcher los pone en su sitio solo mientras se juega (con enlaces duros: no ocupan el doble ni tardan). Al cerrar el juego se quitan y se guarda lo que el jugador cambió. Los resource packs y las carpetas de config quedan ocultos en el Explorador incluso mientras se juega.

@@ -1,13 +1,4 @@
 'use strict';
-// Administración de instancias. Doble llave:
-//   1. El nick tiene que tener permisos concedidos desde el panel web del estudio.
-//   2. Hay que escribir la clave personal de ese nick (la genera el panel).
-// Cada petición va con la sesión del jugador + su clave, y el servidor comprueba los permisos.
-//
-// Instancia sincronizada: la carpeta de la instancia en el PC del administrador es la fuente.
-// Se juega y se modifica como cualquier instancia (mods, configs, options.txt…) y al publicar el
-// launcher compara con lo publicado: solo sube lo nuevo o cambiado y quita lo que ya no está.
-// Los textos, imágenes y permisos se guardan aparte como borrador hasta que se publican.
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -33,30 +24,24 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{1,47}$/;
 const KEY_FILE = configFile('admin.dat');
 const SINGLE_MAX = 64 * 1024 * 1024;
 const PART = 48 * 1024 * 1024;
-const MIN_API = 3; // versión del servidor que entiende todo lo de la 1.1.0
-const BATCH_API = 5; // subida por lotes y ocultar config/resourcepacks (1.1.3)
-// Los archivos pequeños se suben en lotes (una sola petición para muchos): mucho más rápido.
+const MIN_API = 3;
+const BATCH_API = 5;
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
-// Vista de diferencias de los archivos de texto que cambiaste.
 const DIFF_MAX = 2 * 1024 * 1024;
 const BINARY_EXT = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
 const TYPE_DIRS = { mod: 'mods', resourcepack: 'resourcepacks', shader: 'shaderpacks', datapack: 'datapacks' };
-// Se fusionan por claves al actualizar: el jugador solo recibe los ajustes que cambies tú.
 const MERGE_FILES = new Set(['options.txt', 'optionsof.txt', 'optionsshaders.txt']);
-// Solo se copian si el jugador no los tiene.
 const ONCE_FILES = new Set(['servers.dat']);
 const UUID_RE = /^[0-9a-f]{8}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{4}-?[0-9a-f]{12}$/i;
 const MEDIA_EXT = { 'image/png': 'png', 'image/jpeg': 'jpg', 'image/webp': 'webp', 'image/gif': 'gif', 'video/mp4': 'mp4', 'video/webm': 'webm' };
 const PROTECTABLE = ['mods', 'config', 'resourcepacks'];
 
-// Carpetas y archivos de la instancia que nunca se publican (registros, cachés, cosas del launcher…).
 const SKIP_TOP = new Set(['logs', 'crash-reports', 'screenshots', '.cache', 'cache', 'local', 'downloads', 'backups', '.vsl',
   'customskinloader', '.fabric', '.mixin.out', 'essential', 'usercache.json', 'usernamecache.json', 'launcher_profiles.json',
   'command_history.txt', 'patchouli_books', 'modernfix', '.curseclient', 'minecraftinstance.json', 'mmc-pack.json',
   'instance.cfg', 'profile.json', 'natives', 'libraries', 'versions', 'assets', 'icon.png', '.optifine', 'realms_persistence.json']);
-// Lo que se publica por defecto si está en la carpeta.
 const SUGGESTED = new Set(['mods', 'config', 'defaultconfigs', 'kubejs', 'resourcepacks', 'shaderpacks', 'scripts', 'global_packs',
   'datapacks', 'options.txt', 'optionsof.txt', 'optionsshaders.txt', 'servers.dat', 'fancymenu_data', 'customization', 'paxi',
   'openloader', 'resources', 'emotes']);
@@ -87,7 +72,6 @@ function cleanMeta(m = {}, id) {
     featured: Boolean(m.featured),
     accent: /^#[0-9a-f]{6}$/i.test(m.accent || '') ? m.accent : '',
     changelog: str(m.changelog, 2000),
-    // lo que ven los jugadores: el botón "Carpeta" y las carpetas ocultas (mods con Fabric o Quilt, config, resourcepacks)
     showFolder: m.showFolder !== false,
     protect: [...new Set((Array.isArray(m.protect) ? m.protect : []).filter((x) => PROTECTABLE.includes(x)))].sort(),
   };
@@ -105,8 +89,6 @@ const defaultPolicy = (rel) => {
   return 'always';
 };
 
-// Política de un archivo: la que eligió el administrador, la publicada o la de siempre.
-// (antes options.txt era "solo la primera vez"; ahora se fusiona por claves)
 function inheritedPolicy(ws, rel) {
   const b = ws.base?.[rel]?.policy;
   if (b === 'once' && MERGE_FILES.has(rel.toLowerCase())) return 'merge';
@@ -134,15 +116,14 @@ class Admin extends EventEmitter {
     this.accounts = accounts;
     this.instances = instances;
     this.log = log;
-    this.saved = {}; // cuenta → clave recordada (cifrada en admin.dat)
-    this.sessions = new Map(); // cuenta → { key, nick, perms, scope }
+    this.saved = {};
+    this.sessions = new Map();
     this.tasks = new Map();
-    this.grants = new Map(); // rutas elegidas por el usuario (arrastrar y soltar / diálogos)
-    this.pub = new Map(); // id → instancia publicada (null si no lo está)
+    this.grants = new Map();
+    this.pub = new Map();
     this.apiOk = 0;
   }
 
-  // ---------- Acceso ----------
   load() {
     const d = readSecure(KEY_FILE, null);
     if (d?.keys && typeof d.keys === 'object') this.saved = d.keys;
@@ -182,7 +163,6 @@ class Admin extends EventEmitter {
       return { ...base, error: e.message, access: Boolean(s), unlocked: Boolean(s), perms: s?.perms || [] };
     }
     if (!me?.admin) {
-      // el panel le quitó el acceso (o nunca lo tuvo): se olvida la clave de esta cuenta
       this.forget(acc.uuid);
       return base;
     }
@@ -223,7 +203,6 @@ class Admin extends EventEmitter {
     return { unlocked: false };
   }
 
-  // Cabeceras de una petición de administración: sesión del jugador + clave personal.
   async headers(acc, key) {
     const token = await this.accounts.session(acc);
     if (!token) throw err('No se pudo conectar con el servidor de Viciont Studios.', 'ENOBACKEND');
@@ -259,7 +238,6 @@ class Admin extends EventEmitter {
     }
   }
 
-  // Versión de la API del servidor (se recuerda 10 minutos).
   async serverVersion({ fresh = false } = {}) {
     if (!fresh && this.apiVer && Date.now() - this.apiOk < 10 * 60 * 1000) return this.apiVer;
     const h = await this.backend.call('/v1/health', { timeout: 10000, retries: 1 });
@@ -268,14 +246,12 @@ class Admin extends EventEmitter {
     return this.apiVer;
   }
 
-  // El servidor tiene que estar actualizado para sincronizar, publicar y hacer copias de prueba.
   async ensureServer() {
     if (!((await this.serverVersion()) >= MIN_API)) {
       throw err('El servidor de Viciont Studios necesita actualizarse para esta versión del launcher: pega el código nuevo del servidor en Cloudflare y pulsa Deploy.', 'EOLDSERVER');
     }
   }
 
-  // Las rutas del PC solo se aceptan si el usuario las eligió (diálogo o arrastrar y soltar).
   grant(p) {
     if (typeof p !== 'string' || !path.isAbsolute(p)) return;
     this.grants.set(path.resolve(p).toLowerCase(), Date.now());
@@ -288,7 +264,6 @@ class Admin extends EventEmitter {
     return Boolean(t && Date.now() - t < 30 * 60 * 1000);
   }
 
-  // ---------- Borrador de textos, imágenes y permisos ----------
   dirs() {
     const d = this.getDirs().admin;
     return { root: d, drafts: path.join(d, 'drafts'), media: path.join(d, 'media'), imports: path.join(d, 'imports') };
@@ -314,7 +289,6 @@ class Admin extends EventEmitter {
     return inst ? r : null;
   }
 
-  // Borrador actual (o los datos publicados si no hay cambios).
   async metaDraft(id) {
     const local = await this.readDraft(id);
     let inst = this.pub.get(id);
@@ -328,7 +302,6 @@ class Admin extends EventEmitter {
     return { d: { id, meta: cleanMeta(inst, id), media: mediaFrom(inst) }, inst };
   }
 
-  // ¿Hay textos, imágenes o permisos sin publicar?
   metaDirty(d, inst) {
     if (!inst?.version) return true;
     if (JSON.stringify(cleanMeta(d.meta, d.id)) !== JSON.stringify(cleanMeta(inst, d.id))) return true;
@@ -336,7 +309,6 @@ class Admin extends EventEmitter {
     return ['icon', 'background'].some((k) => d.media?.[k]?.local || (d.media?.[k]?.key || null) !== (pub[k]?.key || null));
   }
 
-  // Qué textos, imágenes y permisos cambiaron respecto a lo publicado (para mostrarlo antes de publicar).
   metaChanges(d, inst) {
     if (!inst?.version) return [];
     const a = cleanMeta(inst, d.id);
@@ -377,7 +349,6 @@ class Admin extends EventEmitter {
     return out;
   }
 
-  // Solo se guarda un borrador si de verdad hay algo distinto de lo publicado.
   async persistMeta(d, inst) {
     if (Array.isArray(d.files) || this.metaDirty(d, inst)) await this.writeDraft(d);
     else await fsp.rm(this.draftFile(d.id), { force: true });
@@ -414,7 +385,7 @@ class Admin extends EventEmitter {
         const d = await readJson(path.join(this.dirs().drafts, f));
         if (d?.id && ID_RE.test(d.id)) drafts.set(d.id, d);
       }
-    } catch { /* sin borradores */ }
+    } catch {}
     const pubIds = new Set(out.published.map((p) => p.id));
     for (const p of out.published) {
       const d = drafts.get(p.id);
@@ -458,7 +429,6 @@ class Admin extends EventEmitter {
     const d = local
       ? { id, meta: cleanMeta(local.meta, id), media: local.media || { icon: null, background: null }, ...(Array.isArray(local.files) ? { files: local.files } : {}) }
       : { id, meta: cleanMeta(inst, id), media: mediaFrom(inst) };
-    // borradores de la 1.0.x: si sus archivos son los publicados, ya no hacen falta
     if (Array.isArray(d.files) && (!d.files.length || (inst && sameFiles(d.files, pub.manifest?.files || [])))) {
       delete d.files;
       await this.persistMeta(d, inst);
@@ -466,7 +436,6 @@ class Admin extends EventEmitter {
     return this.view(id, d, inst);
   }
 
-  // Descarta los cambios de textos, imágenes y permisos (los archivos de la carpeta no se tocan).
   async discard(id) {
     await fsp.rm(this.draftFile(id), { force: true });
     await rmrf(path.join(this.dirs().imports, id));
@@ -478,14 +447,12 @@ class Admin extends EventEmitter {
     d.meta = cleanMeta({ ...d.meta, ...patch }, id);
     await this.persistMeta(d, inst);
     if (patch.mc || patch.loader) {
-      // la carpeta sincronizada juega con la versión y el cargador que elijas
       const st = await this.instances.readState(id);
       if (st?.workspace) await this.instances.writeState(id, { ...st, mc: d.meta.mc, loader: d.meta.loader });
     }
     return this.view(id, d, inst, { ws: false });
   }
 
-  // bytes: imagen ya optimizada en la interfaz (o el GIF/vídeo original).
   async setMedia(id, kind, { bytes, type }) {
     if (!['icon', 'background'].includes(kind)) throw err('Tipo de imagen no válido');
     const ext = MEDIA_EXT[type];
@@ -513,14 +480,12 @@ class Admin extends EventEmitter {
     return this.view(id, d, inst, { ws: false });
   }
 
-  // ---------- Carpeta sincronizada ----------
   async mustWs(id) {
     const st = await this.instances.readState(id);
     if (!st?.workspace) throw err('Primero sincroniza esta instancia con tu PC.', 'ENOSYNC');
     return { st, dir: this.instances.gameDir(id) };
   }
 
-  // Guarda la configuración de la carpeta sin pisar lo que el juego haya escrito entretanto.
   async saveWs(id, ws, patch = {}) {
     const cur = (await this.instances.readState(id)) || {};
     await this.instances.writeState(id, { ...cur, ...patch, workspace: ws });
@@ -536,7 +501,6 @@ class Admin extends EventEmitter {
     return fsp.readFile(this.instances.baseCopy(id, rel), 'utf8').catch(() => null);
   }
 
-  // Archivos de la carpeta que se publican (con su SHA-1; solo se recalcula lo que cambió).
   async scanWs(id, st) {
     const ws = st.workspace;
     const dir = this.instances.gameDir(id);
@@ -546,7 +510,7 @@ class Admin extends EventEmitter {
     const candidates = [];
     const rels = [];
     let entries = [];
-    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { /* carpeta vacía */ }
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch {}
     for (const e of entries) {
       const lower = e.name.toLowerCase();
       if (SKIP_TOP.has(lower) || /\.(log|tmp)$/i.test(lower)) continue;
@@ -572,7 +536,6 @@ class Admin extends EventEmitter {
     return { files, candidates };
   }
 
-  // Cambios respecto a lo publicado.
   async diffWs(id, ws, scan) {
     const base = ws.base || {};
     const added = new Set();
@@ -638,7 +601,6 @@ class Admin extends EventEmitter {
         policy: effPolicy(ws, f.path),
         source: m?.url ? 'modrinth' : 'local',
         project: m?.project || null, title: m?.title || null, icon: m?.icon || null, versionName: m?.versionName || null,
-        // qué había publicado (para enseñar qué cambió)
         ...(state === 'modified' && b ? {
           oldSize: b.size || 0, oldPolicy: b.policy || 'always', policyOnly: b.sha1 === f.sha1,
           oldTitle: b.title || null, oldVersionName: b.versionName || null,
@@ -689,8 +651,6 @@ class Admin extends EventEmitter {
     this.instances.emitChange(id);
   }
 
-  // Convierte la instancia en tu carpeta de trabajo: si ya está publicada, primero se descarga
-  // (o se completa) la versión publicada, como la tendría cualquier jugador.
   async sync(id) {
     const cur = await this.instances.readState(id);
     if (cur?.workspace) return this.wsStatus(id);
@@ -723,7 +683,6 @@ class Admin extends EventEmitter {
     return this.wsStatus(id);
   }
 
-  // Copia de lo publicado de options.txt y parecidos (para saber qué ajustes cambias tú).
   async fetchBaseCopies(id) {
     const st = await this.instances.readState(id);
     const ws = st?.workspace;
@@ -745,7 +704,6 @@ class Admin extends EventEmitter {
     }
   }
 
-  // Borradores de la 1.0.x (lista de archivos): se pasan a la carpeta sincronizada.
   async applyLegacy(id, d, inst) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -783,7 +741,6 @@ class Admin extends EventEmitter {
     await shell.trashItem(abs).catch(() => rmrf(abs));
   }
 
-  // Añade archivos o carpetas del PC a la carpeta sincronizada (targetDir: "mods", "config", "" = raíz…).
   async addLocal(id, paths, targetDir = '') {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -810,13 +767,12 @@ class Admin extends EventEmitter {
     return { added, workspace: await this.wsStatus(id) };
   }
 
-  // Descarga un mod, resource pack o shader de Modrinth (con sus dependencias) a la carpeta.
   async addModrinth(id, { projectId, versionId }) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
     const { d } = await this.metaDraft(id);
     const scan = await this.scanWs(id, st);
-    const present = new Map(); // proyecto → archivo que ya está en la carpeta
+    const present = new Map();
     for (const [rel, f] of scan.files) {
       const m = [ws.known?.[rel], ws.base?.[rel]].find((x) => x?.project && x.sha1 === f.sha1);
       if (m) present.set(m.project, rel);
@@ -863,14 +819,12 @@ class Admin extends EventEmitter {
     return { added, workspace: await this.wsStatus(id) };
   }
 
-  // Quita archivos o carpetas (van a la Papelera, por si acaso).
   async removeFiles(id, paths) {
     const { dir } = await this.mustWs(id);
     for (const p of paths) await this.trash(dir, p);
     return { workspace: await this.wsStatus(id) };
   }
 
-  // Deshace los cambios de esos archivos: vuelven a estar como en la versión publicada.
   async restoreFiles(id, paths) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -903,7 +857,6 @@ class Admin extends EventEmitter {
     return { workspace: await this.wsStatus(id) };
   }
 
-  // Enlace de descarga de un archivo publicado (el de subida propia lleva un permiso que dura horas).
   async publishedUrl(id, b) {
     if (b.source !== 'upload' && b.url) return b.url;
     this.dlTokens ||= new Map();
@@ -915,7 +868,6 @@ class Admin extends EventEmitter {
     return this.instances.blobUrl(id, b.sha1, t.token);
   }
 
-  // Lo publicado de un archivo y lo que hay ahora en tu carpeta, para ver qué cambió (solo texto).
   async fileDiff(id, rel) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -978,7 +930,6 @@ class Admin extends EventEmitter {
     return { workspace: await this.wsStatus(id) };
   }
 
-  // Elige qué carpetas o archivos de la raíz se publican.
   async setInclude(id, name, on) {
     const { st } = await this.mustWs(id);
     const ws = st.workspace;
@@ -990,7 +941,6 @@ class Admin extends EventEmitter {
     return { workspace: await this.wsStatus(id) };
   }
 
-  // ---------- Importar ----------
   async scanFolder(dir) {
     let root = dir;
     for (const sub of ['.minecraft', 'minecraft']) {
@@ -1016,7 +966,6 @@ class Admin extends EventEmitter {
     return { root, detected, entries };
   }
 
-  // Copia una instancia (CurseForge, Prism, Modrinth, .minecraft…) a la carpeta sincronizada.
   async importFolder(id, root, include) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -1036,7 +985,7 @@ class Admin extends EventEmitter {
       let total = 0;
       await pool(list, 6, async ([rel, src]) => {
         const r = normalizeRel(rel);
-        if (!r || IGNORE_FILE_RE.test(r) || /\.disabled$/i.test(r)) return; // los mods desactivados no se importan
+        if (!r || IGNORE_FILE_RE.test(r) || /\.disabled$/i.test(r)) return;
         const dest = safeJoin(dir, r);
         await ensureDir(path.dirname(dest));
         await fsp.copyFile(src, dest);
@@ -1051,13 +1000,12 @@ class Admin extends EventEmitter {
     }
   }
 
-  // Instancias de Modrinth App en este PC (con su icono ya listo para mostrarlo en la lista).
   async modrinthInstances() {
     const list = await modrinthApp.listInstances(this.log);
     this.mrIcons = new Set();
     const out = [];
     for (const i of list) {
-      this.grant(i.dir); // se podrá importar sin volver a elegir la carpeta
+      this.grant(i.dir);
       let iconData = null;
       if (i.icon) {
         this.mrIcons.add(path.resolve(i.icon).toLowerCase());
@@ -1069,7 +1017,6 @@ class Admin extends EventEmitter {
     return out;
   }
 
-  // Icono de una instancia de Modrinth App de la lista (para usarlo como icono de la tuya).
   async modrinthIcon(file) {
     if (!this.mrIcons?.has(path.resolve(String(file || '')).toLowerCase())) throw err('Ese icono no es de una instancia de Modrinth App.');
     const ic = await modrinthApp.readIcon(file);
@@ -1077,7 +1024,6 @@ class Admin extends EventEmitter {
     return ic;
   }
 
-  // Descarga un modpack de Modrinth (.mrpack) en la carpeta sincronizada.
   async importMrpack(id, file) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
@@ -1108,7 +1054,6 @@ class Admin extends EventEmitter {
         items.push({ url, dest: safeJoin(dir, rel), sha1: f.hashes.sha1, size: f.fileSize, label: path.basename(rel) });
         this.includeTop(ws, topOf(rel));
       }
-      // primero "overrides" y después "client-overrides" (tienen prioridad)
       let count = items.length;
       for (const prefix of ['overrides/', 'client-overrides/']) {
         for (const name of z.names()) {
@@ -1131,7 +1076,6 @@ class Admin extends EventEmitter {
     }
   }
 
-  // ---------- Publicar ----------
   startProgress(key, label) {
     const p = new TaskProgress(key, { kind: 'admin' });
     p.setPhase('start', label);
@@ -1151,8 +1095,6 @@ class Admin extends EventEmitter {
     this.tasks.delete(key);
   }
 
-  // mergeKeys: { "options.txt": ["resourcePacks", …] } = ajustes que se aplican a los jugadores.
-  // Los que no se marquen se quedan solo en tu PC (y no vuelven a salir como cambios).
   async publish(id, { mergeKeys = {} } = {}) {
     await this.ensureServer();
     const { st, dir } = await this.mustWs(id);
@@ -1172,7 +1114,7 @@ class Admin extends EventEmitter {
     try {
       const scan = await this.scanWs(id, st);
       const entries = [];
-      const composed = new Map(); // archivo que se fusiona → texto que se publica
+      const composed = new Map();
       const localKeys = { ...(ws.localKeys || {}) };
       const lookup = [];
       for (const f of scan.files.values()) {
@@ -1212,7 +1154,6 @@ class Admin extends EventEmitter {
         if (/^(mods|resourcepacks|shaderpacks)\/[^/]+\.(jar|zip)$/i.test(f.path)) lookup.push(e);
         entries.push(e);
       }
-      // lo que ya está en Modrinth se enlaza a su CDN (no ocupa espacio en tu servidor)
       progress.setPhase('modrinth', 'Buscando mods en Modrinth…');
       if (lookup.length) {
         const found = await modrinth.versionsByHashes(lookup.map((e) => e.sha1)).catch(() => ({}));
@@ -1261,7 +1202,6 @@ class Admin extends EventEmitter {
         json: { baseVersion: ws.baseVersion || 0, meta, media: this.mediaNames(d), files },
       });
       const version = r.instance?.version;
-      // lo publicado pasa a ser la base de la carpeta
       for (const [rel, text] of composed) {
         const file = this.instances.baseCopy(id, rel);
         await ensureDir(path.dirname(file));
@@ -1281,7 +1221,6 @@ class Admin extends EventEmitter {
     }
   }
 
-  // Sube el icono y el fondo nuevos (si los hay) y los deja en la caché local.
   async uploadMedia(id, d, progress) {
     for (const kind of ['icon', 'background']) {
       const m = d.media?.[kind];
@@ -1311,8 +1250,6 @@ class Admin extends EventEmitter {
     return this.headers(acc, s.key);
   }
 
-  // Sube lo que falta: los archivos pequeños en lotes (una petición para cientos de ellos) y los
-  // grandes de uno en uno. Con un servidor anterior a la API v5, todos de uno en uno.
   async uploadAll(id, todo, progress) {
     const batchable = (await this.serverVersion().catch(() => 0)) >= BATCH_API;
     const small = batchable ? todo.filter((t) => t.size <= BATCH_FILE_MAX) : [];
@@ -1332,7 +1269,6 @@ class Admin extends EventEmitter {
     if (failed) throw failed.reason;
   }
 
-  // Un lote: [4 bytes: tamaño de la cabecera][cabecera JSON][archivos seguidos]. El servidor comprueba el SHA-1 de cada uno.
   async uploadBatch(id, items, progress) {
     const head = Buffer.from(JSON.stringify({ files: items.map((t) => ({ sha1: t.sha, size: t.size })) }), 'utf8');
     const len = Buffer.alloc(4);
@@ -1400,8 +1336,6 @@ class Admin extends EventEmitter {
     });
   }
 
-  // Trae una versión que publicó otro administrador. Lo que cambiaste tú se respeta: si los dos
-  // cambiasteis el mismo archivo, se queda el tuyo (y se avisa).
   async pull(id) {
     await this.ensureServer();
     const { st, dir } = await this.mustWs(id);
@@ -1419,7 +1353,7 @@ class Admin extends EventEmitter {
       const b = B[rel]?.sha1;
       const r = R.get(rel)?.sha1;
       const l = scan.files.get(rel)?.sha1;
-      if (r === b) continue; // el otro administrador no lo tocó
+      if (r === b) continue;
       const dest = safeJoin(dir, rel);
       const remoteUrl = () => this.instances.fileUrl(id, R.get(rel), downloadToken);
       if (l === b) {
@@ -1427,7 +1361,7 @@ class Admin extends EventEmitter {
         else if (remoteUrl()) items.push({ url: remoteUrl(), dest, sha1: r, size: R.get(rel).size, label: path.basename(rel), force: true });
         continue;
       }
-      if (l === r) continue; // el mismo cambio en los dos lados
+      if (l === r) continue;
       if (l && r && effPolicy(ws, rel) === 'merge' && remoteUrl()) { merges.push({ rel, dest, url: remoteUrl() }); continue; }
       conflicts.push(rel);
     }
@@ -1443,7 +1377,6 @@ class Admin extends EventEmitter {
     } finally { this.stopProgress(key); }
     const nws = { ...ws, baseVersion: manifest.version, base: Object.fromEntries(manifest.files.map((f) => [f.path, { ...f }])) };
     for (const rel of R.keys()) this.includeTop(nws, topOf(rel));
-    // las copias base se renuevan con lo que se acaba de publicar
     for (const rel of Object.keys(nws.base)) if (effPolicy(nws, rel) === 'merge') await fsp.rm(this.instances.baseCopy(id, rel), { force: true });
     await this.saveWs(id, nws, { installedVersion: manifest.version, summary: instance, mc: manifest.mc, loader: manifest.loader });
     await this.fetchBaseCopies(id);
@@ -1452,7 +1385,6 @@ class Admin extends EventEmitter {
     return { conflicts, workspace: await this.wsStatus(id) };
   }
 
-  // Copia de prueba: se instala como la de un jugador cualquiera (con los mods ocultos si toca).
   async testCopy(id) {
     await this.ensureServer();
     const pub = await this.fetchPublished(id);
@@ -1462,7 +1394,6 @@ class Admin extends EventEmitter {
     return tid;
   }
 
-  // Deja de sincronizar: la carpeta se queda como una instalación normal de jugador.
   async unsync(id) {
     const st = await this.instances.readState(id);
     if (!st?.workspace) return true;
@@ -1473,7 +1404,6 @@ class Admin extends EventEmitter {
     return true;
   }
 
-  // Cambios rápidos sin volver a publicar archivos (visibilidad, permisos, textos…).
   async updateMeta(id, meta) {
     const { d } = await this.metaDraft(id);
     d.meta = cleanMeta({ ...d.meta, ...meta }, id);
@@ -1484,7 +1414,6 @@ class Admin extends EventEmitter {
     return r.instance;
   }
 
-  // Se borra del servidor; tu carpeta se queda (vuelve a ser una instancia sin publicar).
   async remove(id) {
     const { d } = await this.metaDraft(id).catch(() => ({ d: null }));
     await this.call(`/v1/admin/instances/${id}`, { method: 'DELETE', timeout: 60000 });
@@ -1507,25 +1436,20 @@ class Admin extends EventEmitter {
     return this.call(`/v1/admin/offline-accounts/${encodeURIComponent(name)}`, { method: 'DELETE' });
   }
 
-  // ---------- Almacenamiento del servidor (R2 + base de datos) ----------
-  // null si el servidor todavía no sabe calcularlo (anterior a la API v4).
   async storage({ fresh = false } = {}) {
     const r = await this.call(`/v1/admin/storage${fresh ? '?fresh=1' : ''}`, { timeout: 90000, ok: [404] });
     return r?.ok ? r : null;
   }
 
-  // Borra lo que ya no se usa: versiones anteriores, imágenes cambiadas, restos y skins sin usar.
   async cleanStorage() {
     return this.call('/v1/admin/storage/clean', { method: 'POST', json: {}, timeout: 120000 });
   }
 
-  // Borra los registros de más de `days` días (0 = todos).
   async cleanLogs(days) {
     return this.call('/v1/admin/storage/logs', { method: 'POST', json: { olderThanDays: Math.max(0, Math.round(Number(days) || 0)) }, timeout: 60000 });
   }
 }
 
-// Detecta versión y cargador de carpetas de CurseForge, Prism/MultiMC o Modrinth App.
 async function detectInstance(dir) {
   const cf = await readJson(path.join(dir, 'minecraftinstance.json'));
   if (cf?.gameVersion) {

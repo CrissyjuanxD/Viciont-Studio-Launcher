@@ -1,5 +1,4 @@
 'use strict';
-// Construye la línea de comandos de Minecraft y lanza el juego.
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -25,10 +24,6 @@ function parseServer(address) {
   return { host: m[1], port: m[2] ? Number(m[2]) : 25565, raw: m[2] ? s : `${m[1]}:25565` };
 }
 
-/**
- * plan: resultado de planGame
- * opts: { dirs, account, gameDir, memory, jvmArgs, extraJvm, resolution, server, launcherVersion }
- */
 function buildCommand(plan, opts) {
   const r = plan.resolved;
   const { account, gameDir, memory = {}, resolution = {}, dirs } = opts;
@@ -97,7 +92,7 @@ function buildCommand(plan, opts) {
   const max = Math.max(min, Number(memory.max) || 2048);
   jvm.push(`-Xms${min}M`, `-Xmx${max}M`);
   jvm.push(...splitArgs(opts.jvmArgs));
-  jvm.push(...(opts.extraJvm || [])); // p. ej. la carpeta de mods ocultos (-Dfabric.addMods)
+  jvm.push(...(opts.extraJvm || []));
   if (r.arguments?.jvm) {
     jvm.push(...expand(r.arguments.jvm));
   } else {
@@ -118,7 +113,6 @@ function buildCommand(plan, opts) {
   return { java: plan.java.javaw, args: [...jvm, r.mainClass, ...game], javaMajor: plan.java.major };
 }
 
-// Los argumentos muy largos no caben en la línea de comandos de Windows (32 767 caracteres).
 async function argFileIfNeeded(cmd, gameDir) {
   const length = cmd.java.length + cmd.args.reduce((n, a) => n + a.length + 3, 0);
   if (length < 30000 || (cmd.javaMajor || 8) < 9) return cmd.args;
@@ -156,7 +150,6 @@ class GameProcess extends EventEmitter {
     child.on('error', (e) => this.emit('error', e));
     child.on('exit', (code, signal) => {
       this.exitCode = code;
-      // se espera a recibir las últimas líneas y a que el registro quede guardado (para el informe de error)
       const duration = Date.now() - this.startedAt;
       let closed = false;
       const finish = () => {
@@ -176,7 +169,7 @@ class GameProcess extends EventEmitter {
     try {
       if (process.platform === 'win32' && this.pid) spawn('taskkill', ['/pid', String(this.pid), '/T', '/F'], { windowsHide: true });
       else this.child.kill();
-    } catch { /* ya terminado */ }
+    } catch {}
   }
 }
 
@@ -185,8 +178,6 @@ async function launchGame(plan, opts) {
   await ensureDir(path.join(opts.gameDir, 'logs'));
   const logFile = path.join(opts.gameDir, 'logs', 'vsl-latest.log');
   await fsp.rename(logFile, path.join(opts.gameDir, 'logs', 'vsl-previous.log')).catch(() => {});
-  // Solo en pruebas automáticas (código fuente, nunca en la versión instalada): un "juego" de
-  // mentira que se ejecuta con el Node de Electron en la carpeta de la instancia.
   const fake = !require('electron').app.isPackaged && process.env.VSL_TEST_FAKEGAME;
   if (fake) {
     const child = spawn(process.execPath, [fake, opts.gameDir, ...(opts.extraJvm || [])], {

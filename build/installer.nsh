@@ -1,11 +1,4 @@
-﻿; Viciont Studio Launcher — pasos extra del instalador / desinstalador (NSIS)
-;
-; Al desinstalar se pregunta qué hacer con los datos:
-;   - Conservar instancias, mundos, cuentas y skins (para reinstalar más tarde)
-;   - Borrar todo (instancias, mundos, cuentas, skins, Java y caché)
-; Las actualizaciones automáticas NUNCA borran datos.
-
-!ifdef BUILD_UNINSTALLER
+﻿!ifdef BUILD_UNINSTALLER
 !include nsDialogs.nsh
 !include LogicLib.nsh
 
@@ -13,7 +6,6 @@ Var vslDeleteAll
 Var vslRadioKeep
 Var vslRadioAll
 
-; Se inserta donde se definen las páginas del desinstalador (con MUI ya cargado).
 !macro customUnWelcomePage
   !insertmacro MUI_UNPAGE_WELCOME
   UninstPage custom un.vslDataPage un.vslDataPageLeave
@@ -52,11 +44,9 @@ Var vslRadioAll
 
 !macro customUnInstall
   ${ifNot} ${isUpdated}
-    ; los datos del launcher siempre son del usuario actual
     SetShellVarContext current
     ReadRegStr $1 HKCU "Software\ViciontStudioLauncher" "DataDir"
     ${If} $vslDeleteAll == "1"
-      ; solo se borra la carpeta de datos si es realmente del launcher (tiene la marca .vsl-data)
       ${If} $1 != ""
       ${AndIf} ${FileExists} "$1\.vsl-data"
         RMDir /r "$1"
@@ -64,7 +54,6 @@ Var vslRadioAll
       RMDir /r "$APPDATA\ViciontStudioLauncher"
       DeleteRegKey HKCU "Software\ViciontStudioLauncher"
     ${Else}
-      ; se conserva todo lo importante; solo se limpian cachés
       RMDir /r "$APPDATA\ViciontStudioLauncher\electron"
       RMDir /r "$APPDATA\ViciontStudioLauncher\caches"
       ${If} $1 != ""

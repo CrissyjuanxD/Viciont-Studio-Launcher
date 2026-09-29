@@ -1,4 +1,3 @@
-# Genera los recursos gráficos del launcher a partir del logo de la web.
 import os, sys, math
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
 
@@ -7,7 +6,6 @@ build = os.path.join(proj, 'build')
 img_dir = os.path.join(proj, 'src', 'renderer', 'img')
 icon = Image.open(os.path.join(build, 'icon.png')).convert('RGBA')
 
-# Icono de Windows con todos los tamaños
 icon.save(os.path.join(build, 'icon.ico'), sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
 icon.resize((256, 256), Image.LANCZOS).save(os.path.join(img_dir, 'icon.png'))
 icon.resize((32, 32), Image.LANCZOS).save(os.path.join(img_dir, 'favicon.png'))
@@ -30,7 +28,6 @@ def backdrop(w, h, seed=0):
     base = Image.new('RGB', (w, h), (6, 2, 12))
     glow = Image.new('RGB', (w, h), (0, 0, 0))
     d = ImageDraw.Draw(glow)
-    # manchas moradas y rosas difuminadas (como la espiral de la web)
     for (cx, cy, r, col) in [(0.25, 0.22, 0.75, (124, 58, 237)), (0.85, 0.75, 0.7, (236, 72, 153)), (0.5, 0.5, 0.45, (168, 85, 247))]:
         R = int(r * max(w, h))
         d.ellipse([cx * w - R / 2, cy * h - R / 2, cx * w + R / 2, cy * h + R / 2], fill=col)
@@ -49,7 +46,6 @@ def scanlines(im, alpha=18):
         d.line([(0, y), (im.size[0], y)], fill=(255, 255, 255, alpha))
     return Image.alpha_composite(im.convert('RGBA'), ov)
 
-# Barra lateral del instalador NSIS (164 x 314, BMP)
 w, h = 164, 314
 side = scanlines(backdrop(w, h))
 em = emblem.copy()
@@ -75,7 +71,6 @@ d.line([(34, 244), (130, 244)], fill=(236, 72, 153), width=1)
 side.convert('RGB').save(os.path.join(build, 'installerSidebar.bmp'))
 side.convert('RGB').save(os.path.join(build, 'uninstallerSidebar.bmp'))
 
-# Imagen para el README / redes (1280 x 640)
 W, H = 1280, 640
 banner = scanlines(backdrop(W, H), 12)
 lg = logo.copy()

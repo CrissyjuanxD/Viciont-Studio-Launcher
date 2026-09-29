@@ -1,7 +1,4 @@
 'use strict';
-// Java para cada versión de Minecraft. Se usa el mismo Java oficial que el
-// launcher de Mojang; si no existe para este equipo, se usa Eclipse Temurin.
-// Todo se "planifica" primero (lista de archivos) para descargarlo junto al resto.
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -22,7 +19,6 @@ async function planMojang(component, dirs, { signal, repair }) {
   try {
     index = await cached('java-runtime-index', 60 * 60 * 1000, () => getJson(RUNTIME_INDEX, { timeout: 20000, signal }));
   } catch (e) {
-    // sin conexión: si ya está instalado, se usa tal cual
     const dir = path.join(dirs.java, component);
     const bins = binPaths(dir);
     if (e.name !== 'AbortError' && (await readJson(path.join(dir, '.vsl-runtime.json'))) && (await exists(bins.javaw))) {
@@ -88,9 +84,6 @@ async function planTemurin(major, dirs, { signal }) {
   return { items: [{ url: pkg.link, dest: zip, size: pkg.size, label: `Java ${major}` }], post, result };
 }
 
-/**
- * Planifica el Java necesario. Devuelve { items, post, result: { javaw, java, major } }.
- */
 async function planJava(javaVersion, dirs, { custom, signal, repair } = {}) {
   const major = javaVersion?.majorVersion || 8;
   if (custom) {
@@ -108,7 +101,6 @@ async function planJava(javaVersion, dirs, { custom, signal, repair } = {}) {
   return plan;
 }
 
-// Versión de un ejecutable de Java (para validar rutas personalizadas).
 function probeJava(javaPath) {
   const exe = javaPath.replace(/javaw\.exe$/i, 'java.exe');
   return new Promise((resolve) => {

@@ -1,7 +1,3 @@
-// Vista de una instancia: fondo propio + botón Descargar / Actualizar / Jugar / Jugando.
-// Mientras descarga, el botón se convierte en una tarjeta con la imagen de la
-// instancia, el progreso, la velocidad (MB/s) y el tiempo restante.
-
 import { state, on, call, instance } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, richText, instIcon, loaderLabel, timeAgo, playTime, bytes, speed, duration } from '../util.js';
@@ -21,8 +17,16 @@ export function statusChip(i) {
 }
 
 const PLAY_LABEL = { install: 'Descargar', update: 'Actualizar', play: 'Jugar' };
+const HIDDEN_NAMES = { mods: 'los mods', config: 'config', resourcepacks: 'los resource packs' };
 
-// ¿Puede abrir la carpeta? (Viciont Studios puede ocultarla a los jugadores)
+function topChips(inst) {
+  const sync = inst.workspace ? `<span class="chip chip--sync">${icon('refresh')}Sincronizada con tu carpeta</span>` : '';
+  const test = inst.test
+    ? `<span class="chip chip--test">${icon('eye')}Copia de prueba</span><span class="inst__testnote">Así la ve un jugador: se descarga y se actualiza igual que la de cualquiera${inst.protect?.length ? ` (con ${inst.protect.map((p) => HIDDEN_NAMES[p] || p).join(', ')} ocultos)` : ''}. Publica una versión nueva y pulsa Actualizar para probarla.</span>`
+    : '';
+  return `${statusChip(inst)}${sync}${test}`;
+}
+
 const folderAllowed = (inst) => inst.showFolder !== false || inst.canManage || Boolean(inst.workspace);
 const adminOn = () => Boolean(state.admin?.unlocked);
 
@@ -102,7 +106,7 @@ export function render(root, route, app) {
     root.innerHTML = `
       <section class="inst">
         <div class="inst__top">
-          <div class="inst__chips">${statusChip(inst)}${inst.workspace ? `<span class="chip chip--sync">${icon('refresh')}Sincronizada con tu carpeta</span>` : ''}${inst.test ? `<span class="chip chip--test">${icon('eye')}Copia de prueba</span>` : ''}</div>
+          <div class="inst__chips">${topChips(inst)}</div>
           <div class="field__row">
             ${inst.workspace && adminOn() ? `<button class="btn btn--sm btn--ghost" type="button" data-act="edit">${icon('edit')}Editar</button>` : ''}
             ${inst.installed && folderAllowed(inst) ? `<button class="btn btn--sm btn--ghost" type="button" data-act="folder">${icon('folder')}Carpeta</button>` : ''}
@@ -125,7 +129,6 @@ export function render(root, route, app) {
           </div>
           ${inst.summary ? `<p class="inst__summary">${esc(inst.summary)}</p>` : ''}
           ${inst.description ? `<div class="inst__desc rich" id="inst-desc">${richText(inst.description)}</div><button class="inst__more" type="button" id="inst-more">Leer más</button>` : ''}
-          ${inst.test ? `<p class="inst__note">${icon('eye')}Así la ve un jugador: se descarga y se actualiza igual que la de cualquiera${inst.protect?.length ? ` (con ${inst.protect.map((p) => ({ mods: 'los mods', config: 'config', resourcepacks: 'los resource packs' }[p] || p)).join(', ')} ocultos)` : ''}. Publica una versión nueva y pulsa Actualizar para probarla.</p>` : ''}
           ${inst.workspace?.behind ? `<p class="inst__warn">${icon('alert')}Otro administrador publicó una versión más nueva. Tráela desde Administración antes de seguir cambiando cosas.</p>` : ''}
           ${inst.workspace && !inst.workspace.behind ? `<p class="inst__note">${icon('refresh')}Esta es tu carpeta de trabajo: lo que cambies aquí (mods, configs, options.txt…) es lo que se publica desde Administración.</p>` : ''}
           ${inst.interrupted ? `<p class="inst__warn">${icon('alert')}La descarga anterior no terminó. Pulsa el botón para continuar donde se quedó.</p>` : ''}
@@ -175,7 +178,7 @@ export function render(root, route, app) {
       if (prev.installedVersion !== d.installedVersion || prev.available !== d.available || prev.version !== d.version) renderAll();
       else renderAction();
       const chips = root.querySelector('.inst__top .inst__chips');
-      if (chips) { chips.innerHTML = statusChip(inst); hydrateIcons(chips); }
+      if (chips) { chips.innerHTML = topChips(inst); hydrateIcons(chips); }
     }
   });
   const offProg = on(`progress:${id}`, (p) => paintProgress(root, inst, p));
@@ -324,7 +327,6 @@ async function logModal(inst) {
   m.content.querySelector('[data-folder]').addEventListener('click', () => call('app:openFolder', 'instance-sub', { id: inst.id, sub: 'logs' }).catch(toastError));
 }
 
-// El juego se cerró con un error: el crash report, el error de Java (si lo hubo) y el registro, enteros.
 export function crashModal(data) {
   const inst = instance(data.id);
   const c = data.crash || {};
@@ -334,7 +336,6 @@ export function crashModal(data) {
     c.log && { key: 'log', label: 'Registro del juego', ...c.log },
   ].filter(Boolean);
   if (!tabs.length) tabs.push({ key: 'log', label: 'Registro del juego', name: '', text: (data.log || []).join('\n') || 'Sin registro' });
-  // "Description: ..." del crash report: la causa en una línea
   const cause = /^Description:\s*(.+)$/m.exec(c.report?.text || '')?.[1]?.trim() || '';
   const exc = c.report ? (/^\s*((?:[\w$]+\.)+[\w$]*(?:Exception|Error)\b[^\n]*)/m.exec(c.report.text.split(/\n\n/).slice(1, 3).join('\n'))?.[1] || '') : '';
   const all = tabs.map((t) => `===== ${t.name || t.label} =====\n${t.text}`).join('\n\n');
@@ -364,7 +365,7 @@ export function crashModal(data) {
     m.content.querySelector('[data-file]').textContent = `${t.name || ''}${t.truncated ? ' · muy largo: se muestran el principio y el final (el archivo está completo en la carpeta)' : ''}`;
     const pre = m.content.querySelector('[data-text]');
     pre.textContent = t.text || 'Sin contenido';
-    pre.scrollTop = key === 'log' ? pre.scrollHeight : 0; // el registro importa sobre todo al final
+    pre.scrollTop = key === 'log' ? pre.scrollHeight : 0;
   };
   show(cur);
   m.content.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));

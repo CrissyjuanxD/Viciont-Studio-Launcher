@@ -1,16 +1,12 @@
 'use strict';
-// Informe de error cuando el juego se cierra mal: el crash report de Minecraft (crash-reports/),
-// el error de Java si lo hubo (hs_err_pid*.log) y el registro del juego. Se muestran y se
-// copian enteros (antes solo salían las últimas líneas del registro).
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
 
 const MAX_REPORT = 2 * 1024 * 1024;
 const MAX_LOG = 1536 * 1024;
-const LOG_HEAD = 192 * 1024; // el principio del registro dice versiones y mods cargados
+const LOG_HEAD = 192 * 1024;
 
-// El archivo más nuevo de la carpeta que coincide y se escribió durante esta partida.
 async function newest(dir, re, since) {
   let entries;
   try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch { return null; }
@@ -25,7 +21,6 @@ async function newest(dir, re, since) {
   return best;
 }
 
-// Lee el archivo entero o, si es enorme, el principio y el final (cortando por líneas).
 async function readCapped(file, size, max, head = 0) {
   if (size <= max) return { text: await fsp.readFile(file, 'utf8'), truncated: false };
   const fh = await fsp.open(file, 'r');
@@ -44,30 +39,24 @@ async function readCapped(file, size, max, head = 0) {
   }
 }
 
-/**
- * gameDir: carpeta de la instancia · startedAt: cuándo empezó la partida · pid: proceso de Java
- * logFile: registro que guarda el launcher (salida completa del juego)
- * Devuelve { report, jvm, log }: cada uno { name, text, truncated } o null.
- */
 async function collectCrash({ gameDir, startedAt, pid, logFile }) {
   const since = (startedAt || 0) - 5000;
   const out = { report: null, jvm: null, log: null };
   try {
     const cr = await newest(path.join(gameDir, 'crash-reports'), /^crash-.*\.txt$/i, since);
     if (cr) out.report = { name: `crash-reports/${cr.name}`, ...(await readCapped(cr.file, cr.size, MAX_REPORT)) };
-  } catch { /* sin crash report */ }
+  } catch {}
   try {
     const hs = (pid && await newest(gameDir, new RegExp(`^hs_err_pid${pid}\\.log$`, 'i'), since)) || await newest(gameDir, /^hs_err_pid\d+\.log$/i, since);
     if (hs) out.jvm = { name: hs.name, ...(await readCapped(hs.file, hs.size, MAX_REPORT)) };
-  } catch { /* sin error de Java */ }
+  } catch {}
   try {
     const st = logFile ? await fsp.stat(logFile) : null;
     if (st) out.log = { name: `logs/${path.basename(logFile)}`, ...(await readCapped(logFile, st.size, MAX_LOG, LOG_HEAD)) };
-  } catch { /* sin registro */ }
+  } catch {}
   return out;
 }
 
-// Todo junto en un solo texto (para copiarlo, guardarlo o enviarlo al estudio).
 function crashText(c, header = '') {
   const parts = [];
   if (header) parts.push(header);

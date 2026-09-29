@@ -1,5 +1,4 @@
 'use strict';
-// Lectura de archivos .zip/.jar (instaladores de Forge, nativos, .mrpack, Java).
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -53,7 +52,6 @@ async function openZip(file) {
       await renameRetry(tmp, dest);
       return dest;
     },
-    // Extrae todo (o lo que pase el filtro). strip = nº de carpetas iniciales a quitar.
     async extractAll(destDir, { filter, strip = 0, map } = {}) {
       const root = path.resolve(destDir) + path.sep;
       let count = 0;
@@ -64,14 +62,14 @@ async function openZip(file) {
         if (map) rel = map(rel, name);
         if (!rel) continue;
         const dest = path.resolve(destDir, rel);
-        if (!dest.startsWith(root)) continue; // evita rutas maliciosas ("zip slip")
+        if (!dest.startsWith(root)) continue;
         await ensureDir(path.dirname(dest));
         await pipeline(await stream(e), fs.createWriteStream(dest));
         count++;
       }
       return count;
     },
-    close() { try { zf.close(); } catch { /* ya cerrado */ } },
+    close() { try { zf.close(); } catch {} },
   };
   return api;
 }
@@ -81,7 +79,6 @@ async function withZip(file, fn) {
   try { return await fn(z); } finally { z.close(); }
 }
 
-// Lee el "Main-Class" del MANIFEST.MF de un .jar.
 async function jarMainClass(file) {
   return withZip(file, async (z) => {
     const mf = await z.readText('META-INF/MANIFEST.MF');

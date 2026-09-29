@@ -1,5 +1,4 @@
 'use strict';
-// Peticiones HTTP con tiempo de espera, reintentos y mensajes de error claros.
 
 let USER_AGENT = 'ViciontStudioLauncher/dev (+https://github.com/CrissyjuanxD/Viciont-Studio-Launcher)';
 const setUserAgent = (ua) => { USER_AGENT = ua; };
@@ -37,10 +36,6 @@ function abortError(signal) {
 const isNetworkError = (e) => e && (e.name === 'TypeError' || e.name === 'TimeoutError' || e.code === 'ETIMEDOUT' ||
   /fetch failed|network|socket|ECONN|ENOTFOUND|EAI_AGAIN|timeout|terminated/i.test(`${e.message} ${e.cause?.code || ''}`));
 
-/**
- * Hace una petición y devuelve { status, headers, data }.
- * type: 'json' | 'text' | 'buffer' | 'response' (sin leer el cuerpo)
- */
 async function request(url, opts = {}) {
   const {
     method = 'GET', headers = {}, body, json, form, timeout = 25000, signal,
@@ -111,7 +106,6 @@ const getJson = async (url, opts) => (await request(url, { ...opts, type: 'json'
 const getText = async (url, opts) => (await request(url, { ...opts, type: 'text' })).data;
 const getBuffer = async (url, opts) => (await request(url, { ...opts, type: 'buffer' })).data;
 
-// Caché en memoria para respuestas que cambian poco (listas de versiones, etc.).
 const memo = new Map();
 async function cached(key, ttlMs, fn) {
   const hit = memo.get(key);

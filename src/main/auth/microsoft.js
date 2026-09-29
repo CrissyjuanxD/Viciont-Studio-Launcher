@@ -1,9 +1,4 @@
 'use strict';
-// Inicio de sesión con Microsoft (cuentas premium de Minecraft Java), igual que
-// Modrinth App y el launcher oficial: la contraseña se escribe SOLO en la página
-// oficial de Microsoft, dentro de una ventana aparte; el launcher nunca la ve.
-// Microsoft recuerda tu cuenta en esa ventana (como en Modrinth), así que la
-// próxima vez solo tendrás que elegirla.
 
 const path = require('node:path');
 const crypto = require('node:crypto');
@@ -16,10 +11,8 @@ const ICON = path.join(__dirname, '..', '..', 'renderer', 'img', 'icon.png');
 const MS_HOSTS = /^https:\/\/([a-z0-9-]+\.)*(live\.com|microsoft\.com|microsoftonline\.com|xboxlive\.com|xbox\.com|msauth\.net|msftauth\.net|live\.net|microsoftonline-p\.com|office\.com|bing\.com)(\/|$)/i;
 const { authError } = xbox;
 
-let current = null; // ventana de inicio de sesión abierta (solo puede haber una)
+let current = null;
 
-// La ventana se identifica como un navegador normal (sin "Electron"), igual que
-// el motor de Windows que usa Modrinth, para que Microsoft muestre su página de siempre.
 let sessionReady = false;
 function loginSession() {
   const ses = session.fromPartition(PARTITION);
@@ -32,7 +25,6 @@ function loginSession() {
   return ses;
 }
 
-// Trae al frente la ventana de Microsoft si ya está abierta.
 function focusLoginWindow() {
   if (!current || current.isDestroyed()) return false;
   if (current.isMinimized()) current.restore();
@@ -46,9 +38,7 @@ function cancelLogin() {
   if (current && !current.isDestroyed()) current.close();
 }
 
-// Abre la página oficial de Microsoft y espera el código de autorización.
 function openLoginWindow(url) {
-  // como Modrinth: si ya había una ventana de inicio de sesión, se cierra antes de abrir otra
   if (current && !current.isDestroyed()) current.destroy();
   return new Promise((resolve, reject) => {
     let done = false;
@@ -86,7 +76,6 @@ function openLoginWindow(url) {
     wc.on('will-redirect', (e, u) => { if (check(e?.url || u)) e.preventDefault(); });
     wc.on('did-navigate', (_, u) => check(u));
     wc.on('did-redirect-navigation', (e, u) => check(e?.url || u));
-    // Solo se permiten páginas de Microsoft; cualquier otro enlace se abre en el navegador.
     wc.on('will-navigate', (e, u) => {
       const target = e?.url || u;
       if (check(target)) { e.preventDefault(); return; }
@@ -104,16 +93,14 @@ function openLoginWindow(url) {
       if (!done && code <= -100) finish(authError('No se pudo abrir la página de Microsoft. Revisa tu conexión.', 'ENETWORK'));
     });
     win.on('closed', () => finish(authError('Cerraste la ventana de inicio de sesión.', 'ECANCEL')));
-    // se cierra sola a los 10 minutos, como en Modrinth
     const timer = setTimeout(() => finish(authError('El inicio de sesión tardó demasiado. Vuelve a intentarlo.', 'ECANCEL')), 10 * 60 * 1000);
     win.on('closed', () => clearTimeout(timer));
     win.loadURL(url).catch(() => {});
   });
 }
 
-// Olvida la cuenta de Microsoft recordada en la ventana de inicio de sesión.
 async function clearWebSession() {
-  try { await session.fromPartition(PARTITION).clearStorageData(); } catch { /* sin datos */ }
+  try { await session.fromPartition(PARTITION).clearStorageData(); } catch {}
 }
 
 async function getProfile(mcAccessToken) {
@@ -147,7 +134,6 @@ function accountFromProfile(profile, refreshToken, mc, flow, xuid) {
   };
 }
 
-// ---------- Dispositivo (clave propia del PC, como Modrinth) ----------
 async function ensureDevice(store) {
   let dev = store.get();
   if (!dev?.key?.privatePem) dev = { key: xbox.createDeviceKey() };
@@ -167,9 +153,6 @@ async function xboxToMinecraft(accessToken, sessionId, store) {
   return { mc, xuid: xsts.xid };
 }
 
-// ---------- Método clásico (plan B y cuentas añadidas con la 1.0.0) ----------
-// RpsTicket: "t=" con el token del cliente del launcher oficial (MBI_SSL) y "d=" con
-// el de la 1.0.0 (XboxLive.signin).
 const V1_SCOPE = 'XboxLive.signin offline_access';
 
 async function v1Token(form) {
@@ -211,7 +194,6 @@ async function classicXbox(msAccessToken, prefix) {
   try {
     return { mc: await xbox.minecraftLogin({ uhs: claim.uhs, token: xsts.Token }), xuid: claim.xid || null };
   } catch {
-    // servicio anterior de Minecraft (por si el nuevo falla)
     const mc = (await request('https://api.minecraftservices.com/authentication/login_with_xbox', {
       method: 'POST', json: { identityToken: `XBL3.0 x=${claim.uhs};${xsts.Token}` }, timeout: 25000,
     })).data;
@@ -219,9 +201,6 @@ async function classicXbox(msAccessToken, prefix) {
   }
 }
 
-// Del token de Microsoft al de Minecraft: primero el método moderno (dispositivo
-// firmado, como Modrinth) y, si falla por algo que no sea un problema de la cuenta,
-// el clásico con el mismo token. Así un cambio de Xbox no deja a nadie sin poder entrar.
 async function toMinecraft(msAccessToken, sessionId, store) {
   try {
     return { ...(await xboxToMinecraft(msAccessToken, sessionId, store)), flow: 'sisu' };
@@ -232,7 +211,6 @@ async function toMinecraft(msAccessToken, sessionId, store) {
 }
 
 
-// Si Xbox no ofrece el inicio moderno (caída o cambio), se usa la página clásica.
 async function classicLogin() {
   const p = new URLSearchParams({ client_id: xbox.CLIENT_ID, response_type: 'code', redirect_uri: xbox.REDIRECT, scope: xbox.SCOPE, prompt: 'select_account' });
   const code = await openLoginWindow(`https://login.live.com/oauth20_authorize.srf?${p}`);
@@ -241,10 +219,6 @@ async function classicLogin() {
   return accountFromProfile(await getProfile(mc.accessToken), ms.refresh_token, mc, 'classic', xuid);
 }
 
-// ---------- API ----------
-/**
- * store: { get(): dispositivo|null, set(dispositivo) } — se guarda cifrado con las cuentas.
- */
 async function login(store) {
   let flow;
   try {
@@ -263,7 +237,6 @@ async function login(store) {
   return accountFromProfile(profile, ms.refresh_token, r.mc, r.flow, r.xuid);
 }
 
-// Renueva la sesión sin volver a pedir la contraseña (unos 90 días).
 async function refresh(account, store) {
   if (!account.msRefresh) throw authError('Vuelve a iniciar sesión con Microsoft.', 'EEXPIRED');
   let ms;
@@ -272,7 +245,6 @@ async function refresh(account, store) {
     ms = await xbox.oauthRefresh(account.msRefresh);
     r = account.flow === 'sisu' ? await toMinecraft(ms.access_token, null, store) : { ...(await classicXbox(ms.access_token, 't')), flow: 'classic' };
   } else {
-    // cuenta añadida con la versión 1.0.0
     ms = await v1Token({ refresh_token: account.msRefresh, grant_type: 'refresh_token' });
     r = { ...(await classicXbox(ms.access_token, 'd')), flow: 'v1' };
   }
@@ -280,8 +252,6 @@ async function refresh(account, store) {
   return { ...account, ...accountFromProfile(profile, ms.refresh_token || account.msRefresh, r.mc, r.flow, r.xuid || account.xuid), addedAt: account.addedAt };
 }
 
-// Demuestra a nuestro servidor que la cuenta es premium sin enviarle el token
-// (el mismo sistema que usan los servidores de Minecraft en modo online).
 async function joinServer(account, serverId) {
   await request('https://sessionserver.mojang.com/session/minecraft/join', {
     method: 'POST', type: 'text', ok: [204],
@@ -290,16 +260,11 @@ async function joinServer(account, serverId) {
   });
 }
 
-// ---------- Prueba premium con el certificado de Mojang ----------
-// Si Mojang no contesta a nuestro servidor, este comprueba la cuenta sin hablar con
-// Mojang: el certificado de jugador (el mismo que usa el juego para el chat firmado)
-// y las texturas del perfil vienen firmados por Mojang, y el launcher firma nuestro
-// desafío con la clave del certificado. El token de Minecraft nunca sale del PC.
 const pemBody = (pem) => String(pem || '').replace(/-----[^-]+-----/g, '').replace(/\s+/g, '');
 
 function privateKeyFrom(pem) {
   const der = Buffer.from(pemBody(pem), 'base64');
-  try { return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }); } catch { /* formato antiguo */ }
+  try { return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs8' }); } catch {}
   return crypto.createPrivateKey({ key: der, format: 'der', type: 'pkcs1' });
 }
 
@@ -307,7 +272,6 @@ async function playerCertificate(account) {
   const c = account.cert;
   const now = Date.now();
   if (c?.publicKey && c?.privateKey && Date.parse(c.expiresAt) - now > 60 * 60 * 1000 && Date.parse(c.refreshedAfter || c.expiresAt) > now) return c;
-  // El servicio solo acepta peticiones marcadas como JSON (si no, responde 415).
   const variants = [
     { headers: { 'Content-Type': 'application/json' }, body: '' },
     { headers: { 'Content-Type': 'application/json' }, body: '{}' },
@@ -327,8 +291,6 @@ async function playerCertificate(account) {
     }
   }
   if (!data?.keyPair?.publicKey || !data?.keyPair?.privateKey || !data?.publicKeySignatureV2 || !data?.expiresAt) throw authError('Mojang no devolvió un certificado válido.');
-  // Aunque la cabecera diga "RSA PUBLIC KEY", Mojang la da en formato X.509 (SPKI);
-  // por si algún día cambia, también se acepta PKCS#1 y se convierte.
   const pubDer = Buffer.from(pemBody(data.keyPair.publicKey), 'base64');
   let pub;
   try { pub = crypto.createPublicKey({ key: pubDer, format: 'der', type: 'spki' }); } catch {
@@ -339,7 +301,6 @@ async function playerCertificate(account) {
   return { publicKey, privateKey, signature: data.publicKeySignatureV2, expiresAt: data.expiresAt, refreshedAfter: data.refreshedAfter || null };
 }
 
-// Texturas del perfil firmadas por Mojang (dicen el nombre actual de la cuenta).
 const texturesCache = new Map();
 async function signedTextures(uuid) {
   const id = String(uuid).replace(/-/g, '');
@@ -353,10 +314,6 @@ async function signedTextures(uuid) {
   return textures;
 }
 
-/**
- * Devuelve { cert, payload }: el certificado (para guardarlo cifrado con la cuenta)
- * y los datos que se envían al servidor del estudio.
- */
 async function premiumProof(account, challenge) {
   const [cert, textures] = await Promise.all([playerCertificate(account), signedTextures(account.uuid)]);
   const proof = crypto.sign('sha256', Buffer.from(`vsl-auth:${challenge}`), crypto.createPrivateKey(cert.privateKey)).toString('base64');

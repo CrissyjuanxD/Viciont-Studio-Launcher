@@ -1,8 +1,5 @@
-// Acceso al proceso principal y estado global de la interfaz.
-
 const bridge = window.vsl;
 
-// El error se crea aquí (y no en el puente) para que conserve su código: ECANCEL, EEXPIRED…
 export async function call(channel, ...args) {
   const r = await bridge.invoke(channel, ...args);
   if (r?.ok) return r.data;
@@ -13,7 +10,6 @@ export async function call(channel, ...args) {
 }
 export const pathFor = (file) => bridge.pathFor(file);
 
-// ---------- Estado + eventos ----------
 const listeners = new Map();
 
 export function on(type, fn) {
@@ -37,7 +33,7 @@ export const state = {
   progress: new Map(),
   studio: null,
   update: null,
-  admin: { access: false, unlocked: false, perms: [] }, // acceso de administración de la cuenta activa
+  admin: { access: false, unlocked: false, perms: [] },
   route: { name: 'home' },
   focused: true,
 };
@@ -61,7 +57,6 @@ export function upsertInstance(d) {
   emit(`instance:${d.id}`, d);
 }
 
-// Eventos que llegan del proceso principal
 bridge.on((msg) => {
   const { type, data } = msg || {};
   switch (type) {

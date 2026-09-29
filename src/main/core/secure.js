@@ -1,6 +1,4 @@
 'use strict';
-// Guardado cifrado con la protección de datos de Windows (DPAPI, vía safeStorage):
-// solo tu usuario de Windows en este equipo puede leer las sesiones guardadas.
 
 const fs = require('node:fs');
 const { safeStorage } = require('electron');

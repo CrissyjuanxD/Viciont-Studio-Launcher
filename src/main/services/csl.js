@@ -1,7 +1,4 @@
 'use strict';
-// Skins de cuentas no premium con CustomSkinLoader (mod de cliente, GPL-3.0).
-// El launcher lo añade a las instancias con mods y le indica nuestro servidor de
-// skins. Solo quien juega con este launcher ve esas skins.
 
 const path = require('node:path');
 const { readJson, writeJsonAtomic } = require('../util/fsx');
@@ -13,7 +10,6 @@ const ENTRY_NAME = 'ViciontStudio';
 
 const isCslFile = (f) => f?.project === CSL_PROJECT || /customskinloader/i.test(f?.path || '');
 
-// Devuelve el archivo del mod para esa versión/cargador, o null si no hay.
 async function cslFile(mc, loader) {
   if (!loader || loader === 'vanilla') return null;
   const list = await cached(`csl:${mc}:${loader}`, 6 * 60 * 60 * 1000, () => modrinth.versions(CSL_PROJECT, { mc, loader }));
@@ -25,7 +21,6 @@ async function cslFile(mc, loader) {
   };
 }
 
-// Añade nuestro servidor al principio de la lista de CustomSkinLoader sin tocar el resto.
 async function configure(gameDir, apiBase) {
   if (!apiBase) return;
   const root = `${apiBase.replace(/\/+$/, '')}/csl/`;

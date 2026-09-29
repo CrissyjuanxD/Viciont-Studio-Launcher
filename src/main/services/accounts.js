@@ -1,5 +1,4 @@
 'use strict';
-// Cuentas del launcher (premium y no premium), guardadas cifradas en accounts.dat.
 
 const { EventEmitter } = require('node:events');
 const { readSecure, writeSecure } = require('../core/secure');
@@ -31,9 +30,9 @@ class Accounts extends EventEmitter {
     this.log = log;
     this.data = { active: null, list: [], device: null, vault: {} };
     this.meCache = new Map();
-    this.sessionFlights = new Map(); // una sola conexión con el servidor a la vez por cuenta
-    this.sessionFails = new Map(); // si falla, se espera cada vez más antes de reintentar
-    this.msLogin = null; // una sola ventana de Microsoft a la vez
+    this.sessionFlights = new Map();
+    this.sessionFails = new Map();
+    this.msLogin = null;
   }
 
   load() {
@@ -45,9 +44,6 @@ class Accounts extends EventEmitter {
     for (const a of this.data.list) this.rememberCode(a, false);
   }
 
-  // Códigos de recuperación de los nicks no premium usados en este PC. Se quedan guardados
-  // (cifrados) aunque cierres sesión, para poder volver a entrar sin escribirlos, salvo
-  // que al salir elijas olvidarlos.
   rememberCode(acc, save = true) {
     if (acc?.type !== 'offline' || !acc.claimSecret) return;
     const k = acc.name.toLowerCase();
@@ -56,7 +52,6 @@ class Accounts extends EventEmitter {
     if (save) writeSecure(FILE, this.data);
   }
 
-  // Clave propia de este PC para Xbox (como el launcher oficial y Modrinth). Va cifrada con las cuentas.
   deviceStore() {
     return {
       get: () => this.data.device || null,
@@ -64,7 +59,6 @@ class Accounts extends EventEmitter {
     };
   }
 
-  // Registro de actividad (lo recoge el servicio de telemetría).
   track(type, info = {}) { this.emit('track', type, info); }
 
   save() {
@@ -96,9 +90,6 @@ class Accounts extends EventEmitter {
     return this.summary();
   }
 
-  // forgetMicrosoft: que Microsoft olvide también la cuenta en la ventana de inicio de
-  // sesión (para PCs compartidos). Si no, la próxima vez solo hay que elegirla, como en Modrinth.
-  // forgetRecovery: olvidar también el código del nick no premium en este PC (PCs compartidos).
   remove(uuid, { forgetMicrosoft = false, forgetRecovery = false } = {}) {
     const acc = this.find(uuid);
     this.data.list = this.data.list.filter((a) => a.uuid !== uuid);
@@ -113,8 +104,6 @@ class Accounts extends EventEmitter {
     return this.summary();
   }
 
-  // ---------- Premium ----------
-  // Si ya hay un inicio de sesión en curso, se trae su ventana al frente (nunca se abren dos).
   loginMicrosoft() {
     if (this.msLogin) {
       microsoft.focusLoginWindow();
@@ -150,7 +139,6 @@ class Accounts extends EventEmitter {
     return this.summary();
   }
 
-  // Renueva el token de Minecraft si caduca pronto (dura 24 h).
   async ensureFresh(acc, { force = false } = {}) {
     if (!acc || acc.type !== 'microsoft') return acc;
     if (!force && acc.mcToken && acc.mcExpiresAt - Date.now() > 15 * 60 * 1000) return acc;
@@ -179,7 +167,6 @@ class Accounts extends EventEmitter {
     return saved;
   }
 
-  // ---------- No premium ----------
   async checkNick(name) {
     const problem = offline.validateNick(name);
     if (problem) return { ok: false, reason: 'format', message: problem };
@@ -212,7 +199,6 @@ class Accounts extends EventEmitter {
     const existing = this.find(uuid);
     const acc = existing ? { ...existing, name: nick } : { type: 'offline', uuid, name: nick, addedAt: Date.now() };
     const typed = String(recoveryCode || '').trim();
-    // si no se escribe el código, se usa el guardado en este PC (si lo hay)
     const saved = this.data.vault[nick.toLowerCase()]?.code || '';
     const code = typed || acc.claimSecret || saved;
     if (code) acc.claimSecret = code;
@@ -222,7 +208,6 @@ class Accounts extends EventEmitter {
         await this.offlineSession(acc, { forceNew: true });
       } catch (e) {
         if (e.code === 'EBADCODE' && !typed && code === saved) {
-          // el código guardado ya no vale (p. ej. liberaron el nick y otra persona lo registró)
           delete this.data.vault[nick.toLowerCase()];
           writeSecure(FILE, this.data);
           throw Object.assign(new Error('Este nick ya no está a tu nombre en este PC. Si es tuyo, escribe tu código de recuperación.'), { code: 'EBADCODE' });
@@ -250,7 +235,7 @@ class Accounts extends EventEmitter {
         return acc.backend.token;
       } catch (e) {
         if (e.status === 404 && !forceNew) {
-          delete acc.claimSecret; // el servidor se reinició: volvemos a registrar el nick
+          delete acc.claimSecret;
         } else if (e.status === 401 || e.status === 403) {
           throw Object.assign(new Error('El código de recuperación no es correcto para este nick.'), { code: 'EBADCODE' });
         } else if (e.status !== 404) throw e;
@@ -269,16 +254,12 @@ class Accounts extends EventEmitter {
     }
   }
 
-  // Token de sesión para nuestro servidor (se renueva solo).
-  // force: reintentar ya aunque el último intento fallara (cuando lo pide el jugador).
   async session(acc = this.active(), { force = false } = {}) {
     if (!acc || !this.backend.configured()) return null;
     const base = this.backend.base();
     if (acc.backend?.token && acc.backend.base === base && acc.backend.exp - Date.now() > 60 * 60 * 1000) return acc.backend.token;
-    // si varias partes del launcher piden sesión a la vez, se hace una sola vez
     const key = `${acc.uuid}@${base}`;
     if (this.sessionFlights.has(key)) return this.sessionFlights.get(key);
-    // tras un fallo no se reintenta cada pocos segundos: 30 s, 1 min, 2 min… hasta 10 min
     const fail = this.sessionFails.get(key);
     if (fail && !force && Date.now() < fail.until) throw fail.error;
     const flight = this._session(acc, base)
@@ -298,8 +279,6 @@ class Accounts extends EventEmitter {
     if (acc.type === 'microsoft') {
       const fresh = await this.ensureFresh(acc);
       const { challenge } = await this.backend.call('/v1/auth/challenge', { method: 'POST', json: {} });
-      // 1) como un servidor de Minecraft (join) y 2) certificado firmado por Mojang, por si
-      //    Mojang no le contesta a nuestro servidor. El token de Minecraft nunca se envía.
       const [join, proof] = await Promise.allSettled([microsoft.joinServer(fresh, challenge), microsoft.premiumProof(fresh, challenge)]);
       if (join.status === 'rejected') this.log.warn('Mojang no aceptó el join:', join.reason?.message);
       const body = { name: fresh.name, challenge };
@@ -325,7 +304,6 @@ class Accounts extends EventEmitter {
     for (const k of [...this.sessionFails.keys()]) if (k.startsWith(`${uuid}@`)) this.sessionFails.delete(k);
   }
 
-  // El servidor rechazó el token (caducado o servidor nuevo): se pedirá otro.
   invalidateSession(acc = this.active()) {
     if (!acc?.backend) return;
     acc.backend = null;
@@ -333,7 +311,6 @@ class Accounts extends EventEmitter {
     this.save();
   }
 
-  // ¿Qué sabe el servidor de esta cuenta? (incluye si tiene permisos de administración)
   async me({ fresh = false, force = false } = {}) {
     const acc = this.active();
     if (!acc || !this.backend.configured()) return null;
@@ -359,7 +336,6 @@ class Accounts extends EventEmitter {
     return a?.type === 'offline' ? a.claimSecret || null : null;
   }
 
-  // Datos que necesita el juego al arrancar.
   async launchIdentity() {
     let acc = this.active();
     if (!acc) throw new Error('Inicia sesión para jugar');

@@ -1,8 +1,3 @@
-/* ==========================================================================
-   Viciont Studio Launcher — estilos base (misma identidad que la web)
-   Paleta: morado, rosa, negro y blanco
-   ========================================================================== */
-
 :root {
   --bg: #06020c;
   --bg-2: #0d0418;
@@ -75,11 +70,9 @@ input, textarea, .selectable { user-select: text; }
 .muted { color: var(--muted); }
 .grad-text { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
 
-/* ---------- Texto enriquecido ---------- */
 .rich p + p { margin-top: 0.8em; }
 .rich strong { color: #fff; font-weight: 700; background: linear-gradient(transparent 62%, rgba(236, 72, 153, 0.35) 62%); }
 
-/* ---------- Botones ---------- */
 .btn {
   position: relative;
   display: inline-flex; align-items: center; justify-content: center; gap: 0.55em;
@@ -116,7 +109,6 @@ input, textarea, .selectable { user-select: text; }
 .spin { display: inline-block; width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255, 255, 255, 0.25); border-top-color: #fff; animation: spin 0.8s linear infinite; flex: none; }
 @keyframes spin { to { transform: rotate(360deg); } }
 
-/* ---------- Formularios ---------- */
 .field { display: grid; gap: 7px; min-width: 0; }
 .field__label { font: 600 0.72rem/1.2 var(--font-ui); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-2); display: flex; align-items: center; gap: 8px; }
 .field__label em { font-style: normal; color: var(--pink-hot); }
@@ -156,18 +148,15 @@ input, textarea, .selectable { user-select: text; }
 .check input:checked { background: var(--grad); border-color: transparent; }
 .check input:checked::after { transform: rotate(-45deg) scale(1); }
 
-/* interruptor */
 .switch { position: relative; display: inline-flex; align-items: center; gap: 12px; cursor: pointer; font-size: 0.9rem; color: var(--text-2); }
 .switch input { appearance: none; -webkit-appearance: none; width: 42px; height: 24px; border-radius: 99px; background: rgba(255, 255, 255, 0.08); border: 1px solid var(--line-strong); position: relative; transition: 0.25s; flex: none; cursor: pointer; }
 .switch input::after { content: ''; position: absolute; top: 3px; left: 3px; width: 16px; height: 16px; border-radius: 50%; background: #cfc2e8; transition: transform 0.25s var(--ease), background 0.25s; }
 .switch input:checked { background: var(--grad); border-color: transparent; box-shadow: var(--glow-pink); }
 .switch input:checked::after { transform: translateX(18px); background: #fff; }
 
-/* control deslizante */
 .range { -webkit-appearance: none; appearance: none; width: 100%; height: 6px; border-radius: 6px; background: linear-gradient(90deg, var(--pink-hot) 0 var(--p, 50%), rgba(255, 255, 255, 0.1) var(--p, 50%) 100%); outline: none; }
 .range::-webkit-slider-thumb { -webkit-appearance: none; width: 18px; height: 18px; border-radius: 50%; background: #fff; box-shadow: 0 0 0 4px rgba(236, 72, 153, 0.35), 0 0 14px rgba(236, 72, 153, 0.8); cursor: pointer; }
 
-/* número con botones − + */
 .stepper { display: flex; align-items: stretch; border: 1px solid var(--line); border-radius: 11px; overflow: hidden; background: rgba(6, 1, 14, 0.72); }
 .stepper button { width: 42px; border: 0; background: rgba(255, 255, 255, 0.04); color: var(--text); font-size: 1.1rem; transition: background 0.2s; }
 .stepper button:hover { background: rgba(236, 72, 153, 0.18); }
@@ -175,7 +164,6 @@ input, textarea, .selectable { user-select: text; }
 .stepper input:focus { outline: none; }
 .stepper__unit { display: grid; place-items: center; padding: 0 10px; color: var(--muted); font: 400 0.8rem var(--font-mono); }
 
-/* ---------- Etiquetas ---------- */
 .kicker { display: inline-flex; align-items: center; gap: 10px; font: 400 0.78rem/1.2 var(--font-mono); letter-spacing: 0.18em; text-transform: uppercase; color: #f0abfc; }
 .chip { display: inline-flex; align-items: center; gap: 6px; font: 600 0.7rem/1 var(--font-ui); letter-spacing: 0.1em; text-transform: uppercase; padding: 7px 10px; border-radius: 999px; border: 1px solid var(--line-strong); background: rgba(10, 3, 20, 0.6); color: #f3e8ff; white-space: nowrap; }
 .chip .i { width: 13px; height: 13px; }
@@ -188,7 +176,6 @@ input, textarea, .selectable { user-select: text; }
 .caret { display: inline-block; width: 0.55em; height: 1.05em; margin-left: 2px; vertical-align: -0.15em; background: var(--pink-hot); box-shadow: 0 0 10px var(--pink-hot); animation: blink 1s steps(1) infinite; }
 @keyframes blink { 50% { opacity: 0; } }
 
-/* ---------- Glitch ---------- */
 .glitch { position: relative; display: inline-block; }
 .glitch::before, .glitch::after {
   content: attr(data-text);
@@ -240,7 +227,6 @@ input, textarea, .selectable { user-select: text; }
 .glitch-img.is-bursting .glitch-img__ghost--a { animation: glitch-a 0.48s steps(2, end) both; }
 .glitch-img.is-bursting .glitch-img__ghost--b { animation: glitch-b 0.48s steps(2, end) both; }
 
-/* ---------- Ventana modal ---------- */
 .modal { position: fixed; inset: var(--titlebar-h) 0 0 0; z-index: 100; display: grid; place-items: center; padding: 24px; }
 .modal__backdrop { position: absolute; inset: 0; background: rgba(4, 0, 10, 0.78); animation: fade-in 0.22s ease both; }
 .modal__dialog {
@@ -288,7 +274,6 @@ input, textarea, .selectable { user-select: text; }
 .confirm__extra { margin-top: 16px; display: grid; justify-items: center; gap: 10px; }
 .confirm .modal__actions { justify-content: center; }
 
-/* ---------- Avisos ---------- */
 .toasts { position: fixed; right: 22px; bottom: 22px; z-index: 150; display: grid; gap: 10px; width: min(380px, calc(100% - 44px)); pointer-events: none; }
 .toast {
   display: flex; align-items: flex-start; gap: 10px;
@@ -308,7 +293,6 @@ input, textarea, .selectable { user-select: text; }
 .toast__body { display: grid; gap: 8px; min-width: 0; }
 .toast__actions { display: flex; gap: 8px; }
 
-/* ---------- Tooltip ---------- */
 .tooltip {
   position: fixed; z-index: 180; pointer-events: none;
   padding: 7px 11px; border-radius: 9px;
@@ -320,7 +304,6 @@ input, textarea, .selectable { user-select: text; }
 .tooltip.on { opacity: 1; transform: none; }
 .tooltip small { display: block; font: 400 0.72rem var(--font-mono); color: #f0abfc; letter-spacing: 0.06em; }
 
-/* ---------- Menú contextual ---------- */
 .menu {
   position: fixed; z-index: 170; min-width: 220px; padding: 6px;
   border-radius: 14px; background: rgba(20, 8, 36, 0.98); border: 1px solid var(--line-strong);
@@ -333,7 +316,6 @@ input, textarea, .selectable { user-select: text; }
 .menu__item.is-danger:hover { background: rgba(255, 92, 138, 0.14); }
 .menu__sep { height: 1px; margin: 6px 4px; background: var(--line); }
 
-/* ---------- Estado vacío ---------- */
 .empty { grid-column: 1 / -1; display: grid; justify-items: center; gap: 12px; padding: 42px 20px; text-align: center; color: var(--text-2); border: 1px dashed var(--line-strong); border-radius: var(--radius); background: rgba(10, 3, 20, 0.55); }
 .empty .i { font-size: 1.8rem; color: var(--pink-hot); }
 .empty h3 { font: 400 1.6rem/1 var(--font-display); letter-spacing: 0.04em; color: #fff; }

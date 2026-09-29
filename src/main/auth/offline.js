@@ -1,6 +1,4 @@
 'use strict';
-// Cuentas no premium (solo nick). No se permiten nicks que pertenezcan a una
-// cuenta premium: se consulta la misma base de datos que usa NameMC (la de Mojang).
 
 const crypto = require('node:crypto');
 const { request, HttpError } = require('../util/net');
@@ -15,7 +13,6 @@ function validateNick(name) {
   return null;
 }
 
-// UUID que calculan los servidores en modo "offline" para un nick.
 function offlineUuid(name) {
   const md5 = crypto.createHash('md5').update(`OfflinePlayer:${name}`, 'utf8').digest();
   md5[6] = (md5[6] & 0x0f) | 0x30;
@@ -29,7 +26,6 @@ const LOOKUPS = [
   (n) => `https://api.minecraftservices.com/minecraft/profile/lookup/name/${encodeURIComponent(n)}`,
 ];
 
-/** { premium: boolean, name?: string } — lanza error si Mojang no responde. */
 async function premiumLookup(name) {
   let lastErr = null;
   for (const url of LOOKUPS) {

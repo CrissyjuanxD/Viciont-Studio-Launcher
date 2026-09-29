@@ -1,11 +1,9 @@
 'use strict';
-// Reglas de los JSON de versión de Minecraft (sistema operativo, arquitectura y
-// "features"), rutas Maven y datos de descarga de librerías.
 
 const os = require('node:os');
 
 const OS_NAME = process.platform === 'win32' ? 'windows' : process.platform === 'darwin' ? 'osx' : 'linux';
-const ARCH = process.arch === 'ia32' ? 'x86' : process.arch; // x64 | arm64 | x86
+const ARCH = process.arch === 'ia32' ? 'x86' : process.arch;
 const ARCH_BITS = ARCH === 'x86' ? '32' : '64';
 
 function ruleMatches(rule, features) {
@@ -33,7 +31,6 @@ function isAllowed(rules, features = {}) {
   return allowed;
 }
 
-// "grupo:artefacto:versión[:clasificador][@ext]" → "grupo/…/artefacto/versión/artefacto-versión[-clasificador].ext"
 function parseMaven(name) {
   const [coords, extRaw] = String(name).split('@');
   const [group, artifact, version, classifier] = coords.split(':');
@@ -47,7 +44,6 @@ function mavenPath(name) {
   return [...m.group.split('.'), m.artifact, m.version, file].join('/');
 }
 
-// Clave para evitar librerías repetidas (misma librería con otra versión).
 function libraryKey(name) {
   const m = parseMaven(name);
   return `${m.group}:${m.artifact}${m.classifier ? `:${m.classifier}` : ''}${m.ext !== 'jar' ? `@${m.ext}` : ''}`;
@@ -66,7 +62,6 @@ function fixUrl(url) {
   return u;
 }
 
-// Datos de descarga del artefacto principal (o null si la librería solo tiene nativos).
 function libraryArtifact(lib) {
   if (lib.downloads) {
     const a = lib.downloads.artifact;
@@ -79,7 +74,6 @@ function libraryArtifact(lib) {
   return { path: p, url: base + p, sha1, size: lib.size };
 }
 
-// Nativos al estilo antiguo (campo "natives" + clasificadores).
 function libraryNatives(lib) {
   const key = lib.natives?.[OS_NAME];
   if (!key) return null;
@@ -92,13 +86,11 @@ function libraryNatives(lib) {
   return { path: p, url: base + p, exclude: lib.extract?.exclude || [] };
 }
 
-// Los nativos modernos (1.19+) son librerías normales con clasificador "natives-…".
 function isModernNative(lib) {
   const c = parseMaven(lib.name).classifier || '';
   return c.startsWith('natives-');
 }
 
-// Filtra por reglas y elimina duplicados (gana la primera aparición: la versión hija).
 function resolveLibraries(libraries, features) {
   const seen = new Set();
   const out = [];

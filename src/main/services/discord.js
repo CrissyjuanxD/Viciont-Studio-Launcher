@@ -1,15 +1,11 @@
 'use strict';
-// Discord Rich Presence: en tu perfil de Discord se ve que usas Viciont Studio
-// Launcher, qué instancia estás mirando, qué estás descargando y a qué juegas.
-// Habla directamente con la app de Discord del PC (tubería local discord-ipc-N):
-// no hace falta cuenta ni nada en internet, y si Discord no está abierto no pasa nada.
 
 const net = require('node:net');
 const crypto = require('node:crypto');
 
 const OP = { HANDSHAKE: 0, FRAME: 1, CLOSE: 2, PING: 3, PONG: 4 };
 const RETRY_MS = 30 * 1000;
-const MIN_GAP_MS = 5 * 1000; // Discord acepta ~5 cambios cada 20 s
+const MIN_GAP_MS = 5 * 1000;
 const LOGO = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-Studio-Launcher/main/docs/discord-logo.png';
 const DOWNLOAD = 'https://github.com/CrissyjuanxD/Viciont-Studio-Launcher/releases/latest';
 
@@ -33,7 +29,7 @@ class DiscordPresence {
     this.retryTimer = null;
     this.sendTimer = null;
     this.lastSent = 0;
-    this.wanted = null; // actividad que se quiere mostrar
+    this.wanted = null;
     this.sentKey = '';
   }
 
@@ -48,7 +44,6 @@ class DiscordPresence {
     if (on) this.connect();
   }
 
-  // ---------- Conexión con la app de Discord ----------
   connect(index = 0) {
     if (!this.enabled || this.sock) return;
     if (index > 9) { this.scheduleRetry(); return; }
@@ -87,7 +82,7 @@ class DiscordPresence {
     this.ready = false;
     this.sentKey = '';
     if (s) {
-      try { s.write(frame(OP.FRAME, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: null }, nonce: crypto.randomUUID() })); } catch { /* ya cerrada */ }
+      try { s.write(frame(OP.FRAME, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: null }, nonce: crypto.randomUUID() })); } catch {}
       s.end();
       setTimeout(() => s.destroy(), 300).unref?.();
     }
@@ -117,7 +112,6 @@ class DiscordPresence {
     }
   }
 
-  // ---------- Actividad ----------
   set(activity) {
     this.wanted = activity;
     this.flush();
@@ -138,7 +132,6 @@ class DiscordPresence {
     this.sock.write(frame(OP.FRAME, { cmd: 'SET_ACTIVITY', args: { pid: process.pid, activity: this.wanted }, nonce: crypto.randomUUID() }));
   }
 
-  // Construye la actividad a partir de lo que pasa en el launcher.
   static build({ version, view, instance, playing, downloading, showPrivate }) {
     const base = {
       assets: { large_image: LOGO, large_text: `Viciont Studios Launcher ${version}` },

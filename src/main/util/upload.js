@@ -1,6 +1,4 @@
 'use strict';
-// Subidas al servidor con progreso real (bytes enviados) y tamaño conocido,
-// que es lo que necesita Cloudflare R2.
 
 const http = require('node:http');
 const https = require('node:https');

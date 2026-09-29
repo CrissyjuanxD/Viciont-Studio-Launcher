@@ -1,5 +1,4 @@
 'use strict';
-// Viciont Studio Launcher — proceso principal.
 
 const path = require('node:path');
 const os = require('node:os');
@@ -26,12 +25,10 @@ const { listLoaderVersions, supportedGameVersions, LOADERS } = require('./game/l
 const { probeJava } = require('./game/java');
 const { crashText } = require('./game/crash');
 
-// Modo desarrollo solo al ejecutar el código fuente (nunca en la versión instalada).
 const isDev = !app.isPackaged;
 const RENDERER = path.join(__dirname, '..', 'renderer');
 const APP_NAME = 'Viciont Studios Launcher';
 const VERSION = app.getVersion();
-// Pruebas automáticas (solo en desarrollo): --vsl-test=script.js [--hidden]
 const TEST_SCRIPT = !app.isPackaged ? (process.argv.find((a) => a.startsWith('--vsl-test=')) || '').slice(11) : '';
 const HIDDEN_TEST = Boolean(TEST_SCRIPT) && process.argv.includes('--hidden');
 
@@ -48,7 +45,6 @@ if (!app.requestSingleInstanceLock()) {
 function start() {
   const settings = new Settings();
   if (!settings.get().hardwareAcceleration) app.disableHardwareAcceleration();
-  // Menos procesos y nada de teclas multimedia capturadas por los vídeos de fondo.
   app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService,SpareRendererForSitePerProcess');
 
   protocol.registerSchemesAsPrivileged([
@@ -68,11 +64,9 @@ function start() {
   const admin = new Admin({ getDirs, backend, accounts, instances, log });
   const updater = new Updater({ log, settings });
   const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
-  const track = (type, info) => { try { telemetry.track(type, info); } catch { /* nunca rompe nada */ } };
-  // las copias de prueba ("<id>~test") se registran con la instancia original
+  const track = (type, info) => { try { telemetry.track(type, info); } catch {} };
   const instName = (id) => `${instances.remote.get(baseId(id))?.name || baseId(id)}${isTestId(id) ? ' (copia de prueba)' : ''}`;
 
-  // ---------- Discord (qué haces en el launcher) ----------
   const discord = new DiscordPresence({ log, version: VERSION });
   const presence = { view: 'home', instanceId: null, playing: null, downloading: null };
   const instInfo = (id) => {
@@ -108,7 +102,6 @@ function start() {
     if (win && !win.isDestroyed()) win.webContents.send('vsl:event', { type, data });
   };
 
-  // ---------- Ventana ----------
   async function createWindow() {
     const saved = await readJson(stateFile, {});
     win = new BrowserWindow({
@@ -142,7 +135,6 @@ function start() {
     });
     wc.on('will-attach-webview', (e) => e.preventDefault());
     wc.on('before-input-event', (e, input) => {
-      // sin recargar ni abrir herramientas en la versión final
       if (!isDev && (input.key === 'F5' || (input.control && ['r', 'R'].includes(input.key)) || (input.control && input.shift && ['i', 'I'].includes(input.key)))) e.preventDefault();
       if (isDev && input.key === 'F12' && input.type === 'keyDown') wc.toggleDevTools();
     });
@@ -152,7 +144,6 @@ function start() {
     });
     win.once('ready-to-show', () => {
       if (HIDDEN_TEST) {
-        // pruebas: ventana invisible que no roba el foco ni los clics del usuario
         win.setOpacity(0);
         win.setIgnoreMouseEvents(true);
         win.setSkipTaskbar(true);
@@ -176,10 +167,8 @@ function start() {
     });
     win.on('closed', () => {
       win = null;
-      // si el juego sigue abierto, el launcher queda en la bandeja para poder volver
       if (!quitting && instances.anyRunning()) ensureTray('El juego sigue abierto');
     });
-    // Windows se está apagando o cerrando sesión: parar descargas de forma segura.
     win.on('session-end', () => { quitting = true; instances.cancelAll(); });
     win.on('focus', () => send('focus', true));
     win.on('blur', () => send('focus', false));
@@ -222,7 +211,6 @@ function start() {
     if (tray) { tray.destroy(); tray = null; }
   }
 
-  // ---------- Eventos de los servicios → interfaz ----------
   instances.on('instance', (d) => send('instance', d));
   instances.on('progress', (p) => {
     send('progress', p);
@@ -253,7 +241,6 @@ function start() {
     if (mode === 'hide') {
       const name = instName(d.id);
       ensureTray(`Jugando a ${name}`);
-      // cerrar la ventana libera casi toda la memoria del launcher mientras juegas
       setTimeout(() => {
         if (win && !instances.busy() && instances.anyRunning()) {
           hiddenForGame = true;
@@ -268,7 +255,6 @@ function start() {
     if (presence.playing?.id === d.id) { presence.playing = null; updatePresence(); }
     const mins = Math.round((d.duration || 0) / 60000);
     if (d.crashed) {
-      // el informe completo (crash report + registro) se sube aparte y el panel lo muestra entero
       const head = `Viciont Studios Launcher ${VERSION} · ${instName(d.id)} · código ${d.code} · ${mins} min · ${new Date().toISOString()}`;
       try {
         telemetry.trackCrash({
@@ -276,14 +262,13 @@ function start() {
           message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min${d.crash?.report ? ' (con crash report)' : ''}`,
           data: { code: d.code, minutes: mins, crashReport: d.crash?.report?.name || null, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) },
         }, d.crash ? crashText(d.crash, head) : '');
-      } catch { /* nunca rompe nada */ }
+      } catch {}
     } else {
       track('game.exit', { uuid, instance: baseId(d.id), message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
     }
     const s = settings.get();
     if (instances.anyRunning()) { send('game', { ...d, state: 'exit' }); return; }
     if (!win) {
-      // ventana cerrada por el modo "ocultar": se vuelve a abrir; si la cerró el jugador, se sale
       if (hiddenForGame && s.reopenOnExit) {
         hiddenForGame = false;
         destroyTray();
@@ -312,12 +297,10 @@ function start() {
     if (s.status === 'error') track('launcher.update_error', { level: 'warn', message: `No se pudo actualizar el launcher: ${s.error}` });
   });
 
-  // ---------- IPC ----------
   const handlers = {};
   const on = (name, fn) => { handlers[name] = fn; };
   const parentWin = () => (win && !win.isDestroyed() ? win : undefined);
 
-  // app
   on('app:info', () => ({
     name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
     dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
@@ -331,11 +314,9 @@ function start() {
   });
   on('app:openFolder', async (kind, id) => {
     if (kind === 'instance' && id) {
-      // Viciont Studios puede ocultar la carpeta de una instancia a los jugadores
       const d = await instances.get(id);
       if (d && d.showFolder === false && !d.canManage && !d.workspace && !(d.test && admin.unlocked())) throw new Error('Esta instancia no permite abrir su carpeta.');
     }
-    // (instance-sub recibe { id, sub }: la carpeta se calcula solo para el tipo pedido)
     const targets = {
       data: () => dataRoot,
       logs: () => log.DIR,
@@ -348,9 +329,7 @@ function start() {
     await fsp.mkdir(target, { recursive: true });
     return shell.openPath(target);
   });
-  // (los informes de error pueden ser largos: se copian enteros)
   on('app:copy', (text) => { clipboard.writeText(String(text).slice(0, 12 * 1024 * 1024)); return true; });
-  // Guarda un texto (p. ej. un informe de error) donde elija el usuario.
   on('app:saveText', async (name, text) => {
     const safe = String(name || 'informe.txt').replace(/[<>:"/\\|?*\x00-\x1f]/g, '_').slice(0, 120) || 'informe.txt';
     const r = await dialog.showSaveDialog(parentWin(), { title: 'Guardar informe', defaultPath: path.join(app.getPath('desktop'), safe), filters: [{ name: 'Texto', extensions: ['txt'] }] });
@@ -358,7 +337,6 @@ function start() {
     await fsp.writeFile(r.filePath, String(text ?? ''), 'utf8');
     return r.filePath;
   });
-  // qué pantalla está viendo el jugador (para Discord)
   on('app:presence', (p) => {
     const view = ['home', 'instance', 'skins', 'admin', 'login'].includes(p?.view) ? p.view : 'home';
     presence.view = view === 'admin' ? 'home' : view;
@@ -366,7 +344,6 @@ function start() {
     updatePresence();
     return true;
   });
-  // errores de la interfaz (máximo 5 por sesión) para detectar fallos
   let uiErrors = 0;
   on('app:uiError', (message) => {
     if (++uiErrors > 5) return false;
@@ -374,7 +351,6 @@ function start() {
     track('launcher.ui_error', { level: 'warn', message: String(message).slice(0, 400) });
     return true;
   });
-  // Nombre, frases y redes del estudio: se leen de la web (se editan en su panel).
   on('app:studio', async () => {
     const file = paths.configFile('studio.json');
     const site = backend.siteUrl();
@@ -411,14 +387,12 @@ function start() {
     return true;
   });
 
-  // ajustes
   on('settings:get', () => settings.get());
   on('settings:set', (patch) => {
     const allowed = ['memory', 'jvmArgs', 'resolution', 'javaPaths', 'onLaunch', 'reopenOnExit', 'concurrency', 'effects', 'hardwareAcceleration', 'autoUpdate', 'discordRpc', 'discordHidePrivate'];
     if (isDev) allowed.push('apiBase');
     const clean = Object.fromEntries(Object.entries(patch || {}).filter(([k]) => allowed.includes(k)));
     if (clean.javaPaths) {
-      // solo ejecutables de Java que existan (nunca otro programa)
       clean.javaPaths = Object.fromEntries(Object.entries(clean.javaPaths || {}).filter(([, v]) => typeof v === 'string' && /^javaw?\.exe$/i.test(path.basename(v)) && path.isAbsolute(v) && fs.existsSync(v)));
     }
     const before = settings.get().apiBase;
@@ -438,7 +412,6 @@ function start() {
   });
   on('settings:moveDataDir', async (target, { move } = {}) => {
     if (instances.busy() || instances.anyRunning()) throw new Error('Cierra el juego y espera a que terminen las descargas.');
-    // solo la carpeta que el usuario eligió en el diálogo (o volver a la de por defecto)
     if (target !== null && target !== chosenDataDir) throw new Error('Elige la carpeta con el botón "Cambiar".');
     const dest = target === null ? paths.CONFIG_ROOT : path.resolve(String(target));
     if (path.resolve(dest).toLowerCase() === path.resolve(dataRoot).toLowerCase()) return { dataDir: dataRoot };
@@ -480,11 +453,9 @@ function start() {
     return { path: r.filePaths[0], ...info };
   });
 
-  // cuentas
   on('accounts:get', () => accounts.summary());
   on('accounts:loginMicrosoft', () => accounts.loginMicrosoft());
   on('accounts:cancelLogin', () => { accounts.cancelLogin(); return true; });
-  // ¿la cuenta activa está conectada con el servidor del estudio?
   on('accounts:serverStatus', async () => {
     if (!backend.configured()) return { ok: false, message: 'El servidor de Viciont Studios todavía no está configurado.' };
     try {
@@ -514,7 +485,6 @@ function start() {
     return accounts.summary();
   });
 
-  // skins
   on('skins:state', () => skins.state());
   on('skins:add', (data) => skins.add(data));
   on('skins:addFromName', (name) => skins.importFromName(name));
@@ -538,7 +508,6 @@ function start() {
   });
   on('skins:current', () => skins.current().catch(() => null));
 
-  // instancias
   on('instances:list', () => instances.list());
   on('instances:refresh', () => instances.refresh());
   on('instances:get', (id) => instances.get(id));
@@ -563,7 +532,6 @@ function start() {
   on('instances:size', (id) => instances.size(id));
   on('instances:log', (id) => instances.logTail(id));
 
-  // administración
   const needAdmin = (fn) => (...a) => {
     if (!admin.unlocked()) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
     return fn(...a);
@@ -585,7 +553,6 @@ function start() {
     return admin.addLocal(id, r.filePaths, targetDir);
   }));
   on('admin:addPaths', needAdmin((id, list, targetDir) => {
-    // solo rutas que el usuario arrastró de verdad a la ventana
     const ok = (Array.isArray(list) ? list : []).filter((p) => admin.granted(p));
     if (!ok.length) throw new Error('Arrastra los archivos desde el Explorador de Windows.');
     return admin.addLocal(id, ok, targetDir);
@@ -635,7 +602,6 @@ function start() {
     if (!admin.granted(root)) throw new Error('Vuelve a elegir la carpeta.');
     return admin.importFolder(id, root, include);
   }));
-  // instancias de Modrinth App de este PC (sin exportar .mrpack)
   on('admin:modrinthInstances', needAdmin(() => admin.modrinthInstances()));
   on('admin:modrinthIcon', needAdmin((file) => admin.modrinthIcon(file)));
   on('admin:scanPath', needAdmin((dir) => {
@@ -668,7 +634,6 @@ function start() {
   on('admin:cleanStorage', needAdmin(() => admin.cleanStorage()));
   on('admin:cleanLogs', needAdmin((days) => admin.cleanLogs(days)));
 
-  // catálogo (versiones y Modrinth)
   on('catalog:mcVersions', async () => {
     const m = await getVersionManifest(dirs);
     return m.versions.map((v) => ({ id: v.id, type: v.type, date: v.releaseTime }));
@@ -681,7 +646,6 @@ function start() {
   on('modrinth:search', (q) => modrinth.search(q));
   on('modrinth:versions', (id, q) => modrinth.versions(id, q));
 
-  // Rutas de archivos soltados en la ventana (las registra el preload, no la página).
   ipcMain.on('vsl-grant', (event, p) => {
     if (String(event.senderFrame?.url || '').startsWith('vsl://app/') && typeof p === 'string') admin.grant(p);
   });
@@ -699,7 +663,6 @@ function start() {
     }
   });
 
-  // ---------- Arranque ----------
   app.on('second-instance', showWindow);
   app.on('before-quit', () => { quitting = true; saveWindowState(); discord.disconnect(); });
   app.on('window-all-closed', () => {
@@ -752,7 +715,6 @@ function start() {
     admin.load();
     await backend.init();
     await instances.loadCache();
-    // config/resourcepacks ocultos que quedaran puestos (el launcher se cerró con el juego abierto…)
     instances.recoverStaged().catch((e) => log.warn('No se pudieron revisar los archivos ocultos:', e.message));
     updater.init();
     await telemetry.init();
@@ -774,7 +736,6 @@ function start() {
       Promise.resolve().then(() => run(ctx)).catch((e) => log.error('[test]', e))
         .finally(() => { if (!process.argv.includes('--keep')) { quitting = true; app.quit(); } });
     }
-    // refresco suave de la lista cada 10 minutos (solo si la ventana está abierta)
     const t = setInterval(() => {
       if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) instances.refresh().then((l) => send('instances', l)).catch(() => {});
     }, 10 * 60 * 1000);

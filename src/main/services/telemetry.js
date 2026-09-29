@@ -1,11 +1,4 @@
 'use strict';
-// Registro de actividad para el panel del estudio: inicios de sesión, cambios de
-// skin, descargas, partidas y errores. Sirve para ayudar a los jugadores cuando
-// algo falla. Se envía en lotes al servidor del estudio con la sesión del jugador.
-//
-// Nunca se envían contraseñas, tokens, códigos de recuperación, archivos ni la IP;
-// las rutas del PC se acortan (C:\Users\<usuario> → ~). Cuando el juego se cierra con un
-// error también se envía su informe completo (crash report + registro del juego), limpio igual.
 
 const os = require('node:os');
 const fs = require('node:fs');
@@ -17,9 +10,8 @@ const { configFile } = require('../core/paths');
 const { redact } = require('../core/log');
 
 const FILE = configFile('activity-queue.json');
-// Informes de error pendientes de enviar (se suben justo antes de su registro "game.crash").
 const CRASH_DIR = configFile('crash-queue');
-const CRASH_MAX = Math.floor(2.5 * 1024 * 1024); // caracteres (el servidor admite hasta 3 MB)
+const CRASH_MAX = Math.floor(2.5 * 1024 * 1024);
 const MAX_QUEUE = 300;
 const FLUSH_MS = 60 * 1000;
 const HEARTBEAT_MS = 15 * 60 * 1000;
@@ -66,7 +58,7 @@ class Telemetry {
     this.flushing = null;
     this.saveTimer = null;
     this.soonTimer = null;
-    this.playing = new Map(); // instancia → uuid de la cuenta
+    this.playing = new Map();
   }
 
   async init() {
@@ -78,10 +70,6 @@ class Telemetry {
     setTimeout(() => this.flush(), 8000).unref?.();
   }
 
-  /**
-   * type: "grupo.evento" (p. ej. game.start). info: { level, message, instance, data, uuid }
-   * uuid: cuenta a la que pertenece (por defecto, la activa; si no hay ninguna, la próxima que entre).
-   */
   track(type, { level = 'info', message, instance, data, uuid } = {}) {
     if (!TYPE_RE.test(type)) return null;
     const e = {
@@ -100,7 +88,6 @@ class Telemetry {
     return e;
   }
 
-  // El juego se cerró con un error: su registro va con el informe completo (que se sube aparte).
   trackCrash(info, text) {
     let name = null;
     if (text) {
@@ -115,7 +102,6 @@ class Telemetry {
     else if (name) fsp.rm(path.join(CRASH_DIR, name), { force: true }).catch(() => {});
   }
 
-  // Informes que ya no tienen registro en la cola (o muy antiguos).
   async cleanCrashes() {
     const inQueue = new Set(this.queue.map((e) => e.crash).filter(Boolean));
     for (const n of await fsp.readdir(CRASH_DIR).catch(() => [])) {
@@ -150,7 +136,6 @@ class Telemetry {
     this.soonTimer = setTimeout(() => this.flush(), 1500);
   }
 
-  // Envía ya (con un límite de tiempo), p. ej. antes de cerrar sesión.
   async flushNow(ms = 4000) {
     await Promise.race([this.flush(), new Promise((r) => setTimeout(r, ms))]);
   }
@@ -160,7 +145,6 @@ class Telemetry {
     return this.flushing;
   }
 
-  // Sube el informe completo de un crash. false = hay que reintentarlo más tarde (sin conexión…).
   async sendCrash(e, token, acc) {
     const file = path.join(CRASH_DIR, e.crash);
     const text = await fsp.readFile(file, 'utf8').catch(() => null);
@@ -174,7 +158,6 @@ class Telemetry {
       } catch (err) {
         if (err.status === 401) { this.accounts.invalidateSession(acc); return false; }
         if (!err.status || err.status >= 500 || err.status === 429) return false;
-        // 404 = servidor anterior a la API v5: el registro se envía igual, con las últimas líneas
       }
     }
     delete e.crash;
@@ -189,9 +172,9 @@ class Telemetry {
     const drop = new Set();
     for (const e of this.queue) {
       let uuid = e.uuid;
-      if (uuid && !this.accounts.find(uuid)) { drop.add(e); continue; } // la cuenta ya no existe en este PC
+      if (uuid && !this.accounts.find(uuid)) { drop.add(e); continue; }
       if (!uuid) uuid = active?.uuid;
-      if (!uuid) continue; // aún no hay sesión: se envía cuando alguien entre
+      if (!uuid) continue;
       if (!groups.has(uuid)) groups.set(uuid, []);
       groups.get(uuid).push(e);
     }

@@ -1,8 +1,4 @@
 'use strict';
-// Descargas y SHA-1 en un hilo aparte. El proceso principal de Electron también mueve y pinta
-// la ventana: si se satura con miles de archivos (descargas, comprobaciones), el launcher se
-// "traba" hasta que termina. Aquí solo llegan avisos de progreso agrupados (10 por segundo).
-// Si el hilo no arranca o se cae, lo pendiente se hace en el proceso principal como antes.
 
 const path = require('node:path');
 const { Worker } = require('node:worker_threads');
@@ -13,7 +9,7 @@ let ready = false;
 let deaths = 0;
 let broken = false;
 let seq = 0;
-const jobs = new Map(); // id → { resolve, reject, progress, applied, cleanup }
+const jobs = new Map();
 
 function rebuild(e) {
   const err = new Error(e?.message || 'Error desconocido');
@@ -39,7 +35,6 @@ function spawn() {
   const gone = (e) => {
     if (worker !== w) return;
     worker = null;
-    // si ni siquiera llegó a arrancar (o se cae una y otra vez) no se vuelve a intentar
     if (!ready || ++deaths >= 3) broken = true;
     const err = Object.assign(new Error(`El hilo de descargas se cerró: ${e?.message || e}`), { workerDied: true });
     for (const id of [...jobs.keys()]) settle(id, (j) => j.reject(err));
@@ -88,7 +83,6 @@ function run(type, payload, { signal, progress } = {}) {
     const w = worker;
     w.postMessage({ type, id, ...payload });
     if (signal) {
-      // se avisa al hilo y se espera a que cierre sus archivos (la cancelación sigue siendo segura)
       const onAbort = () => w.postMessage({ type: 'abort', id });
       if (signal.aborted) onAbort();
       else {
@@ -97,7 +91,6 @@ function run(type, payload, { signal, progress } = {}) {
       }
     }
     j.undo = () => {
-      // el trabajo se repite en el proceso principal: se descuenta lo que ya se había contado
       if (!progress) return;
       progress.total = Math.max(0, progress.total - j.applied.total);
       progress.filesTotal = Math.max(0, progress.filesTotal - j.applied.files);
@@ -109,7 +102,6 @@ function run(type, payload, { signal, progress } = {}) {
   });
 }
 
-// Misma forma que downloadAll: { downloaded, skipped, failedOptional: [{ item, error }] }
 async function download(items, opts = {}, local) {
   const { concurrency, signal, progress, verify } = opts;
   const plain = items.map((it) => ({

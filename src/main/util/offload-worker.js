@@ -1,6 +1,4 @@
 'use strict';
-// Hilo de descargas y SHA-1 (ver offload.js). Usa el mismo motor de descargas que el proceso
-// principal; solo envía el progreso agrupado para no inundar al proceso de la ventana.
 
 const { parentPort, workerData } = require('node:worker_threads');
 const { setUserAgent } = require('./net');

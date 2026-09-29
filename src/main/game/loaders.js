@@ -1,5 +1,4 @@
 'use strict';
-// Cargadores de mods: Fabric, Quilt, Forge y NeoForge (listas de versiones e instalación).
 
 const path = require('node:path');
 const { getJson, getText, cached } = require('../util/net');
@@ -19,8 +18,6 @@ const QUILT_META = 'https://meta.quiltmc.org/v3';
 const FORGE_MAVEN = 'https://maven.minecraftforge.net';
 const NEO_MAVEN = 'https://maven.neoforged.net';
 
-// ---------- Listas de versiones ----------
-
 async function fabricLike(base, mc) {
   const list = await cached(`${base}:${mc}`, 15 * 60 * 1000, () => getJson(`${base}/versions/loader/${encodeURIComponent(mc)}`));
   return (list || []).map((x) => ({ version: x.loader.version, stable: x.loader.stable !== false && !/beta|alpha|pre|rc/i.test(x.loader.version) }));
@@ -38,7 +35,6 @@ async function forgePromotions() {
     getJson('https://files.minecraftforge.net/net/minecraftforge/forge/promotions_slim.json').then((j) => j?.promos || {}).catch(() => ({})));
 }
 
-// "1.20.1-47.2.0" → versión de Forge "47.2.0" para Minecraft "1.20.1"
 function splitForge(full, mc) {
   if (!full.startsWith(`${mc}-`)) return null;
   let v = full.slice(mc.length + 1);
@@ -92,7 +88,7 @@ function compareNumeric(a, b) {
     if (Number.isFinite(nx) && Number.isFinite(ny) && x !== '' && y !== '') {
       if (nx !== ny) return nx - ny;
     } else if (x !== y) {
-      if (x === '') return 1; // "1.0" > "1.0-beta"
+      if (x === '') return 1;
       if (y === '') return -1;
       return x < y ? -1 : 1;
     }
@@ -110,7 +106,6 @@ async function listLoaderVersions(type, mc) {
   }
 }
 
-// Versiones de Minecraft que soporta cada cargador (para filtrar en el panel).
 async function supportedGameVersions(type) {
   if (type === 'fabric' || type === 'quilt') {
     const base = type === 'fabric' ? FABRIC_META : QUILT_META;
@@ -121,12 +116,9 @@ async function supportedGameVersions(type) {
     const all = await forgeMetadata();
     return new Set(all.map((f) => f.split('-')[0]));
   }
-  return null; // NeoForge: se comprueba por versión
+  return null;
 }
 
-// ---------- Instalación ----------
-
-// Fabric y Quilt: su JSON hereda de la versión vanilla.
 async function installFabricLike(type, mc, loader, dirs, { signal } = {}) {
   const base = type === 'fabric' ? FABRIC_META : QUILT_META;
   const url = `${base}/versions/loader/${encodeURIComponent(mc)}/${encodeURIComponent(loader)}/profile/json`;

@@ -1,6 +1,3 @@
-// Efectos glitch/electrónicos (los mismos de la web) con control de consumo:
-// todo se detiene cuando la ventana está minimizada, oculta o en segundo plano.
-
 let level = 'full';
 let idle = false;
 const idleListeners = new Set();
@@ -22,7 +19,6 @@ export function onIdleChange(fn) {
   return () => idleListeners.delete(fn);
 }
 
-// "Inactivo" = ventana sin foco durante un rato, oculta o minimizada.
 export function initIdle() {
   let t = null;
   const apply = (v) => {
@@ -42,7 +38,6 @@ export function initIdle() {
   if (!document.hasFocus()) onBlur();
 }
 
-// ---------- Texto que se "descifra" ----------
 const GLYPHS = '!<>-_\\/[]{}=+*^?#01§$%&@ABCDEFXYZ';
 export function scramble(el, text, { duration = 700 } = {}) {
   if (!el) return;
@@ -66,7 +61,6 @@ export function scramble(el, text, { duration = 700 } = {}) {
   el._scramble = requestAnimationFrame(step);
 }
 
-// ---------- Escritura en bucle ----------
 export function typeLoop(el, words) {
   if (!el) return () => {};
   clearTimeout(el._typing);
@@ -98,7 +92,6 @@ export function typeLoop(el, words) {
   return () => { stopped = true; clearTimeout(el._typing); };
 }
 
-// ---------- Ráfagas de glitch aleatorias ----------
 export function startGlitchBursts() {
   const inView = (el) => {
     const r = el.getBoundingClientRect();
@@ -127,7 +120,6 @@ export function burst(el) {
   setTimeout(() => el.classList.remove('is-bursting'), 480);
 }
 
-// ---------- Transición glitch entre vistas ----------
 export function glitchTransition(swap) {
   const layer = document.getElementById('transition-fx');
   if (!layer || reducedMotion() || level === 'reduced') { swap(); return; }
@@ -153,7 +145,6 @@ export function glitchTransition(swap) {
   }, 520);
 }
 
-// ---------- Inclinación 3D de tarjetas ----------
 export function bindTilt(root) {
   root.addEventListener('pointermove', (e) => {
     if (reducedMotion()) return;
@@ -171,7 +162,6 @@ export function bindTilt(root) {
   });
 }
 
-// ---------- Pantalla de arranque ----------
 export function bootScreen() {
   const el = document.getElementById('boot');
   if (!el) return { done: () => {} };
@@ -189,7 +179,6 @@ export function bootScreen() {
   };
 }
 
-// Imagen con glitch (tres capas: original + dos fantasmas de color)
 export function glitchImg(src, cls = '') {
   return `<div class="glitch-img ${cls}"><img class="glitch-img__main" src="${src}" alt=""><img class="glitch-img__ghost glitch-img__ghost--a" src="${src}" alt=""><img class="glitch-img__ghost glitch-img__ghost--b" src="${src}" alt=""></div>`;
 }

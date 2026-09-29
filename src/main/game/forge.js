@@ -1,6 +1,4 @@
 'use strict';
-// Instalación de Forge y NeoForge a partir de su instalador oficial (sin abrirlo):
-// se leen install_profile.json y version.json y se ejecutan sus "procesadores" con Java.
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -50,11 +48,6 @@ function runJava(javaExe, args, cwd, signal) {
 
 const stripQuotes = (v) => (typeof v === 'string' && v.length >= 2 && v.startsWith("'") && v.endsWith("'") ? v.slice(1, -1) : v);
 
-/**
- * Planifica la instalación. Devuelve { id, items, post(java) }.
- * - items: librerías que hay que descargar (se juntan con el resto de descargas)
- * - post: extrae lo que viene dentro del instalador y ejecuta los procesadores
- */
 async function planForge({ type, mc, version, dirs, signal, repair }) {
   const name = NAMES[type];
   const mapFile = path.join(dirs.versions, 'vsl-loaders.json');
@@ -78,7 +71,6 @@ async function planForge({ type, mc, version, dirs, signal, repair }) {
   try {
     const profile = JSON.parse(await zip.readText('install_profile.json'));
 
-    // ---- Forge antiguo (1.5 – 1.12): el JSON de versión viene dentro del perfil ----
     if (profile.versionInfo) {
       const vi = { ...profile.versionInfo };
       const inst = profile.install || {};
@@ -95,7 +87,6 @@ async function planForge({ type, mc, version, dirs, signal, repair }) {
       return { id: vi.id, items: [], post: null };
     }
 
-    // ---- Forge / NeoForge moderno (1.13+) ----
     const versionJson = JSON.parse(await zip.readText(String(profile.json || '/version.json').replace(/^\//, '')));
     const id = versionJson.id;
     await writeJsonAtomic(versionJsonPath(dirs, id), versionJson);
@@ -109,7 +100,7 @@ async function planForge({ type, mc, version, dirs, signal, repair }) {
       const dest = path.join(dirs.libraries, ...a.path.split('/'));
       const inJar = `maven/${a.path}`;
       if (zip.has(inJar)) { bundled.push({ inJar, dest, sha1: a.sha1 }); continue; }
-      if (!a.url) continue; // lo generan los procesadores
+      if (!a.url) continue;
       items.set(dest.toLowerCase(), { url: a.url, dest, sha1: a.sha1, size: a.size, label: lib.name });
     }
 

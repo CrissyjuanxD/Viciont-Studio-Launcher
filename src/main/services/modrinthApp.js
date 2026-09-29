@@ -1,11 +1,4 @@
 'use strict';
-// Instancias de Modrinth App en este PC, para importarlas sin exportar un .mrpack.
-// Solo se lee (la base de datos se abre en modo lectura): Modrinth App nunca se toca.
-//
-// Formatos que entiende:
-//   · actual: app.db con las tablas "instances" + "instance_content_sets" (versión y cargador)
-//   · 0.8-0.9: app.db con la tabla "profiles"
-//   · antiguo (Theseus): un profile.json dentro de cada carpeta de profiles/
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -20,7 +13,7 @@ function normLoader(type, version, mc) {
   const t = String(type || 'vanilla').toLowerCase();
   const lt = LOADERS.has(t) ? t : 'vanilla';
   let v = lt === 'vanilla' ? '' : String(version || '');
-  if (mc && v.startsWith(`${mc}-`)) v = v.slice(mc.length + 1); // Forge: "1.20.1-47.3.0" → "47.3.0"
+  if (mc && v.startsWith(`${mc}-`)) v = v.slice(mc.length + 1);
   return { type: lt, version: v };
 }
 
@@ -31,7 +24,6 @@ function openDb(file) {
   return new DatabaseSync(file, { readOnly: true });
 }
 
-// Filas de la base de datos (formato actual o el de la 0.8-0.9) y la carpeta de los perfiles.
 function readDb(file, base) {
   const db = openDb(file);
   try {
@@ -40,7 +32,7 @@ function readDb(file, base) {
     try {
       const s = db.prepare('SELECT custom_dir FROM settings').get();
       if (s?.custom_dir) root = String(s.custom_dir);
-    } catch { /* sin carpeta propia */ }
+    } catch {}
     let rows = [];
     if (has('instances') && has('instance_content_sets')) {
       rows = db.prepare(`SELECT i.path AS path, i.name AS name, i.icon_path AS icon, i.last_played AS lastPlayed, i.install_stage AS stage,
@@ -56,7 +48,6 @@ function readDb(file, base) {
   }
 }
 
-// Theseus antiguo: profiles/<carpeta>/profile.json
 async function readLegacy(profilesDir) {
   const rows = [];
   let entries = [];
@@ -71,7 +62,6 @@ async function readLegacy(profilesDir) {
   return rows;
 }
 
-// Lista las instancias de Modrinth App (las jugadas hace menos, primero).
 async function listInstances(log) {
   const appData = app.getPath('appData');
   const out = [];
@@ -88,7 +78,7 @@ async function listInstances(log) {
     for (const r of rows) {
       if (!r?.path) continue;
       const dir = path.resolve(profilesDir, String(r.path));
-      if (!dir.toLowerCase().startsWith(path.resolve(profilesDir).toLowerCase() + path.sep)) continue; // nada fuera de profiles/
+      if (!dir.toLowerCase().startsWith(path.resolve(profilesDir).toLowerCase() + path.sep)) continue;
       const key = dir.toLowerCase();
       if (seen.has(key) || !(await statOrNull(dir))?.isDirectory()) continue;
       seen.add(key);
@@ -108,7 +98,6 @@ async function listInstances(log) {
   return out;
 }
 
-// Icono de una instancia (como bytes, para optimizarlo en la interfaz igual que uno elegido a mano).
 async function readIcon(file) {
   const type = ICON_TYPES[path.extname(file).toLowerCase()];
   const st = await statOrNull(file);

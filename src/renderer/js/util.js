@@ -1,5 +1,3 @@
-// Utilidades de la interfaz.
-
 export function esc(value) {
   return String(value ?? '')
     .replace(/&/g, '&amp;')
@@ -9,7 +7,6 @@ export function esc(value) {
     .replace(/'/g, '&#39;');
 }
 
-// Párrafos + **negrita** (el resto se escapa).
 export function richText(text) {
   const parts = String(text || '').trim().split(/\n{2,}/).filter(Boolean);
   return parts.map((p) => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</p>`).join('');
@@ -78,7 +75,6 @@ export function coverMini(name) {
   return `<div class="cover-mini"><span>${esc(initials(name))}</span></div>`;
 }
 
-// Imagen de la instancia (icono o fondo) o portada generada.
 export function instIcon(inst) {
   const url = mediaUrl(inst?.media?.icon);
   return url ? `<img src="${url}" alt="" loading="lazy" decoding="async">` : coverMini(inst?.name);

@@ -1,8 +1,4 @@
 'use strict';
-// Skins: biblioteca local + aplicar la skin.
-// - Premium: se cambia en Mojang (se ve en todos los servidores y launchers).
-// - No premium: se sube a nuestro servidor y la carga CustomSkinLoader (solo la
-//   ven quienes juegan con este launcher).
 
 const path = require('node:path');
 const fsp = require('node:fs/promises');
@@ -63,7 +59,6 @@ class Skins {
     return buf;
   }
 
-  // Estado completo para la pantalla de skins.
   async state() {
     const acc = this.accounts.active();
     const lib = await this.library();
@@ -71,7 +66,7 @@ class Skins {
     for (const it of lib.items) {
       try {
         items.push({ ...it, image: dataUrl(await fsp.readFile(path.join(this.dir(), `${it.hash}.png`))) });
-      } catch { /* archivo borrado */ }
+      } catch {}
     }
     const out = { account: acc ? { name: acc.name, type: acc.type, uuid: acc.uuid } : null, items, current: null, capes: [], serverReady: this.backend.configured() };
     if (!acc) return out;
@@ -84,7 +79,7 @@ class Skins {
       for (const c of acc.capes || []) {
         try {
           out.capes.push({ id: c.id, alias: c.alias, active: c.state === 'ACTIVE', image: dataUrl(await this.textureCached(c.url)) });
-        } catch { /* sin imagen */ }
+        } catch {}
       }
     }
     return out;
@@ -110,7 +105,6 @@ class Skins {
     return { image: dataUrl(await fsp.readFile(file)), model: model || 'classic', hash };
   }
 
-  // ---------- Biblioteca ----------
   async add({ bytes, name, model }) {
     const buf = Buffer.from(bytes);
     validateSkin(buf, { premium: false });
@@ -130,7 +124,6 @@ class Skins {
     return this.state();
   }
 
-  // Copia la skin de cualquier jugador premium (útil para no premium).
   async importFromName(name) {
     const nick = String(name || '').trim();
     if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) throw new Error('Escribe un nick válido.');
@@ -164,7 +157,6 @@ class Skins {
     return this.state();
   }
 
-  // ---------- Aplicar ----------
   async apply(id) {
     const acc = this.accounts.active();
     if (!acc) throw new Error('Inicia sesión primero.');

@@ -1,5 +1,3 @@
-// Viciont Studio Launcher — interfaz.
-
 import { call, on, state, setInstances, instance } from './api.js';
 import { icon, hydrateIcons } from './icons.js';
 import { esc, instIcon, mediaUrl, isVideo } from './util.js';
@@ -18,7 +16,6 @@ import { crashModal } from './views/instance.js';
 const VIEWS = { home: homeView, instance: instanceView, skins: skinsView, admin: adminView };
 const $ = (id) => document.getElementById(id);
 
-// ---------- Fondo propio de cada instancia ----------
 const scene = (() => {
   const root = $('scene');
   let currentKey = null;
@@ -56,7 +53,6 @@ const scene = (() => {
       root.appendChild(layer);
       layer.classList.add('is-glitching');
       setTimeout(() => layer.classList.remove('is-glitching'), 520);
-      // el fondo animado deja de dibujarse mientras la imagen lo tapa (ahorra GPU)
       setTimeout(() => { if (currentKey === key) app.bg.setPaused(true); }, 800);
     },
     clear() {
@@ -112,8 +108,6 @@ const app = {
     try { cur = await call('skins:current'); } catch { cur = null; }
     await paintHead(canvas, cur?.image || null);
   },
-  // Cambiar de cuenta: las sesiones ya están guardadas (cifradas) en el PC, así que el
-  // cambio es inmediato; lo que depende del servidor se actualiza después, en segundo plano.
   async switchAccount(uuid) {
     const summary = await call('accounts:switch', uuid);
     state.accounts = summary;
@@ -130,7 +124,6 @@ const app = {
     app.refreshAdmin();
     if (current.name === 'home' || current.name === 'skins' || current.name === 'admin') { current.key = ''; app.go(current.name === 'admin' ? { name: 'home' } : state.route, { instant: true }); }
   },
-  // ¿La cuenta activa tiene acceso de administración? (lo decide el panel del estudio)
   async refreshAdmin({ fresh = false } = {}) {
     try { state.admin = await call('admin:status', { fresh }); } catch { state.admin = { access: false, unlocked: false, perms: [] }; }
     app.onAdminChange(Boolean(state.admin?.unlocked));
@@ -149,7 +142,6 @@ const app = {
   openSettings(tab) { return openSettings(app, tab); },
 };
 
-// ---------- Barra lateral ----------
 function paintRail() {
   const list = $('rail-list');
   const items = state.instances;
@@ -181,23 +173,43 @@ function updateRailProgress(p) {
   if (b && p.percent != null) b.dataset.tipSub = `Descargando ${Math.floor(p.percent)}%`;
 }
 
-// ---------- Barra de título ----------
 function paintTitlebar() {
   const box = $('titlebar-status');
   const chips = [];
   if (state.instancesMeta.error === 'EOFFLINE') chips.push(`<span class="chip chip--warn">${icon('alert')}Sin conexión</span>`);
   if (state.admin?.unlocked) chips.push(`<span class="chip">${icon('shield')}Admin</span>`);
-  const u = state.update;
-  if (u?.status === 'ready') chips.push(`<button class="chip chip--hot" type="button" id="upd-chip">${icon('download')}Versión ${esc(u.version)} lista · Reiniciar</button>`);
-  else if (u?.status === 'downloading') chips.push(`<span class="chip">${icon('download')}Actualizando launcher ${u.percent || 0}%</span>`);
   box.innerHTML = chips.join('');
-  box.querySelector('#upd-chip')?.addEventListener('click', async () => {
-    const ok = await confirm({ title: 'Actualizar el launcher', text: `Se cerrará el launcher, se instalará la versión ${u.version} y volverá a abrirse.`, ok: 'Reiniciar ahora', icon: 'download' });
-    if (ok) call('app:installUpdate').catch(toastError);
-  });
+  paintUpdateButton();
 }
 
-// ---------- Inicio de sesión ----------
+let tooltips = null;
+
+function paintUpdateButton() {
+  const b = $('upd-btn');
+  const u = state.update;
+  const shown = u?.status === 'downloading' || u?.status === 'ready';
+  b.hidden = !shown;
+  if (!shown) return;
+  const ready = u.status === 'ready';
+  const pct = ready ? 100 : Math.max(0, Math.min(100, Math.round(u.percent || 0)));
+  b.classList.toggle('is-ready', ready);
+  b.style.setProperty('--p', `${pct}%`);
+  b.dataset.tipSub = ready
+    ? `La versión ${u.version} ya está descargada: pulsa para reiniciar e instalarla.`
+    : `Descargando la versión ${u.version || 'nueva'}… ${pct}%`;
+  tooltips?.refresh();
+}
+
+async function onUpdateButton() {
+  const u = state.update;
+  if (u?.status !== 'ready') {
+    if (state.accounts?.active && !$('shell').hidden) app.openSettings('launcher');
+    return;
+  }
+  const ok = await confirm({ title: 'Actualizar el launcher', text: `Se cerrará el launcher, se instalará la versión ${u.version} y volverá a abrirse.`, ok: 'Reiniciar ahora', icon: 'download' });
+  if (ok) call('app:installUpdate').catch(toastError);
+}
+
 let loginCleanup = null;
 function closeLogin() {
   try { loginCleanup?.(); } catch (e) { console.error(e); }
@@ -241,11 +253,9 @@ function showShell() {
   app.refreshAdmin();
 }
 
-// ---------- Eventos del proceso principal ----------
 on('instances', () => {
   paintRail();
   paintTitlebar();
-  // si la instancia abierta desapareció (sin permiso), volver al inicio
   if (state.route.name === 'instance' && !instance(state.route.id)) app.go({ name: 'home' });
 });
 on('progress', updateRailProgress);
@@ -257,7 +267,7 @@ on('task-done', (d) => {
   else if (!d.ok) toast(`No se pudo instalar ${name}: ${d.error}`, { kind: 'error', timeout: 9000, actions: [{ label: 'Reintentar', onClick: () => call('instances:install', d.id) }] });
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
-on('update', paintTitlebar);
+on('update', paintUpdateButton);
 on('admin-locked', () => {
   app.onAdminChange(false);
   toast('Se cerró el modo administrador: tu clave o tus permisos cambiaron.', { kind: 'error', timeout: 8000 });
@@ -283,12 +293,12 @@ on('close-requested', async () => {
 });
 on('closing', () => toast('Pausando descargas de forma segura…', { timeout: 0 }));
 
-// ---------- Arranque ----------
 async function boot() {
   const bootFx = bootScreen();
   hydrateIcons(document);
   initIdle();
-  initTooltips();
+  tooltips = initTooltips();
+  $('upd-btn').addEventListener('click', onUpdateButton);
   try {
     const [info, settings, accounts, list] = await Promise.all([
       call('app:info'), call('settings:get'), call('accounts:get'), call('instances:list'),
@@ -360,7 +370,6 @@ window.addEventListener('focus', () => {
   adminCheckedAt = Date.now();
   app.refreshAdmin({ fresh: true });
 });
-// errores de la interfaz: se guardan en el registro para poder arreglarlos
-const reportUi = (msg) => { try { call('app:uiError', String(msg).slice(0, 400)).catch(() => {}); } catch { /* nada */ } };
+const reportUi = (msg) => { try { call('app:uiError', String(msg).slice(0, 400)).catch(() => {}); } catch {} };
 window.addEventListener('error', (e) => { console.error(e.error || e.message); reportUi(`${e.message} (${String(e.filename || '').split('/').pop()}:${e.lineno})`); });
 window.addEventListener('unhandledrejection', (e) => { const m = e.reason?.message || String(e.reason); if (!/Acción|AbortError/.test(m)) reportUi(`Promesa: ${m}`); });

@@ -1,5 +1,3 @@
-// Ventanas modales, confirmaciones, avisos, tooltips y menús.
-
 import { icon, hydrateIcons } from './icons.js';
 import { esc } from './util.js';
 
@@ -61,10 +59,6 @@ function trapFocus(e, dialog) {
 
 export const anyModalOpen = () => stack.length > 0;
 
-/**
- * Confirmación con estilo. Devuelve true/false (o el valor del botón elegido).
- * buttons: [{ label, value, kind: 'primary'|'danger'|'ghost' }]
- */
 export function confirm({ title, text = '', html = '', icon: ic = 'alert', danger = false, ok = 'Aceptar', cancel = 'Cancelar', buttons, extra = '' } = {}) {
   return new Promise((resolve) => {
     const btns = buttons || [
@@ -99,7 +93,6 @@ export function alertBox(title, text, ic = 'info') {
   return confirm({ title, text, icon: ic, cancel: null, ok: 'Entendido' });
 }
 
-// ---------- Avisos ----------
 export function toast(message, { kind = 'info', timeout = 4200, actions = [] } = {}) {
   const box = document.getElementById('toasts');
   const el = document.createElement('div');
@@ -116,7 +109,6 @@ export function toast(message, { kind = 'info', timeout = 4200, actions = [] } =
 
 export const toastError = (e, prefix = '') => toast(`${prefix}${e?.message || e}`, { kind: 'error', timeout: 6500 });
 
-// ---------- Tooltips (atributo data-tip, opcional data-tip-sub) ----------
 export function initTooltips() {
   const tip = document.getElementById('tooltip');
   let current = null;
@@ -150,7 +142,6 @@ export function initTooltips() {
   return { refresh: () => current && show(current), hide };
 }
 
-// ---------- Menú contextual ----------
 let openMenu = null;
 export function menu(anchor, items) {
   closeMenu();
@@ -192,7 +183,6 @@ export function closeMenu() {
   document.removeEventListener('keydown', escKey, true);
 }
 
-// Botón con estado de carga mientras se ejecuta una acción.
 export async function busy(btn, fn, label) {
   if (!btn) return fn();
   const prev = btn.innerHTML;

@@ -1,5 +1,4 @@
 'use strict';
-// Cliente de la API pública de Modrinth (búsqueda de mods, versiones y archivos).
 
 const { request, cached } = require('../util/net');
 
@@ -12,9 +11,6 @@ async function api(pathname, opts = {}) {
 
 const LOADER_TAGS = { fabric: ['fabric'], quilt: ['quilt', 'fabric'], forge: ['forge'], neoforge: ['neoforge'] };
 
-/**
- * type: mod | resourcepack | shader | datapack | modpack
- */
 async function search({ query = '', type = 'mod', mc, loader, offset = 0, limit = 20, sort = 'relevance' }) {
   const facets = [[`project_type:${type}`]];
   if (mc) facets.push([`versions:${mc}`]);
@@ -42,7 +38,6 @@ async function projects(ids) {
   return api(`/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`);
 }
 
-// Versiones compatibles de un proyecto (la primera es la más reciente).
 async function versions(idOrSlug, { mc, loader, type = 'mod' } = {}) {
   const q = new URLSearchParams();
   if (mc) q.set('game_versions', JSON.stringify([mc]));
@@ -65,7 +60,6 @@ async function version(id) {
   return simplifyVersion(await api(`/version/${encodeURIComponent(id)}`));
 }
 
-// Busca varios archivos por su SHA-1 (para reconocer mods que ya están en Modrinth).
 async function versionsByHashes(sha1s) {
   if (!sha1s.length) return {};
   const out = {};

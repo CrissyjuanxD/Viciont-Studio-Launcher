@@ -1,6 +1,4 @@
 'use strict';
-// Versiones de Minecraft: lista oficial de Mojang, JSON de cada versión y
-// herencia (Fabric/Forge/NeoForge/Quilt heredan de la versión vanilla).
 
 const path = require('node:path');
 const { getJson, cached } = require('../util/net');
@@ -29,7 +27,6 @@ function versionJsonPath(dirs, id) {
   return path.join(dirs.versions, id, `${id}.json`);
 }
 
-// Asegura el JSON de una versión vanilla (lo descarga si falta o está dañado).
 async function ensureVanillaJson(dirs, id, { signal, progress } = {}) {
   const file = versionJsonPath(dirs, id);
   const local = await readJson(file);
@@ -76,13 +73,11 @@ function mergeVersions(child, parent) {
   merged.javaVersion = child.javaVersion || parent.javaVersion;
   merged.logging = child.logging || parent.logging;
   merged.type = child.type || parent.type;
-  // la versión "base" (su .jar) es la del padre salvo que la hija tenga el suyo
   merged.baseJar = child.downloads?.client ? child.id : (parent.baseJar || parent.jar || parent.id);
   merged.chain = [...(parent.chain || [parent.id]), child.id];
   return merged;
 }
 
-// Devuelve el JSON final de una versión con toda su herencia aplicada.
 async function resolveVersion(dirs, id, depth = 0) {
   if (depth > 6) throw new Error('Herencia de versiones demasiado profunda');
   const json = await loadVersionJson(dirs, id);
@@ -93,7 +88,6 @@ async function resolveVersion(dirs, id, depth = 0) {
   return mergeVersions(json, parent);
 }
 
-// Orden de versiones: se usa la fecha de publicación de Mojang cuando existe.
 function sortByRelease(ids, manifest) {
   const time = new Map(manifest.versions.map((v) => [v.id, Date.parse(v.releaseTime)]));
   return [...ids].sort((a, b) => (time.get(b) || 0) - (time.get(a) || 0));

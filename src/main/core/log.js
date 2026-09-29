@@ -1,6 +1,4 @@
 'use strict';
-// Registro del launcher en launcher_logs\launcher.log (rota a los 2 MB, guarda 3).
-// Nunca escribe tokens: se ocultan antes de guardar.
 
 const fs = require('node:fs');
 const path = require('node:path');
@@ -28,7 +26,7 @@ function rotate() {
       if (fs.existsSync(a)) fs.renameSync(a, `${FILE}.${i + 1}`);
     }
     if (fs.existsSync(FILE)) fs.renameSync(FILE, `${FILE}.1`);
-  } catch { /* sin permisos: seguimos */ }
+  } catch {}
   size = 0;
 }
 

@@ -1,9 +1,3 @@
-// Administración de instancias (nick autorizado en el panel + clave personal).
-// Los botones se muestran según los permisos del nick; el servidor los vuelve a comprobar siempre.
-//
-// El contenido de una instancia es tu carpeta sincronizada: lo que cambies ahí (desde aquí o desde
-// el Explorador de Windows, o jugando) es lo que se publica. Al publicar solo se sube lo que cambió.
-
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce } from '../util.js';
@@ -24,7 +18,6 @@ const POLICY = {
   merge: { label: 'Fusionar ajustes: el jugador solo recibe los que cambies tú', short: 'Fusionar', icon: 'layers' },
 };
 const PROTECT_LOADERS = ['fabric', 'quilt'];
-// Archivos que no son de texto (no se pueden comparar línea a línea).
 const BIN_RE = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
 const DIFF_MAX = 2 * 1024 * 1024;
 const fileIcon = (p) => (FOLDERS.find(([dir]) => dir && p.startsWith(`${dir}/`)) || FOLDERS[FOLDERS.length - 1])[2];
@@ -42,7 +35,6 @@ export function render(root, route, app) {
   return renderList(root, app);
 }
 
-// ======================= LISTA =======================
 function renderList(root, app) {
   root.innerHTML = `
     <div class="page page--admin">
@@ -59,7 +51,6 @@ function renderList(root, app) {
     </div>`;
   hydrateIcons(root);
 
-  // Círculo con lo que ocupa el servidor (abajo a la derecha). No aparece si el servidor es anterior a la API v4.
   let storage = null;
   const loadStorage = async (fresh = false) => {
     try { storage = await call('admin:storage', { fresh }); } catch { storage = null; }
@@ -123,7 +114,6 @@ function renderList(root, app) {
   return () => {};
 }
 
-// ---------- Almacenamiento del servidor ----------
 const pct = (used, limit) => (limit ? Math.min(1, used / limit) : 0);
 const level = (p) => (p >= 1 ? 'is-full' : p >= 0.8 ? 'is-warn' : '');
 const pctLabel = (used, limit) => {
@@ -132,7 +122,6 @@ const pctLabel = (used, limit) => {
 };
 const num = (n) => Number(n || 0).toLocaleString('es-ES');
 
-// Anillos concéntricos: [{ r, w, p (0-1), cls }]
 function ringSvg(parts) {
   return `<svg class="sring" viewBox="0 0 64 64" aria-hidden="true">${parts.map(({ r, w, p, cls }) => {
     const len = 2 * Math.PI * r;
@@ -249,7 +238,6 @@ function storageModal(initial, { reload, onChange }) {
   draw();
 }
 
-// Selector de versión de Minecraft + cargador + versión del cargador.
 function versionPicker(container, initial = {}) {
   const st = { mc: initial.mc || '', loader: initial.loader?.type || 'fabric', loaderVersion: initial.loader?.version || '', snapshots: false };
   let mcList = [];
@@ -299,7 +287,6 @@ function versionPicker(container, initial = {}) {
   call('catalog:mcVersions').then((l) => { mcList = l; drawMc(); drawLoader(); }).catch((e) => { q('mc').innerHTML = `<option>${esc(e.message)}</option>`; });
   return {
     value: () => ({ mc: st.mc, loader: { type: st.loader, version: st.loader === 'vanilla' ? '' : st.loaderVersion } }),
-    // Rellena la versión (p. ej. con la de una instancia de Modrinth App)
     set: (v) => {
       if (v.mc) st.mc = v.mc;
       if (v.loader?.type) st.loader = v.loader.type;
@@ -337,7 +324,7 @@ function newInstanceModal(app) {
   const f = m.content.querySelector('#nf');
   const vp = versionPicker(m.content.querySelector('#vp'));
   let idTouched = false;
-  let fromMr = null; // instancia de Modrinth App elegida
+  let fromMr = null;
   f.name.addEventListener('input', () => { if (!idTouched) f.id.value = slugify(f.name.value); });
   f.id.addEventListener('input', () => { idTouched = true; f.id.value = slugify(f.id.value); });
   const drawMr = () => {
@@ -416,12 +403,11 @@ async function playersModal() {
   load();
 }
 
-// ======================= EDITOR =======================
 function renderEditor(root, id, app, route = {}) {
   let d = null;
   let tab = route.tab || 'general';
   let filter = '';
-  let only = ''; // '' = todo · 'added' | 'modified' | 'removed' = solo esos cambios
+  let only = '';
   let syncing = false;
   const offs = [];
   const ws = () => d?.workspace || { synced: false };
@@ -493,7 +479,6 @@ function renderEditor(root, id, app, route = {}) {
     hydrateIcons(body);
   };
 
-  // ---------- General ----------
   const tabGeneral = (body) => {
     const mt = d.meta;
     body.innerHTML = `
@@ -537,7 +522,6 @@ function renderEditor(root, id, app, route = {}) {
     });
   };
 
-  // ---------- Apariencia ----------
   const tabLook = (body) => {
     const src = (m) => (m?.local ? `vsl-media://local/admin/${m.name}` : mediaUrl(m?.key));
     const iconM = d.media?.icon;
@@ -584,7 +568,6 @@ function renderEditor(root, id, app, route = {}) {
     inp.click();
   };
 
-  // ---------- Contenido (tu carpeta sincronizada) ----------
   const tabContent = (body) => {
     const w = ws();
     if (!w.synced) {
@@ -726,11 +709,10 @@ function renderEditor(root, id, app, route = {}) {
     hydrateIcons(list);
   };
 
-  // ---------- Permisos ----------
   const tabAccess = (body) => {
     const mt = d.meta;
     const protectable = PROTECT_LOADERS.includes(mt.loader?.type);
-    const v5 = (d.apiVersion || 0) >= 5; // ocultar config y resourcepacks necesita el servidor nuevo
+    const v5 = (d.apiVersion || 0) >= 5;
     body.innerHTML = `
       <div class="panel">
         <div class="panel__title"><span>¿Quién puede ver esta instancia?</span></div>
@@ -828,7 +810,6 @@ function renderEditor(root, id, app, route = {}) {
     drawAllow();
   };
 
-  // ---------- Acciones ----------
   const reload = async () => {
     d = await call('admin:open', id);
     draw();
@@ -984,7 +965,6 @@ function renderEditor(root, id, app, route = {}) {
   call('admin:open', id).then((r) => {
     d = r;
     draw();
-    // venía de "Importar" al crear la instancia
     const imp = route.import;
     if (imp === 'mrpack') importMrpack(id, (w) => { setWs(w); reload(); });
     if (imp === 'folder') importFolder(id, (w) => { setWs(w); reload(); });
@@ -998,7 +978,6 @@ function renderEditor(root, id, app, route = {}) {
   return () => offs.forEach((f) => f());
 }
 
-// Ajustes cambiados en un archivo que se fusiona (options.txt…).
 function keysModal(file, keys) {
   const m = modal({
     size: 'lg',
@@ -1010,9 +989,6 @@ function keysModal(file, keys) {
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
-// ---------- Qué cambió exactamente (antes de publicar) ----------
-// Lista de cambios sin publicar: textos y permisos, archivos modificados, nuevos y los que se quitan.
-// Los archivos de texto (configs…) se despliegan para ver las líneas que cambiaron.
 function changesHtml(d, { compact = false } = {}) {
   const w = d.workspace || {};
   const files = w.files || [];
@@ -1048,7 +1024,6 @@ function changesHtml(d, { compact = false } = {}) {
   return `<div class="changes ${compact ? 'changes--compact' : ''}">${body || '<p class="field__hint">No hay cambios sin publicar.</p>'}</div>`;
 }
 
-// Las líneas que cambiaron (en verde lo nuevo, en rojo lo que se quita).
 function diffHtml(r) {
   const note = (t) => `<div class="chg__note">${t}</div>`;
   if (r.kind === 'binary') return note('No es un archivo de texto: no se pueden mostrar sus líneas.');
@@ -1066,7 +1041,6 @@ function diffHtml(r) {
   return `<div class="diff__stats"><span class="add">+${res.added} línea(s)</span><span class="del">−${res.removed} línea(s)</span>${p.formatted ? '<span>JSON formateado para compararlo</span>' : ''}${res.truncated ? '<span>(solo las primeras líneas)</span>' : ''}</div><div class="diff">${lines}</div>`;
 }
 
-// Despliega (o recoge) las diferencias de un archivo dentro de una lista de cambios.
 function bindChanges(box, id, d) {
   box.addEventListener('click', async (e) => {
     const kb = e.target.closest('[data-chg-keys]');
@@ -1104,7 +1078,6 @@ function changesModal(id, d) {
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
-// Diferencias de un solo archivo (desde la lista de la carpeta).
 function diffModal(id, f) {
   const m = modal({
     size: 'xl',
@@ -1118,7 +1091,6 @@ function diffModal(id, f) {
   call('admin:fileDiff', id, f.path).then((r) => { pane.innerHTML = diffHtml(r); }).catch((e) => { pane.innerHTML = `<div class="chg__note">${esc(e.message)}</div>`; }).finally(() => hydrateIcons(pane));
 }
 
-// Pide la carpeta de destino dentro de la instancia.
 function askFolder(def = 'mods') {
   return new Promise((resolve) => {
     const opts = [['mods', 'mods/'], ['config', 'config/'], ['resourcepacks', 'resourcepacks/'], ['shaderpacks', 'shaderpacks/'], ['', 'Raíz de la instancia'], ['custom', 'Otra carpeta…']];
@@ -1144,7 +1116,6 @@ function askFolder(def = 'mods') {
   });
 }
 
-// Búsqueda en Modrinth (se descarga directamente a tu carpeta)
 function modrinthModal(id, draft, onChange) {
   let type = 'mod';
   let offset = 0;
@@ -1202,7 +1173,6 @@ function modrinthModal(id, draft, onChange) {
   search();
 }
 
-// Instancias de Modrinth App de este PC: resuelve con la elegida (o null).
 async function pickModrinthInstance() {
   let list;
   const t = toast('Buscando instancias de Modrinth App…', { timeout: 0 });
@@ -1238,14 +1208,12 @@ async function pickModrinthInstance() {
   });
 }
 
-// Usa el icono de una instancia de Modrinth App (se optimiza igual que uno elegido a mano).
 async function useModrinthIcon(id, file) {
   const ic = await call('admin:modrinthIcon', file);
   const out = await processMedia(new File([ic.bytes], ic.name, { type: ic.type }), 'icon');
   await call('admin:setMedia', id, 'icon', out);
 }
 
-// preset: instancia de Modrinth App (sin elegir carpeta; trae su versión y su icono)
 async function importFolder(id, onDone, preset = null) {
   let scan;
   try { scan = preset ? await call('admin:scanPath', preset.dir) : await call('admin:scanFolder'); } catch (e) { toastError(e); return; }
@@ -1355,7 +1323,6 @@ async function publish(id, d, onDone) {
   } finally { off(); }
 }
 
-// Optimiza imágenes (WebP) antes de subirlas; GIF y vídeo se mantienen tal cual.
 async function processMedia(file, kind) {
   const type = file.type || '';
   if (/^video\//.test(type)) {

@@ -1,7 +1,4 @@
-// Ajustes: juego (RAM, Java, resolución), launcher, almacenamiento, cuenta,
-// administración y "acerca de".
-
-import { call, state, emit } from '../api.js';
+import { call, state, emit, on } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, bytes } from '../util.js';
 import { modal, toast, toastError, confirm, busy } from '../ui.js';
@@ -17,7 +14,6 @@ const TABS = [
 ];
 
 export function openSettings(app, tab = 'game') {
-  // la pestaña de administración solo se ve para los nicks con acceso concedido en el panel
   const tabs = TABS;
   if (tab === 'admin' && !state.admin?.access) tab = 'game';
   const m = modal({
@@ -41,7 +37,6 @@ export function openSettings(app, tab = 'game') {
   };
   m.content.querySelectorAll('[data-tab]').forEach((b) => b.addEventListener('click', () => show(b.dataset.tab)));
   show(tab);
-  // se vuelve a preguntar al servidor (por si acaban de darte o quitarte el acceso)
   app.refreshAdmin?.({ fresh: true }).then((st) => {
     const b = m.content.querySelector('[data-tab="admin"]');
     if (b) b.hidden = !st?.access;
@@ -235,6 +230,7 @@ const PANES = {
       upd.textContent = map[u?.status] || '';
     };
     paintUpd(state.update);
+    const offUpd = on('update', (u) => { if (upd.isConnected) paintUpd(u); else offUpd(); });
     pane.querySelector('#check-upd').addEventListener('click', async (e) => {
       const u = await busy(e.currentTarget, () => call('app:checkUpdates'));
       paintUpd(u);

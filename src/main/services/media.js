@@ -1,7 +1,4 @@
 'use strict';
-// Imágenes y vídeos de las instancias (iconos y fondos). Se guardan en caché y
-// se sirven a la interfaz con el protocolo vsl-media:// (con soporte de rangos
-// para que los vídeos arranquen al instante y ocupen poca memoria).
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -19,7 +16,7 @@ class Media {
     this.backend = backend;
     this.log = log;
     this.pending = new Map();
-    this.localRoots = new Map(); // prefijo → carpeta (vista previa del panel de administración)
+    this.localRoots = new Map();
   }
 
   fileFor(key) {
@@ -41,14 +38,12 @@ class Media {
     return p;
   }
 
-  // Manejador del protocolo vsl-media://<instancia>/<archivo>
   async handle(request) {
     try {
       const u = new URL(request.url);
       let key = `${u.host}${decodeURIComponent(u.pathname)}`.replace(/\/+$/, '');
       let file;
       if (u.host === 'local') {
-        // vsl-media://local/<raíz>/<archivo> — archivos del panel aún sin publicar
         const [, root, name] = decodeURIComponent(u.pathname).split('/');
         const dir = this.localRoots.get(root);
         if (!dir || !/^[a-f0-9]{16,64}\.(png|jpe?g|gif|webp|mp4|webm)$/i.test(name || '')) return new Response('not found', { status: 404 });

@@ -1,6 +1,4 @@
 'use strict';
-// Utilidades de sistema de archivos con escrituras atómicas (nunca dejan
-// un archivo a medias aunque el launcher se cierre o se vaya la luz).
 
 const fs = require('node:fs');
 const fsp = fs.promises;
@@ -30,7 +28,6 @@ function readJsonSync(p, fallback = null) {
   try { return JSON.parse(fs.readFileSync(p, 'utf8')); } catch { return fallback; }
 }
 
-// En Windows el antivirus o el indexador pueden bloquear un archivo un instante.
 async function renameRetry(from, to) {
   for (let i = 0; ; i++) {
     try { return await fsp.rename(from, to); } catch (e) {
@@ -74,7 +71,6 @@ function writeFileAtomicSync(p, data) {
 const writeJsonAtomic = (p, obj) => writeFileAtomic(p, JSON.stringify(obj, null, 2));
 const writeJsonAtomicSync = (p, obj) => writeFileAtomicSync(p, JSON.stringify(obj, null, 2));
 
-// En el proceso principal el SHA-1 se calcula en el hilo de descargas (no traba la ventana).
 let offload = null;
 function hashFile(p, algo = 'sha1') {
   if (isMainThread) {
@@ -100,7 +96,6 @@ async function rmrf(p) {
   await fsp.rm(p, { recursive: true, force: true, maxRetries: 4, retryDelay: 120 });
 }
 
-// Une rutas impidiendo salir de la carpeta raíz ("../", rutas absolutas, etc.).
 function safeJoin(root, rel) {
   const clean = String(rel || '').replace(/\\/g, '/');
   if (!clean || clean.includes('\0') || /^[a-zA-Z]:/.test(clean) || clean.startsWith('/')) {
@@ -113,7 +108,6 @@ function safeJoin(root, rel) {
   return target;
 }
 
-// Normaliza una ruta relativa de instancia ("mods/x.jar"), o null si no es válida.
 function normalizeRel(rel) {
   const parts = String(rel || '').replace(/\\/g, '/').split('/').filter((s) => s && s !== '.');
   if (!parts.length || parts.some((s) => s === '..' || /[<>:"|?*\x00-\x1f]/.test(s))) return null;
@@ -138,7 +132,6 @@ async function dirSize(dir) {
   return total;
 }
 
-// Lista archivos de forma recursiva devolviendo rutas relativas con "/".
 async function listFiles(dir, { skip } = {}) {
   const out = [];
   const walk = async (d, rel) => {
@@ -156,7 +149,6 @@ async function listFiles(dir, { skip } = {}) {
   return out;
 }
 
-// Crea un enlace duro (no ocupa espacio extra) o copia si no se puede.
 async function linkOrCopy(src, dest) {
   await ensureDir(path.dirname(dest));
   await fsp.rm(dest, { force: true });

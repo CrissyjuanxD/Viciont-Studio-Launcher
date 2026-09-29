@@ -1,5 +1,3 @@
-// Skins (como en Modrinth): vista 3D, biblioteca de skins, aplicar y capas.
-
 import { call, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc } from '../util.js';
@@ -26,7 +24,7 @@ export function render(root, _route, app) {
   app.scene.clear();
   app.bg.setMode('dim');
   let data = null;
-  let selected = null; // id de la biblioteca o 'current'
+  let selected = null;
   let viewer = null;
   let anim = 'idle';
   let disposed = false;
@@ -71,8 +69,6 @@ export function render(root, _route, app) {
     try {
       const lib = await loadViewerLib();
       if (disposed) return;
-      // Tamaño fijo (como en Modrinth): el visor nunca depende del tamaño de la
-      // ventana, así no puede entrar en un bucle de "crecer hasta abajo".
       viewer = new lib.SkinViewer({ canvas, width: VIEW_W, height: VIEW_H, pixelRatio: Math.min(2, window.devicePixelRatio || 1) });
       viewer.fov = 50;
       viewer.zoom = 0.86;
@@ -106,7 +102,7 @@ export function render(root, _route, app) {
       await viewer.loadSkin(s.image, { model: s.model === 'slim' ? 'slim' : 'default' });
       const cape = data?.capes?.find((c) => c.active);
       if (cape) await viewer.loadCape(cape.image); else viewer.loadCape(null);
-    } catch { /* imagen dañada */ }
+    } catch {}
   };
 
   const draw = () => {
@@ -174,7 +170,6 @@ export function render(root, _route, app) {
     showSelected();
   };
 
-  // añadir desde archivo (selector o arrastrar y soltar)
   const addFile = async (file) => {
     if (!file) return;
     if (!/png$/i.test(file.type) && !/\.png$/i.test(file.name)) { toast('La skin tiene que ser una imagen PNG.', { kind: 'error' }); return; }
@@ -271,7 +266,6 @@ export function render(root, _route, app) {
     if (e.key === 'Enter' && e.target.matches('[data-pick]')) e.target.click();
   });
 
-  // arrastrar y soltar un PNG
   stage.parentElement.addEventListener('dragover', (e) => { e.preventDefault(); root.querySelector('.skins').classList.add('drop-hint'); });
   stage.parentElement.addEventListener('dragleave', () => root.querySelector('.skins').classList.remove('drop-hint'));
   stage.parentElement.addEventListener('drop', (e) => {
@@ -288,18 +282,17 @@ export function render(root, _route, app) {
     disposed = true;
     offIdle();
     if (viewer) {
-      // libera también la memoria de gráficos del visor 3D (si no, se queda reservada)
       let gl = null;
       try { gl = viewer.renderer.getContext(); } catch { gl = null; }
       viewer.dispose();
-      try { gl?.getExtension('WEBGL_lose_context')?.loseContext(); } catch { /* ya liberado */ }
+      try { gl?.getExtension('WEBGL_lose_context')?.loseContext(); } catch {}
       viewer = null;
     }
   };
 }
 
 async function paintBody(canvas, src, slim) {
-  try { drawBody(canvas, await loadImage(src), slim, 4); } catch { /* sin imagen */ }
+  try { drawBody(canvas, await loadImage(src), slim, 4); } catch {}
 }
 
 function askNameModel(name, slim) {

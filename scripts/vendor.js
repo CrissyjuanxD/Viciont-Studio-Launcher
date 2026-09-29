@@ -1,5 +1,3 @@
-// Copia a src/renderer las fuentes y librerías de node_modules que usa la interfaz
-// (así la app funciona sin internet y sin cargar nada de CDNs).
 const fs = require('node:fs');
 const path = require('node:path');
 

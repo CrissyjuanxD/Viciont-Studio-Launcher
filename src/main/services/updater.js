@@ -1,5 +1,4 @@
 'use strict';
-// Actualizaciones automáticas del launcher desde las Releases de GitHub.
 
 const { EventEmitter } = require('node:events');
 const { app } = require('electron');

@@ -1,8 +1,6 @@
-// Pantalla principal: logo con glitch, bienvenida, "continuar jugando" e instancias.
-
 import { state, on, call } from '../api.js';
 import { icon } from '../icons.js';
-import { esc, instIcon, instThumb, loaderLabel, timeAgo, bytes } from '../util.js';
+import { esc, instIcon, instThumb, loaderLabel, timeAgo, playTime } from '../util.js';
 import { typeLoop, scramble, glitchImg, bindTilt } from '../fx.js';
 import { statusChip } from './instance.js';
 
@@ -13,13 +11,12 @@ export function render(root, _route, app) {
   root.innerHTML = `
     <section class="home">
       <div class="home__hero">
+        ${glitchImg('img/emblem.webp', 'home__emblem')}
         <div class="home__brand">
-          ${glitchImg('img/emblem.webp', 'home__emblem')}
-          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span><span class="glitch glitch--grad" data-text="STUDIOS">STUDIOS</span></h1>
+          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span> <span class="glitch glitch--grad" data-text="STUDIOS">STUDIOS</span></h1>
           <p class="home__tagline"><span id="home-typing"></span><span class="caret"></span></p>
           <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Elige una instancia de la barra lateral o de la lista.</p>
         </div>
-        <div id="home-continue"></div>
       </div>
       <div class="home__section">
         <div class="section-head">
@@ -64,32 +61,18 @@ export function render(root, _route, app) {
               ${i.visibility === 'private' ? `<span class="tag">${icon('lock')} privada</span>` : ''}
               ${i.test ? `<span class="tag tag--test">${icon('eye')} copia de prueba</span>` : ''}
               ${i.workspace ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
+              ${i.installed && i.playTime ? `<span class="tag" data-tip="Tiempo jugado en total">${icon('clock')} ${esc(playTime(i.playTime))}</span>` : ''}
             </div>
             ${i.summary ? `<p class="icard__summary">${esc(i.summary)}</p>` : ''}
+            ${i.installed && i.lastPlayed ? `<div class="icard__played">${icon('history')}<span>Jugado ${esc(timeAgo(i.lastPlayed))}</span></div>` : ''}
           </div>
         </button>`).join('');
     }
-    // continuar jugando
-    const cont = root.querySelector('#home-continue');
-    const last = [...list].filter((i) => i.installed && i.lastPlayed).sort((a, b) => b.lastPlayed - a.lastPlayed)[0]
-      || list.find((i) => i.featured) || list[0];
-    if (!last) { cont.innerHTML = ''; return; }
-    const played = last.installed && last.lastPlayed;
-    cont.innerHTML = `
-      <div class="home__continue">
-        <div class="home__continue-media">${instThumb(last)}</div>
-        <div class="home__continue-body">
-          <span class="home__continue-kicker">${played ? `Jugado ${esc(timeAgo(last.lastPlayed))}` : 'Destacada'}</span>
-          <span class="home__continue-name">${esc(last.name)}</span>
-          <div class="icard__meta"><span class="tag">${esc(last.mc || '')}</span><span class="tag">${esc(loaderLabel(last.loader))}</span>${last.size ? `<span class="tag">${esc(bytes(last.size))}</span>` : ''}</div>
-          <button class="btn btn--primary btn--block" type="button" data-open="${esc(last.id)}">${icon(played ? 'play' : 'arrowRight')}${played ? 'Continuar' : 'Ver instancia'}</button>
-        </div>
-      </div>`;
   };
 
   root.addEventListener('click', (e) => {
-    const card = e.target.closest('[data-id], [data-open]');
-    if (card) app.go({ name: 'instance', id: card.dataset.id || card.dataset.open });
+    const card = e.target.closest('[data-id]');
+    if (card) app.go({ name: 'instance', id: card.dataset.id });
     const s = e.target.closest('[data-social]');
     if (s) call('app:openExternal', s.dataset.social).catch(() => {});
   });
@@ -102,7 +85,6 @@ export function render(root, _route, app) {
   renderList();
   const off = on('instances', renderList);
 
-  // redes del estudio (desde la web)
   app.studio().then((st) => {
     const box = root.querySelector('#home-socials');
     if (!box || !st) return;

@@ -1,12 +1,4 @@
 'use strict';
-// Autenticación de Xbox con "SISU" y token de dispositivo firmado: el mismo método
-// que usan el launcher oficial de Minecraft y Modrinth App.
-//
-//   1. El PC tiene una clave propia (ECDSA P-256) → token de dispositivo de Xbox.
-//   2. SISU devuelve la página oficial de Microsoft para iniciar sesión (con PKCE).
-//   3. Con el código de Microsoft, SISU autoriza al usuario (y al título Minecraft).
-//   4. XSTS → token de Minecraft (launcher/login).
-// Todas las peticiones a Xbox van firmadas con la clave del dispositivo.
 
 const crypto = require('node:crypto');
 const { userAgent } = require('../util/net');
@@ -27,7 +19,6 @@ const XERR = {
   2148916238: 'Es una cuenta de menor de edad: un adulto debe añadirla a un grupo familiar de Microsoft.',
 };
 
-// Diferencia entre el reloj del PC y el de Microsoft (las firmas llevan la hora).
 let skew = 0;
 const now = () => Date.now() + skew;
 
@@ -37,7 +28,6 @@ function authError(message, code = 'EAUTH', extra = {}) {
 
 const b64url = (buf) => Buffer.from(buf).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
 
-// ---------- Clave del dispositivo ----------
 function createDeviceKey() {
   const { privateKey, publicKey } = crypto.generateKeyPairSync('ec', { namedCurve: 'P-256' });
   const jwk = publicKey.export({ format: 'jwk' });
@@ -51,7 +41,6 @@ function createDeviceKey() {
 
 const proofKey = (key) => ({ kty: 'EC', x: key.x, y: key.y, crv: 'P-256', alg: 'ES256', use: 'sig' });
 
-// Firma de Xbox: versión + hora (FILETIME) + método + ruta + autorización + cuerpo.
 function signature(key, path, body, authorization = '') {
   const filetime = (BigInt(Math.floor(now() / 1000)) + 11644473600n) * 10000000n;
   const t = Buffer.alloc(8);
@@ -101,7 +90,6 @@ function xboxFailure(step, r) {
   return authError(`Xbox Live no respondió bien (${step}, HTTP ${r.status}).`, 'EXBOX', { status: r.status });
 }
 
-// ---------- Pasos ----------
 async function deviceToken(key) {
   const r = await signedPost('https://device.auth.xboxlive.com/device/authenticate', {
     Properties: {

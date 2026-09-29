@@ -1,24 +1,4 @@
 'use strict';
-// Instancias para los jugadores: lista (según permisos), instalación, actualización,
-// reparación, arranque del juego y desinstalación.
-//
-// Seguridad ante cierres: antes de tocar una instancia se escribe un "diario"
-// (.vsl/journal.json). Cada archivo se descarga a .part y solo se renombra cuando
-// su SHA-1 es correcto. Si el launcher se cierra a medias, el diario sigue ahí y la
-// próxima vez se verifica todo y se continúa donde se quedó.
-//
-// Tipos de instancia en este PC:
-//   · normal: la que descarga cualquier jugador.
-//   · sincronizada (state.workspace): la carpeta de un administrador; lo que cambie ahí es lo que
-//     se publica. No se actualiza sola: los cambios de otros se traen desde Administración.
-//   · copia de prueba ("<id>~test"): igual que la de un jugador cualquiera, para probar actualizaciones.
-//
-// Carpetas ocultas a los jugadores (las elige el administrador en Permisos):
-//   · mods (Fabric/Quilt): se guardan aparte y el cargador los lee desde ahí.
-//   · config y resourcepacks: se guardan aparte y el launcher los pone en su sitio solo mientras
-//     se juega (con enlaces duros: no ocupan el doble ni tardan). Al cerrar el juego se quitan y
-//     lo que el juego cambió se guarda. Los resource packs quedan ocultos en el Explorador incluso
-//     mientras se juega.
 
 const path = require('node:path');
 const fs = require('node:fs');
@@ -40,14 +20,11 @@ const ID_RE = /^[a-z0-9][a-z0-9-]{1,47}(~test)?$/;
 const TEST = '~test';
 const baseId = (id) => String(id || '').replace(/~test$/, '');
 const isTestId = (id) => String(id || '').endsWith(TEST);
-// Cargadores que pueden leer los mods desde otra carpeta (así la carpeta "mods" se ve vacía).
 const PROTECT_LOADERS = new Set(['fabric', 'quilt']);
 const isProtectable = (rel) => /^mods\/[^/]+\.jar$/i.test(rel);
-// Carpetas que se guardan aparte y solo se ponen en su sitio mientras se juega (cualquier cargador).
 const STAGED = ['config', 'resourcepacks'];
 const topOf = (rel) => String(rel).split('/')[0].toLowerCase();
 
-// Dónde va cada archivo: 'g' = carpeta del juego, 'p' = mods ocultos (por SHA-1), 'h' = config/resourcepacks ocultos.
 function locOf(rel, kinds) {
   if (kinds.includes('mods') && isProtectable(rel)) return 'p';
   const top = topOf(rel);
@@ -60,7 +37,6 @@ const isAlive = (pid) => {
   try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; }
 };
 
-// Oculta (o vuelve a mostrar) archivos y carpetas en el Explorador: atributos "oculto" + "sistema".
 function setHidden(paths, on) {
   if (process.platform !== 'win32' || !paths.length) return Promise.resolve();
   return pool(paths, 4, (p) => new Promise((resolve) => {
@@ -82,9 +58,9 @@ class Instances extends EventEmitter {
     this.remote = new Map();
     this.remoteError = null;
     this.remoteAt = 0;
-    this.tasks = new Map(); // id → { ctrl, progress, promise, kind }
-    this.running = new Map(); // id → GameProcess
-    this.waiting = new Map(); // id → temporizador (juego de una sesión anterior que sigue abierto)
+    this.tasks = new Map();
+    this.running = new Map();
+    this.waiting = new Map();
   }
 
   setDirs(dirs) { this.dirs = dirs; }
@@ -95,14 +71,10 @@ class Instances extends EventEmitter {
   }
   stateFile(id) { return path.join(this.gameDir(id), '.vsl', 'state.json'); }
   journalFile(id) { return path.join(this.gameDir(id), '.vsl', 'journal.json'); }
-  // Carpetas aparte (fuera de la instancia) para lo que se oculta a los jugadores.
   pkName(id) { return crypto.createHash('sha1').update(`vsl:${id}`).digest('hex').slice(0, 24); }
-  // mods ocultos (solo .jar: Fabric revisa todo lo que hay dentro, subcarpetas incluidas)
   protectedDir(id) { return path.join(this.dirs.meta, 'pk', this.pkName(id)); }
-  // config y resource packs ocultos, y el diario de lo que está puesto mientras se juega
   hiddenDir(id) { return path.join(this.dirs.meta, 'pk-files', this.pkName(id)); }
   stageFile(id) { return path.join(this.hiddenDir(id), 'stage.json'); }
-  // Copia de lo último que se recibió de un archivo que se fusiona por claves (options.txt…).
   baseCopy(id, rel, hidden = false) {
     return hidden ? path.join(this.hiddenDir(id), 'base', ...rel.split('/')) : path.join(this.gameDir(id), '.vsl', 'base', ...rel.split('/'));
   }
@@ -115,8 +87,6 @@ class Instances extends EventEmitter {
   async readState(id) { return readJson(this.stateFile(id)); }
   async writeState(id, st) { await writeJsonAtomic(this.stateFile(id), st); }
 
-  // Qué se oculta de esta instancia a este jugador (los administradores lo ven todo;
-  // la copia de prueba se comporta como la de un jugador cualquiera).
   protectKinds(summary, loader, test = false) {
     const list = Array.isArray(summary?.protect) ? summary.protect : [];
     if (!list.length || !(test || !summary.canManage)) return [];
@@ -125,7 +95,6 @@ class Instances extends EventEmitter {
   protects(summary, loader, test = false) { return this.protectKinds(summary, loader, test).includes('mods'); }
   kindsOf(st) { return Array.isArray(st?.protectKinds) ? st.protectKinds : (st?.protected ? ['mods'] : []); }
 
-  // ---------- Lista ----------
   async loadCache() {
     const c = await readJson(this.cacheFile, null);
     if (c?.list) for (const s of c.list) this.remote.set(s.id, s);
@@ -215,10 +184,8 @@ class Instances extends EventEmitter {
     this.get(id).then((d) => this.emit('instance', d)).catch(() => {});
   }
 
-  // ---------- Instalar / actualizar / reparar ----------
   async fetchManifest(id) {
     const token = await this.accounts.session().catch(() => null);
-    // f=merge: este launcher sabe fusionar options.txt por claves
     const r = await this.backend.call(`/v1/instances/${baseId(id)}?f=merge`, { token, timeout: 20000 });
     if (!r?.manifest || !Array.isArray(r.manifest.files)) throw new Error('El servidor devolvió una instancia incompleta');
     return r;
@@ -228,7 +195,6 @@ class Instances extends EventEmitter {
     return `${this.backend.base()}/v1/instances/${baseId(id)}/blobs/${sha1}${downloadToken ? `?t=${encodeURIComponent(downloadToken)}` : ''}`;
   }
 
-  // Enlace de descarga de un archivo del manifiesto (solo HTTPS o el servidor local de pruebas).
   fileUrl(id, f, downloadToken) {
     let url = f.url;
     if (f.source === 'upload' || !url) url = this.blobUrl(id, f.sha1.toLowerCase(), downloadToken);
@@ -282,7 +248,7 @@ class Instances extends EventEmitter {
     this.remote.set(bid, instance);
     const prev = (await this.readState(id)) || {};
     if (prev.workspace) throw new Error('Esta instancia está sincronizada con tu carpeta: trae los cambios desde Administración.');
-    await this.unstage(id); // por si quedaron puestos los archivos ocultos de una partida anterior
+    await this.unstage(id);
     const hadJournal = await exists(this.journalFile(id));
     const thorough = repair || hadJournal;
     await ensureDir(path.join(gameDir, '.vsl'));
@@ -297,14 +263,13 @@ class Instances extends EventEmitter {
     const kinds = this.protectKinds(instance, manifest.loader, test);
     const destOf = (f, loc) => this.fileAt(id, f.path, f.sha1, loc);
     try {
-      // Archivos de la instancia (mods, configs, resourcepacks…)
       progress.setPhase('check', 'Comprobando archivos de la instancia…');
       const files = [];
       const seen = new Set();
       for (const f of manifest.files) {
         const rel = normalizeRel(f.path);
         if (!rel || seen.has(rel.toLowerCase()) || !/^[a-f0-9]{40}$/i.test(f.sha1 || '')) continue;
-        if (rel.toLowerCase().startsWith('.vsl/')) continue; // carpeta interna del launcher
+        if (rel.toLowerCase().startsWith('.vsl/')) continue;
         seen.add(rel.toLowerCase());
         files.push({ ...f, path: rel });
       }
@@ -316,8 +281,8 @@ class Instances extends EventEmitter {
         if (extra && !seen.has(extra.path.toLowerCase())) files.push(extra);
       }
       const items = [];
-      const merges = []; // ya los tiene el jugador: se fusionan por claves al terminar
-      const fresh = []; // se fusionan por claves pero el jugador aún no los tiene
+      const merges = [];
+      const fresh = [];
       const prevFiles = prev.files || {};
       await pool(files, 16, async (f) => {
         const sha = f.sha1.toLowerCase();
@@ -325,15 +290,13 @@ class Instances extends EventEmitter {
         const dest = destOf(f, f.loc);
         const rec = prevFiles[f.path];
         const was = rec?.loc || 'g';
-        // se activó o se quitó la protección: se mueve el archivo en vez de volver a bajarlo
-        // (los mods ocultos se guardan por su SHA-1: solo se aprovechan si no cambiaron)
         if (rec && was !== f.loc && ((was !== 'p' && f.loc !== 'p') || rec.sha1 === sha)) {
           await this.moveFile(this.fileAt(id, f.path, rec.sha1, was), dest).catch(() => {});
         }
         const st = await statOrNull(dest);
-        if (st && f.policy === 'once') return; // archivo que el jugador puede cambiar (servers.dat…)
+        if (st && f.policy === 'once') return;
         if (f.policy === 'merge' && st) {
-          if (rec && rec.sha1 === sha) return; // el administrador no lo cambió: se queda el del jugador
+          if (rec && rec.sha1 === sha) return;
           const url = this.fileUrl(bid, f, downloadToken);
           if (!url) return;
           const incoming = path.join(gameDir, '.vsl', 'incoming', sha);
@@ -362,7 +325,6 @@ class Instances extends EventEmitter {
       }
       if (signal.aborted) throw Object.assign(new Error('Operación cancelada'), { name: 'AbortError' });
 
-      // options.txt y parecidos: el jugador recibe solo los ajustes que cambió el administrador
       for (const m of merges) {
         const incoming = await fsp.readFile(m.incoming, 'utf8');
         const baseFile = this.baseCopy(id, m.rel, m.hidden);
@@ -380,26 +342,23 @@ class Instances extends EventEmitter {
       }
       await rmrf(path.join(gameDir, '.vsl', 'incoming'));
 
-      // Quitar archivos que ya no forman parte de la instancia (no toca lo que añadió el jugador)
       const keep = new Map(files.map((f) => [f.path.toLowerCase(), f]));
       const keptProtected = new Set(files.filter((f) => f.loc === 'p').map((f) => f.sha1.toLowerCase()));
       for (const [rel, rec] of Object.entries(prevFiles)) {
         try {
           const was = rec.loc || 'g';
-          // en la carpeta oculta los mods se guardan por su SHA-1: si cambió o se quitó, sobra el anterior
           if (was === 'p') {
             if (!keptProtected.has(rec.sha1)) await fsp.rm(this.fileAt(id, rel, rec.sha1, 'p'), { force: true });
             continue;
           }
-          if (keep.has(rel.toLowerCase())) continue; // sigue en la instancia (si cambió de sitio, ya se movió)
+          if (keep.has(rel.toLowerCase())) continue;
           if (rec.policy === 'once' || rec.policy === 'merge') {
-            // el archivo ya es del jugador: si estaba oculto, pasa a su carpeta normal
             if (was === 'h') await this.moveFile(this.fileAt(id, rel, rec.sha1, 'h'), safeJoin(gameDir, rel)).catch(() => {});
             continue;
           }
           await fsp.rm(this.fileAt(id, rel, rec.sha1, was), { force: true });
           if (was === 'h') await this.pruneDirs(this.hiddenDir(id), rel);
-        } catch { /* ruta inválida */ }
+        } catch {}
       }
       if (!kinds.includes('mods')) await this.dropJars(id);
 
@@ -440,7 +399,6 @@ class Instances extends EventEmitter {
     });
   }
 
-  // Quita las carpetas que quedaron vacías entre el archivo y la carpeta principal (config, resourcepacks…).
   async pruneDirs(root, rel) {
     const parts = rel.split('/').slice(0, -1);
     while (parts.length > 1) {
@@ -449,7 +407,6 @@ class Instances extends EventEmitter {
     }
   }
 
-  // Sin mods ocultos: se borran los que quedaran en la carpeta aparte (el resto de lo oculto se queda).
   async dropJars(id) {
     const pdir = this.protectedDir(id);
     for (const n of await fsp.readdir(pdir).catch(() => [])) {
@@ -458,7 +415,6 @@ class Instances extends EventEmitter {
     await fsp.rmdir(pdir).catch(() => {});
   }
 
-  // Coloca cada archivo donde toca (carpeta normal u oculta) si cambió la protección desde la última descarga.
   async relayout(id, st, kinds) {
     if (this.kindsOf(st).join(',') === kinds.join(',')) return st;
     await this.unstage(id);
@@ -480,8 +436,6 @@ class Instances extends EventEmitter {
     return next;
   }
 
-  // ---------- Carpetas ocultas mientras se juega (config, resourcepacks) ----------
-  // Pone los archivos ocultos en la carpeta del juego con enlaces duros (o copias si no se puede).
   async stage(id, st) {
     const hidden = Object.entries(st.files || {}).filter(([, r]) => r.loc === 'h').map(([rel]) => rel);
     if (!hidden.length) return null;
@@ -489,7 +443,6 @@ class Instances extends EventEmitter {
     const gameDir = this.gameDir(id);
     const hdir = this.hiddenDir(id);
     const jf = this.stageFile(id);
-    // primero se anota todo: si el launcher se cierra a medias, se sabe qué hay que quitar
     const journal = { at: Date.now(), pid: null, files: hidden.map((rel) => ({ rel })), dirs: [], hide: [] };
     await writeJsonAtomic(jf, journal);
     const created = new Set();
@@ -524,12 +477,10 @@ class Instances extends EventEmitter {
       e.size = Number(d.size);
       e.mtime = Number(d.mtimeMs);
     });
-    // En el Explorador se ocultan los resource packs y las carpetas nuevas de config (los archivos
-    // sueltos de config no: algunos mods no pueden reescribir un archivo oculto).
     const hide = new Set();
     for (const c of created) {
       const parts = c.split('/');
-      if (parts.length < 2) continue; // la carpeta config o resourcepacks en sí se sigue viendo
+      if (parts.length < 2) continue;
       if (parts.length === 2 || !created.has(parts.slice(0, -1).join('/'))) hide.add(c);
     }
     for (const e of journal.files) {
@@ -551,8 +502,6 @@ class Instances extends EventEmitter {
     if (j) await writeJsonAtomic(jf, { ...j, pid });
   }
 
-  // Quita de la carpeta del juego lo que se puso al jugar; lo que el juego cambió se guarda.
-  // force: aunque el juego de una sesión anterior siga abierto (solo antes de volver a ponerlos).
   async unstage(id, { force = false } = {}) {
     const jf = this.stageFile(id);
     const j = await readJson(jf);
@@ -567,11 +516,10 @@ class Instances extends EventEmitter {
       const dst = safeJoin(gameDir, e.rel);
       const src = path.join(hdir, ...e.rel.split('/'));
       const d = await fsp.stat(dst, { bigint: true }).catch(() => null);
-      if (!d || !d.isFile()) return; // el juego lo borró: se queda la copia guardada
+      if (!d || !d.isFile()) return;
       const same = e.mode === 'link' && e.ino && String(d.ino) === e.ino;
       const changed = !same && (e.size == null || Number(d.size) !== e.size || Math.abs(Number(d.mtimeMs) - e.mtime) > 1 || e.mode !== 'copy');
       if (changed) {
-        // el juego lo reescribió (o se cambió estando puesto): esa versión pasa a ser la guardada
         await this.moveFile(dst, src).catch(() => {});
         saved++;
       } else {
@@ -582,7 +530,6 @@ class Instances extends EventEmitter {
       if (!normalizeRel(rel)) continue;
       await fsp.rmdir(safeJoin(gameDir, rel)).catch(() => {});
     }
-    // si en una carpeta nueva quedó algo del jugador (o de un mod), se vuelve a ver
     const left = [];
     for (const rel of j.hide || []) if (normalizeRel(rel) && await exists(safeJoin(gameDir, rel))) left.push(safeJoin(gameDir, rel));
     await setHidden(left, false);
@@ -591,13 +538,11 @@ class Instances extends EventEmitter {
     return true;
   }
 
-  // Al abrir el launcher: si quedó algo puesto (se cerró con el juego abierto o se apagó el PC), se retira.
   async recoverStaged() {
     for (const id of await this.localIds()) {
       const j = await readJson(this.stageFile(id));
       if (!j) continue;
       if (isAlive(j.pid)) {
-        // el juego de la sesión anterior sigue abierto: se retira cuando se cierre
         const timer = setInterval(() => {
           if (isAlive(j.pid)) return;
           clearInterval(timer);
@@ -617,7 +562,6 @@ class Instances extends EventEmitter {
     if (t) t.ctrl.abort();
   }
 
-  // Cancela todo de forma segura y espera a que se cierren los archivos abiertos.
   async cancelAll() {
     const list = [...this.tasks.values()];
     for (const t of list) t.ctrl.abort();
@@ -626,7 +570,6 @@ class Instances extends EventEmitter {
 
   busy() { return this.tasks.size > 0; }
 
-  // ---------- Jugar ----------
   async play(id, hooks = {}) {
     if (this.running.has(id) || this.waiting.has(id)) return { already: true };
     if (this.tasks.has(id)) throw new Error('Espera a que termine la descarga');
@@ -653,7 +596,6 @@ class Instances extends EventEmitter {
         javaCustom: (major) => settings.javaPaths?.[major] || undefined,
       });
       try {
-        // comprobación rápida: si falta algo (p. ej. lo borró el antivirus) se vuelve a bajar
         const extra = ws ? await this.cslItems(gameDir, st) : [];
         await downloadAll([...plan.items, ...extra], { concurrency: settings.concurrency, signal: ctrl.signal, progress, verify: 'size' });
         for (const post of plan.posts) await post(progress);
@@ -662,7 +604,6 @@ class Instances extends EventEmitter {
       }
       if (st.loader?.type && st.loader.type !== 'vanilla') await csl.configure(gameDir, this.backend.base()).catch(() => {});
       if (!ws) st = await this.relayout(id, st, this.protectKinds(remote || st.summary, st.loader, isTestId(id)));
-      // mods ocultos: Fabric los lee de la carpeta; Quilt necesita la lista de archivos
       const extraJvm = [];
       if (!ws && this.kindsOf(st).includes('mods')) {
         const pdir = this.protectedDir(id);
@@ -671,7 +612,6 @@ class Instances extends EventEmitter {
           if (jars.length) extraJvm.push(`-Dloader.addMods=${jars.join(path.delimiter)}`);
         } else extraJvm.push(`-Dfabric.addMods=${pdir}`);
       }
-      // config y resource packs ocultos: se ponen en su sitio solo mientras se juega
       const staged = ws ? null : await this.stage(id, st);
       const o = st.options || {};
       const summary = remote || st.summary || {};
@@ -699,7 +639,6 @@ class Instances extends EventEmitter {
       this.log.info(`Juego iniciado: ${id} (pid ${game.pid})`);
       game.on('exit', async ({ code, duration }) => {
         const crashed = code !== 0 && code !== null;
-        // primero el informe (el juego pudo escribir en config mientras se cerraba)
         const crash = crashed ? await collectCrash({ gameDir, startedAt: game.startedAt, pid: game.pid, logFile: game.logFile }).catch(() => null) : null;
         this.running.delete(id);
         if (staged) await this.unstage(id, { force: true }).catch((e) => this.log.warn(`No se pudieron retirar los archivos ocultos de ${id}:`, e.message));
@@ -720,7 +659,6 @@ class Instances extends EventEmitter {
     return task.promise;
   }
 
-  // En la carpeta de un administrador también va CustomSkinLoader (lo añade el launcher; no se publica).
   async cslItems(gameDir, st) {
     if (!st.loader?.type || st.loader.type === 'vanilla') return [];
     const f = await csl.cslFile(st.mc, st.loader.type).catch(() => null);
@@ -731,7 +669,6 @@ class Instances extends EventEmitter {
   stop(id) {
     const w = this.waiting.get(id);
     if (w && process.platform === 'win32' && isAlive(w.pid)) {
-      // juego de una sesión anterior del launcher (sigue abierto)
       spawn('taskkill', ['/pid', String(w.pid), '/T', '/F'], { windowsHide: true, stdio: 'ignore' }).on('error', () => {});
       return;
     }
@@ -740,7 +677,6 @@ class Instances extends EventEmitter {
 
   anyRunning() { return this.running.size > 0; }
 
-  // ---------- Otros ----------
   async setOptions(id, patch) {
     const st = await this.readState(id);
     if (!st) throw new Error('La instancia no está instalada');

@@ -1,23 +1,16 @@
 'use strict';
-// Cliente del servidor del estudio (Cloudflare Worker + R2): instancias,
-// permisos, archivos privados, skins no premium y administración.
 
 const path = require('node:path');
 const { request, getJson } = require('../util/net');
 const { readJson, writeJsonAtomic } = require('../util/fsx');
 const { configFile } = require('../core/paths');
 
-// Configuración remota: permite cambiar la URL del servidor sin publicar otra versión.
 const REMOTE_CONFIG = 'https://raw.githubusercontent.com/CrissyjuanxD/Viciont-Studio-Launcher/main/remote/launcher.json';
 const REMOTE_CACHE = configFile('remote.json');
-const DISCORD_CLIENT_ID = '1553630868638146660'; // aplicación de Discord de Viciont Studios
-const SITE_URL = 'https://viciontstudios.pages.dev/'; // web de Viciont Studios (Cloudflare Pages)
+const DISCORD_CLIENT_ID = '1553630868638146660';
+const SITE_URL = 'https://viciontstudios.pages.dev/';
 
 class Backend {
-  // allowOverride: solo en desarrollo se puede usar otro servidor (settings.apiBase).
-  // En la versión instalada el servidor sale SIEMPRE de la configuración oficial
-  // (remote/launcher.json del repositorio), así nadie puede engañar a un jugador
-  // para que se conecte a un servidor falso con mods maliciosos.
   constructor(settings, log, { allowOverride = false } = {}) {
     this.settings = settings;
     this.log = log;
@@ -54,13 +47,11 @@ class Backend {
 
   news() { return Array.isArray(this.remote?.news) ? this.remote.news.slice(0, 6) : []; }
 
-  // ID de la aplicación de Discord de Viciont Studios (se puede cambiar sin publicar otra versión).
   discordClientId() {
     const id = String(this.remote?.discordClientId || '');
     return /^\d{15,25}$/.test(id) ? id : DISCORD_CLIENT_ID;
   }
 
-  // Web de Viciont Studios (se puede cambiar sin publicar otra versión).
   siteUrl() {
     const u = String(this.remote?.site || '');
     return /^https:\/\/[a-z0-9.-]+(\/[^\s?#]*)?\/$/i.test(u) ? u : SITE_URL;

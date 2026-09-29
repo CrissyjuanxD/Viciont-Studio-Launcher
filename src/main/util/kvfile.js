@@ -1,11 +1,7 @@
 'use strict';
-// Archivos de ajustes "clave:valor" o "clave=valor" (options.txt, optionsof.txt, optionsshaders.txt…).
-// Se fusionan por clave: al actualizar una instancia, el jugador recibe solo los ajustes que cambió
-// el administrador y conserva todo lo demás (teclas, volumen, FOV…).
 
 const LINE_RE = /^([^:=]+)([:=])(.*)$/;
 
-// Ajustes que cada jugador suele cambiar a su gusto: al publicar salen desmarcados por defecto.
 const PERSONAL_RE = /^(key_|soundCategory_)/;
 const PERSONAL = new Set(['fov', 'gamma', 'mouseSensitivity', 'fullscreen', 'overrideWidth', 'overrideHeight', 'lastServer',
   'tutorialStep', 'joinedFirstServer', 'onboardAccessibility', 'skipMultiplayerWarning', 'version', 'maxFps',
@@ -47,12 +43,9 @@ function serialize(doc) {
   return doc.entries.length && doc.trailing !== false ? `${out}\n` : out;
 }
 
-// Fusión al actualizar. base = lo que recibió el jugador la última vez (null si no se sabe).
-// Con base: se aplican las claves que el administrador cambió o añadió desde entonces.
-// Sin base: solo se añaden las claves que el jugador no tiene (no se pisa nada suyo).
 function merge3(playerText, baseText, newText) {
   const P = parse(playerText);
-  if (!P.entries.some((e) => e.key != null)) return String(newText ?? ''); // no tiene ajustes propios: el archivo entero
+  if (!P.entries.some((e) => e.key != null)) return String(newText ?? '');
   const N = parse(newText);
   const B = baseText == null ? null : parse(baseText);
   for (const e of N.entries) {
@@ -67,7 +60,6 @@ function merge3(playerText, baseText, newText) {
   return serialize(P);
 }
 
-// Claves que cambian entre lo publicado (base) y el archivo local del administrador.
 function changedKeys(baseText, localText, ignore = []) {
   const B = parse(baseText);
   const L = parse(localText);
@@ -82,7 +74,6 @@ function changedKeys(baseText, localText, ignore = []) {
   return out;
 }
 
-// Archivo que se publica: lo publicado antes + solo las claves elegidas del archivo local.
 function compose(baseText, localText, keys) {
   if (baseText == null) return String(localText ?? '');
   const B = parse(baseText);
@@ -94,7 +85,6 @@ function compose(baseText, localText, keys) {
   return serialize(B);
 }
 
-// ¿Se puede fusionar por claves? (texto con al menos una línea clave:valor o clave=valor)
 function looksLikeKv(text) {
   const doc = parse(text);
   const keyed = doc.entries.filter((e) => e.key != null).length;

@@ -1,5 +1,3 @@
-# Compila el instalador y lo publica en GitHub Releases al subir una etiqueta vX.Y.Z
-# (antes sube el número de "version" en package.json).
 name: Publicar versión
 
 on:
@@ -18,8 +16,6 @@ jobs:
         with:
           node-version: 22
       - run: npm ci
-      # La release se crea antes de compilar: si la crea electron-builder mientras sube
-      # varios archivos a la vez, puede duplicarla y repartir los archivos entre las dos.
       - name: Crear la release
         shell: pwsh
         env:
@@ -35,8 +31,6 @@ jobs:
       - run: npx electron-builder --win --x64 --publish always
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      # Copia con nombre fijo: .../releases/latest/download/Viciont-Studios-Launcher-Setup.exe
-      # descarga siempre la última versión (es el botón de la web del estudio).
       - name: Enlace fijo a la última versión
         shell: pwsh
         env:

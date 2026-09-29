@@ -1,5 +1,4 @@
 'use strict';
-// Ajustes del launcher (settings.json), con valores por defecto según el equipo.
 
 const os = require('node:os');
 const { EventEmitter } = require('node:events');
@@ -22,15 +21,15 @@ const DEFAULTS = {
   jvmArgs: DEFAULT_JVM,
   resolution: { width: 1280, height: 720, fullscreen: false },
   javaPaths: {},
-  onLaunch: 'hide', // hide (cierra la ventana: casi no gasta recursos) | minimize | keep
+  onLaunch: 'hide',
   reopenOnExit: true,
   concurrency: 10,
-  effects: 'full', // full | reduced | minimal
+  effects: 'full',
   hardwareAcceleration: true,
   apiBase: '',
   autoUpdate: true,
-  discordRpc: true, // mostrar en Discord lo que haces en el launcher
-  discordHidePrivate: false, // ocultar en Discord el nombre de las instancias privadas
+  discordRpc: true,
+  discordHidePrivate: false,
   lastInstance: null,
 };
 

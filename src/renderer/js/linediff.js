@@ -1,7 +1,4 @@
-// Diferencias línea a línea (algoritmo de Myers) para ver qué cambió en un archivo de texto,
-// como un "diff" de git: bloques con unas líneas de contexto alrededor de cada cambio.
-
-const MAX_D = 2500; // más cambios que esto no se muestran línea a línea (sería ilegible y lento)
+const MAX_D = 2500;
 
 const splitLines = (t) => {
   const s = String(t ?? '').replace(/\r\n?/g, '\n');
@@ -10,7 +7,6 @@ const splitLines = (t) => {
   return s === '' ? [] : lines;
 };
 
-// Camino más corto entre A[a0..a1) y B[b0..b1). Devuelve [['=', i, j] | ['-', i] | ['+', null, j]] o null.
 function myers(A, B, a0, a1, b0, b1) {
   const N = a1 - a0;
   const M = b1 - b0;
@@ -21,7 +17,7 @@ function myers(A, B, a0, a1, b0, b1) {
   const trace = [];
   const limit = Math.min(max, MAX_D);
   for (let d = 0; d <= limit; d++) {
-    trace.push(V.slice(off - d - 1, off + d + 2)); // V antes del paso d, para k en [-d-1, d+1]
+    trace.push(V.slice(off - d - 1, off + d + 2));
     for (let k = -d; k <= d; k += 2) {
       let x = (k === -d || (k !== d && V[off + k - 1] < V[off + k + 1])) ? V[off + k + 1] : V[off + k - 1] + 1;
       let y = x - k;
@@ -55,10 +51,6 @@ function backtrack(trace, N, M, a0, b0) {
   return out.reverse();
 }
 
-/**
- * Compara dos textos. Devuelve { hunks: [{ lines: [{ t: ' '|'+'|'-', a, b, text }] }], added, removed, truncated }
- * o { tooMany: true, added, removed } si hay demasiados cambios.
- */
 export function diffLines(oldText, newText, { context = 3, maxLines = 2000 } = {}) {
   const A = splitLines(oldText);
   const B = splitLines(newText);
@@ -69,7 +61,6 @@ export function diffLines(oldText, newText, { context = 3, maxLines = 2000 } = {
   while (endA > start && endB > start && A[endA - 1] === B[endB - 1]) { endA--; endB--; }
   const mid = myers(A, B, start, endA, start, endB);
   if (!mid) {
-    // aproximado: líneas que están en un lado y no en el otro
     const count = (arr) => arr.reduce((m, l) => m.set(l, (m.get(l) || 0) + 1), new Map());
     const ca = count(A.slice(start, endA));
     const cb = count(B.slice(start, endB));
@@ -87,7 +78,6 @@ export function diffLines(oldText, newText, { context = 3, maxLines = 2000 } = {
   let added = 0;
   let removed = 0;
   for (const o of ops) { if (o[0] === '+') added++; else if (o[0] === '-') removed++; }
-  // bloques: cada cambio con `context` líneas iguales antes y después
   const keep = new Uint8Array(ops.length);
   ops.forEach((o, i) => {
     if (o[0] === '=') return;
@@ -108,7 +98,6 @@ export function diffLines(oldText, newText, { context = 3, maxLines = 2000 } = {
   return { hunks, added, removed, truncated };
 }
 
-// Los JSON guardados en una sola línea se formatean para que la comparación sirva de algo.
 export function prettyIfJson(file, a, b) {
   if (!/\.(json|mcmeta)$/i.test(file || '')) return { a, b, formatted: false };
   const long = (t) => String(t || '').split('\n').some((l) => l.length > 300);

@@ -1,5 +1,4 @@
 'use strict';
-// Progreso de una tarea larga (instalar/actualizar): bytes, velocidad y tiempo restante.
 
 const { EventEmitter } = require('node:events');
 
@@ -48,7 +47,6 @@ class TaskProgress extends EventEmitter {
     const inst = Math.max(0, (this.done - this._lastDone) / dt);
     this._lastDone = this.done;
     this._lastT = now;
-    // media de los últimos ~4 s para que la velocidad no salte tanto
     this._samples.push(inst);
     if (this._samples.length > 8) this._samples.shift();
     this.speed = this._samples.reduce((a, b) => a + b, 0) / this._samples.length;

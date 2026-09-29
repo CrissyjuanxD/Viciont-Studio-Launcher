@@ -1,8 +1,3 @@
-// Fondo animado (WebGL): la espiral difuminada de la web + partículas, anillos
-// de pulso, cubos flotantes y cortes glitch.
-// Optimizado: se dibuja a media resolución, con límite de FPS, y se detiene por
-// completo cuando la ventana no se ve, está en segundo plano o se está jugando.
-
 import { onIdleChange, isIdle, effectsLevel } from './fx.js';
 
 const VERT = `
@@ -199,7 +194,7 @@ export function createBackground(canvas) {
   }
 
   function scale() { return effectsLevel() === 'reduced' ? 0.34 : 0.5; }
-  const MAX_PIXELS = 960 * 540; // en pantallas grandes no hace falta más (el fondo es difuminado)
+  const MAX_PIXELS = 960 * 540;
   function resize() {
     const dpr = Math.min(window.devicePixelRatio || 1, 2);
     let s = scale();
@@ -249,7 +244,6 @@ export function createBackground(canvas) {
     if (!raf && !paused && !hidden && !lost) raf = requestAnimationFrame(frame);
   }
 
-  // El tiempo de animación se congela mientras está parado (al volver sigue igual).
   let wasRunning = true;
   function updateRun() {
     const now = performance.now();
@@ -260,8 +254,6 @@ export function createBackground(canvas) {
     scheduleRelease();
   }
 
-  // Si el fondo está parado un rato (ventana minimizada, jugando, tapado por el fondo
-  // de una instancia…), se libera su memoria de gráficos; al volver se recupera solo.
   const loseExt = gl.getExtension('WEBGL_lose_context');
   let released = false;
   let releaseTimer = 0;
@@ -303,7 +295,7 @@ export function createBackground(canvas) {
   canvas.addEventListener('webglcontextrestored', () => {
     if (!init()) return;
     lost = false;
-    canvas.width = 0; // obliga a volver a fijar el tamaño y el viewport
+    canvas.width = 0;
     resize();
     updateRun();
     kick();
@@ -314,7 +306,6 @@ export function createBackground(canvas) {
       Object.assign(target, MODES[name] || MODES.home);
       canvas.classList.toggle('is-dim', name === 'dim');
     },
-    // cuando hay un fondo de instancia encima o se está jugando, no se dibuja nada
     setPaused(v) {
       paused = Boolean(v);
       updateRun();

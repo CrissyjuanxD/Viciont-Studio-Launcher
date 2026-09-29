@@ -1,5 +1,3 @@
-// Dibuja la cabeza (foto de perfil) y el cuerpo de frente a partir de la skin.
-
 const cache = new Map();
 
 export function loadImage(src) {
@@ -26,7 +24,6 @@ function prep(canvas, w, h) {
   return ctx;
 }
 
-// Cabeza con la capa del sombrero (como en NameMC).
 export function drawHead(canvas, img, size = 64) {
   const ctx = prep(canvas, size, size);
   const s = img.width / 64;
@@ -35,7 +32,6 @@ export function drawHead(canvas, img, size = 64) {
   ctx.drawImage(img, 40 * s, 8 * s, 8 * s, 8 * s, 0, 0, size, size);
 }
 
-// Cabeza por defecto cuando aún no hay skin (silueta con los colores del estudio).
 export function drawDefaultHead(canvas, size = 64) {
   const ctx = prep(canvas, size, size);
   const g = ctx.createLinearGradient(0, 0, size, size);
@@ -69,7 +65,6 @@ export function isSlim(img) {
   }
 }
 
-// Cuerpo visto de frente (16 × 32 "píxeles" de skin), con capas exteriores.
 export function drawBody(canvas, img, slim = false, scale = 4) {
   const W = 16 * scale;
   const H = 32 * scale;
@@ -92,17 +87,12 @@ export function drawBody(canvas, img, slim = false, scale = 4) {
       ctx.restore();
     }
   };
-  // piernas
   part(4, 20, 4, 12, 4, 20);
   if (modern) part(20, 52, 4, 12, 8, 20); else part(4, 20, 4, 12, 8, 20, true);
-  // cuerpo
   part(20, 20, 8, 12, 4, 8);
-  // brazos
   part(44, 20, aw, 12, 4 - aw, 8);
   if (modern) part(36, 52, aw, 12, 12, 8); else part(44, 20, aw, 12, 12, 8, true);
-  // cabeza
   part(8, 8, 8, 8, 4, 0);
-  // capas exteriores
   if (modern) {
     part(4, 36, 4, 12, 4, 20, false, true);
     part(4, 52, 4, 12, 8, 20, false, true);
@@ -113,7 +103,6 @@ export function drawBody(canvas, img, slim = false, scale = 4) {
   part(40, 8, 8, 8, 4, 0, false, true);
 }
 
-// Parte trasera de una capa (vista previa en la lista de capas).
 export function drawCape(canvas, img, scale = 3) {
   const ctx = prep(canvas, 10 * scale, 16 * scale);
   const s = img.width / 64;

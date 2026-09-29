@@ -1,5 +1,3 @@
-// Inicio de sesión: cuenta de Microsoft (premium) o nick sin cuenta premium.
-
 import { call, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, debounce } from '../util.js';
@@ -134,8 +132,6 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
     if (el) el.innerHTML = msg ? `<div class="form-error">${icon('alert')}<span>${esc(msg)}</span></div>` : '';
   };
 
-  // Un solo manejador por pantalla (se quita al salir): si no, cada vez que se volvía a
-  // esta pantalla se sumaba otro y un clic abría varias ventanas de Microsoft.
   const onClick = async (e) => {
     const b = e.target.closest('[data-opt]');
     if (!b || disposed) return;

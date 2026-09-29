@@ -1,5 +1,4 @@
 'use strict';
-// Recursos del juego (sonidos, idiomas, texturas de la interfaz) desde el CDN de Mojang.
 
 const path = require('node:path');
 const { readJson, exists, linkOrCopy, hashFile } = require('../util/fsx');
@@ -7,7 +6,6 @@ const { downloadAll, pool } = require('../util/downloader');
 
 const RESOURCES = 'https://resources.download.minecraft.net';
 
-// Descarga el índice (pequeño) y devuelve la lista de objetos a descargar.
 async function planAssets(resolved, dirs, { signal, gameDir } = {}) {
   const ai = resolved.assetIndex;
   if (!ai) return { items: [], post: null, result: { index: resolved.assets || 'legacy', root: dirs.assets, virtual: null } };
@@ -30,7 +28,6 @@ async function planAssets(resolved, dirs, { signal, gameDir } = {}) {
 
   let virtual = null;
   let post = null;
-  // Versiones antiguas: los recursos van en carpetas "virtuales" con su nombre real.
   if (index.virtual || index.map_to_resources) {
     virtual = index.map_to_resources && gameDir ? path.join(gameDir, 'resources') : path.join(dirs.assets, 'virtual', ai.id);
     post = async () => {
