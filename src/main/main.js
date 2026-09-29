@@ -4,7 +4,7 @@ const path = require('node:path');
 const os = require('node:os');
 const fs = require('node:fs');
 const fsp = fs.promises;
-const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard } = require('electron');
+const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard, Notification } = require('electron');
 const paths = require('./core/paths');
 const log = require('./core/log');
 const { Settings, totalMB, DEFAULT_JVM, recommendedMax } = require('./core/settings');
@@ -44,6 +44,9 @@ if (!app.requestSingleInstanceLock()) {
 
 function start() {
   const settings = new Settings();
+  const prevVersion = settings.get().lastVersion;
+  const justUpdated = app.isPackaged && ((Boolean(prevVersion) && prevVersion !== VERSION) || process.argv.includes('--updated'));
+  if (prevVersion !== VERSION) settings.set({ lastVersion: VERSION });
   if (!settings.get().hardwareAcceleration) app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService,SpareRendererForSitePerProcess');
 
@@ -301,13 +304,18 @@ function start() {
   const on = (name, fn) => { handlers[name] = fn; };
   const parentWin = () => (win && !win.isDestroyed() ? win : undefined);
 
-  on('app:info', () => ({
-    name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
-    dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
-    news: backend.news(), admin: admin.quickStatus(), update: updater.state, defaultJvm: DEFAULT_JVM,
-    discord: { available: Boolean(backend.discordClientId()) }, site: backend.siteUrl(),
-    loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
-  }));
+  let updateNotice = justUpdated;
+  on('app:info', () => {
+    const notice = updateNotice;
+    updateNotice = false;
+    return {
+      name: APP_NAME, version: VERSION, dev: isDev, totalMB, recommendedMax: recommendedMax(),
+      dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
+      news: backend.news(), admin: admin.quickStatus(), update: updater.state, justUpdated: notice, defaultJvm: DEFAULT_JVM,
+      discord: { available: Boolean(backend.discordClientId()) }, site: backend.siteUrl(),
+      loaders: Object.fromEntries(Object.entries(LOADERS).map(([k, v]) => [k, v.name])),
+    };
+  });
   on('app:openExternal', (url) => {
     if (!/^https:\/\/[^\s]+$/i.test(String(url))) throw new Error('Enlace no permitido');
     return shell.openExternal(url);
@@ -381,9 +389,19 @@ function start() {
   });
   on('app:checkUpdates', () => updater.check());
   on('app:installUpdate', () => {
-    if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de reiniciar.');
+    if (!updater.canInstall()) throw new Error('No hay ninguna actualización lista para instalar.');
+    if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de actualizar.');
+    if (instances.anyRunning()) throw new Error('Cierra el juego antes de actualizar el launcher.');
     quitting = true;
-    updater.install();
+    if (Notification.isSupported()) {
+      new Notification({
+        title: 'Actualizando Viciont Studios Launcher',
+        body: `Se está instalando la versión ${updater.state.version}. El launcher se volverá a abrir solo en unos segundos.`,
+        icon: path.join(RENDERER, 'img', 'icon.png'),
+        silent: true,
+      }).show();
+    }
+    setTimeout(() => updater.install(), 900);
     return true;
   });
 

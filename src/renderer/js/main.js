@@ -195,9 +195,25 @@ function paintUpdateButton() {
   b.classList.toggle('is-ready', ready);
   b.style.setProperty('--p', `${pct}%`);
   b.dataset.tipSub = ready
-    ? `La versión ${u.version} ya está descargada: pulsa para reiniciar e instalarla.`
+    ? `La versión ${u.version} ya está descargada: pulsa para actualizar.`
     : `Descargando la versión ${u.version || 'nueva'}… ${pct}%`;
   tooltips?.refresh();
+}
+
+function updatingScreen(version) {
+  const el = document.createElement('div');
+  el.className = 'updating';
+  el.innerHTML = `
+    <div class="updating__box">
+      <img class="updating__logo" src="img/emblem.webp" alt="">
+      <h2 class="updating__title">Actualizando</h2>
+      <p class="updating__ver mono">Versión ${esc(version)}</p>
+      <div class="updating__bar"><span></span></div>
+      <p class="updating__text">El launcher se cerrará un momento y se volverá a abrir solo, ya actualizado.</p>
+    </div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+  return () => { el.classList.remove('on'); setTimeout(() => el.remove(), 250); };
 }
 
 async function onUpdateButton() {
@@ -206,8 +222,15 @@ async function onUpdateButton() {
     if (state.accounts?.active && !$('shell').hidden) app.openSettings('launcher');
     return;
   }
-  const ok = await confirm({ title: 'Actualizar el launcher', text: `Se cerrará el launcher, se instalará la versión ${u.version} y volverá a abrirse.`, ok: 'Reiniciar ahora', icon: 'download' });
-  if (ok) call('app:installUpdate').catch(toastError);
+  const ok = await confirm({ title: 'Actualizar el launcher', text: `El launcher se cerrará unos segundos para instalar la versión ${u.version} y se volverá a abrir solo. No se abre ningún instalador.`, ok: 'Actualizar ahora', icon: 'download' });
+  if (!ok) return;
+  const shownAt = Date.now();
+  const close = updatingScreen(u.version);
+  try {
+    await call('app:installUpdate');
+  } catch (e) {
+    setTimeout(() => { close(); toastError(e); }, Math.max(0, 1200 - (Date.now() - shownAt)));
+  }
 }
 
 let loginCleanup = null;
@@ -361,6 +384,7 @@ async function boot() {
   if (!state.accounts.active) showLogin();
   else showShell();
   bootFx.done();
+  if (state.info?.justUpdated) setTimeout(() => toast(`Launcher actualizado a la versión ${state.info.version}.`, { kind: 'success', timeout: 6000 }), 1200);
 }
 
 boot();

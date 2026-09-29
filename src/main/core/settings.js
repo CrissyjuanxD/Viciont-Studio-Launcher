@@ -31,6 +31,7 @@ const DEFAULTS = {
   discordRpc: true,
   discordHidePrivate: false,
   lastInstance: null,
+  lastVersion: null,
 };
 
 const clampInt = (v, min, max, def) => {
@@ -68,6 +69,7 @@ function sanitize(s) {
   delete out.discordShowPrivate;
   out.dataDir = typeof s?.dataDir === 'string' && s.dataDir.length > 2 ? s.dataDir : null;
   out.lastInstance = typeof s?.lastInstance === 'string' ? s.lastInstance : null;
+  out.lastVersion = typeof s?.lastVersion === 'string' && /^\d+\.\d+\.\d+$/.test(s.lastVersion) ? s.lastVersion : null;
   return out;
 }
 

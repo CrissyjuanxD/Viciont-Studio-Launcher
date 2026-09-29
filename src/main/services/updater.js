@@ -51,8 +51,10 @@ class Updater extends EventEmitter {
     return this.state;
   }
 
+  canInstall() { return Boolean(this.au) && this.state.status === 'ready'; }
+
   install() {
-    if (this.state.status === 'ready' && this.au) this.au.quitAndInstall(false, true);
+    if (this.canInstall()) this.au.quitAndInstall(true, true);
   }
 }
 

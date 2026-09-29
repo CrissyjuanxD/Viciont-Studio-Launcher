@@ -226,7 +226,7 @@ const PANES = {
     conc.addEventListener('change', () => setConc(Number(conc.value) || 10));
     const upd = pane.querySelector('#upd-state');
     const paintUpd = (u) => {
-      const map = { checking: 'Buscando…', latest: 'Tienes la última versión.', downloading: `Descargando la versión ${u?.version || ''}… ${u?.percent || 0}%`, ready: `La versión ${u?.version} está lista: se instalará al reiniciar.`, error: `No se pudo comprobar (${u?.error || 'error'}).`, dev: 'Modo desarrollo: sin actualizaciones.', unavailable: 'Actualizaciones no disponibles en esta copia.' };
+      const map = { checking: 'Buscando…', latest: 'Tienes la última versión.', downloading: `Descargando la versión ${u?.version || ''}… ${u?.percent || 0}%`, ready: `La versión ${u?.version} está lista: pulsa «Hay una versión disponible» arriba para actualizar, o se instalará sola al cerrar el launcher.`, error: `No se pudo comprobar (${u?.error || 'error'}).`, dev: 'Modo desarrollo: sin actualizaciones.', unavailable: 'Actualizaciones no disponibles en esta copia.' };
       upd.textContent = map[u?.status] || '';
     };
     paintUpd(state.update);
