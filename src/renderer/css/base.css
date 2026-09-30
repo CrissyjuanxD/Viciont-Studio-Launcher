@@ -72,6 +72,8 @@ input, textarea, .selectable { user-select: text; }
 
 .rich p + p { margin-top: 0.8em; }
 .rich strong { color: #fff; font-weight: 700; background: linear-gradient(transparent 62%, rgba(236, 72, 153, 0.35) 62%); }
+.rich a { color: #f0abfc; text-decoration: underline; text-decoration-color: rgba(240, 171, 252, 0.45); text-underline-offset: 3px; word-break: break-word; }
+.rich a:hover { color: #fff; text-decoration-color: currentColor; }
 
 .btn {
   position: relative;

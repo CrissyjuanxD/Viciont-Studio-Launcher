@@ -575,6 +575,7 @@ function start() {
   }));
   on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
   on('admin:setPolicy', needAdmin((id, p, policy) => admin.setPolicy(id, p, policy)));
+  on('admin:mergePick', needAdmin((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
   on('admin:removeFiles', needAdmin((id, list) => admin.removeFiles(id, list)));
   on('admin:restoreFiles', needAdmin((id, list) => admin.restoreFiles(id, list)));
   on('admin:setInclude', needAdmin((id, name, onOff) => admin.setInclude(id, name, onOff === true)));

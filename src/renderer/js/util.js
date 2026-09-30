@@ -9,9 +9,33 @@ export function esc(value) {
 
 export const fileManager = (platform) => ({ darwin: 'Finder', linux: 'gestor de archivos' })[platform] || 'Explorador';
 
+const LINK_RE = /\[([^\]\n]+)\]\((https:\/\/(?:[^\s<&()]|&amp;)+)\)|https:\/\/(?:[^\s<&]|&amp;)+/g;
+const count = (s, c) => s.split(c).length - 1;
+
+function trimUrl(u) {
+  let url = u;
+  let tail = '';
+  while (/[.,;:!?)\]»”]$/.test(url)) {
+    if (url.endsWith(')') && count(url, '(') >= count(url, ')')) break;
+    tail = url.slice(-1) + tail;
+    url = url.slice(0, -1);
+  }
+  return [url, tail];
+}
+
+const link = (url, label) => `<a href="${url}" target="_blank" rel="noopener noreferrer" data-tip="${url}">${label}</a>`;
+
+function linkify(html) {
+  return html.replace(LINK_RE, (m, label, url) => {
+    if (url) return link(url, label);
+    const [href, tail] = trimUrl(m);
+    return `${link(href, href.replace(/^https:\/\//, '').replace(/\/$/, ''))}${tail}`;
+  });
+}
+
 export function richText(text) {
   const parts = String(text || '').trim().split(/\n{2,}/).filter(Boolean);
-  return parts.map((p) => `<p>${esc(p).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/\n/g, '<br>')}</p>`).join('');
+  return parts.map((p) => `<p>${linkify(esc(p).replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')).replace(/\n/g, '<br>')}</p>`).join('');
 }
 
 export function bytes(n, digits = 1) {

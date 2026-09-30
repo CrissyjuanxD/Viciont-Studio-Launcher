@@ -1,6 +1,6 @@
 import { state, on, call, instance } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
-import { esc, richText, instIcon, loaderLabel, timeAgo, playTime, bytes, speed, duration } from '../util.js';
+import { esc, richText, instIcon, timeAgo, playTime, bytes, speed, duration } from '../util.js';
 import { toast, toastError, confirm, menu, modal, busy } from '../ui.js';
 import { scramble, burst } from '../fx.js';
 
@@ -119,7 +119,6 @@ export function render(root, route, app) {
             <div>
               <div class="inst__chips">
                 <span class="chip">${icon('cube')}Minecraft ${esc(inst.mc || '')}</span>
-                <span class="chip">${icon('layers')}${esc(loaderLabel(inst.loader))}</span>
                 ${inst.filesCount ? `<span class="chip">${icon('package')}${inst.modsCount ?? inst.filesCount} ${inst.modsCount != null ? 'mods' : 'archivos'}</span>` : ''}
                 ${inst.visibility === 'private' ? `<span class="chip chip--hot">${icon('lock')}Privada</span>` : ''}
                 ${(inst.tags || []).map((t) => `<span class="chip">${esc(t)}</span>`).join('')}

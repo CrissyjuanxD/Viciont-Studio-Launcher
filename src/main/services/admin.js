@@ -104,6 +104,36 @@ const sameFiles = (a, b) => {
   return a.every((f) => m.get(f.path) === String(f.sha1).toLowerCase());
 };
 
+const keyMap = (v) => (v && typeof v === 'object' && !Array.isArray(v) ? v : {});
+
+function sortMerge(ws, rel, changed) {
+  const now = new Map(changed.map((c) => [c.key, c.to]));
+  const old = ws.localKeys?.[rel];
+  const kept = {};
+  if (Array.isArray(old)) {
+    for (const k of old) if (now.has(k)) kept[k] = now.get(k);
+  } else {
+    for (const [k, v] of Object.entries(keyMap(old))) if (now.get(k) === v) kept[k] = v;
+  }
+  const picked = {};
+  for (const [k, v] of Object.entries(keyMap(ws.mergePick?.[rel]))) if (now.get(k) === v) picked[k] = v;
+  const pending = [];
+  const hidden = [];
+  for (const c of changed) {
+    if (picked[c.key] === c.to) pending.push({ ...c, confirmed: true });
+    else if (kept[c.key] === c.to) hidden.push(c);
+    else pending.push({ ...c, confirmed: false });
+  }
+  return { kept, picked, pending, hidden };
+}
+
+function storeMerge(ws, rel, kept, picked) {
+  ws.localKeys = { ...keyMap(ws.localKeys) };
+  ws.mergePick = { ...keyMap(ws.mergePick) };
+  if (Object.keys(kept).length) ws.localKeys[rel] = kept; else delete ws.localKeys[rel];
+  if (Object.keys(picked).length) ws.mergePick[rel] = picked; else delete ws.mergePick[rel];
+}
+
 function newWs(owner, baseVersion, base) {
   const include = new Set(SUGGESTED);
   for (const rel of Object.keys(base)) include.add(topOf(rel));
@@ -544,27 +574,34 @@ class Admin extends EventEmitter {
     const added = new Set();
     const modified = new Set();
     const merge = {};
+    const mergeKept = {};
     for (const [rel, f] of scan.files) {
       const b = base[rel];
       if (!b) { added.add(rel); continue; }
       const pol = effPolicy(ws, rel);
       if (b.sha1 === f.sha1) {
+        if (pol === 'merge') storeMerge(ws, rel, {}, {});
         if ((b.policy || 'always') !== pol) modified.add(rel);
         continue;
       }
       if (pol === 'merge') {
         const baseText = await this.baseText(id, rel);
         if (baseText != null) {
-          const keys = kv.changedKeys(baseText, await fsp.readFile(f.abs, 'utf8').catch(() => ''), ws.localKeys?.[rel] || []);
-          if (keys.length) merge[rel] = keys;
-          if (keys.length || (b.policy || 'always') !== pol) modified.add(rel);
+          const s = sortMerge(ws, rel, kv.changedKeys(baseText, await fsp.readFile(f.abs, 'utf8').catch(() => '')));
+          storeMerge(ws, rel, s.kept, s.picked);
+          if (s.pending.length) merge[rel] = s.pending;
+          if (s.hidden.length) mergeKept[rel] = s.hidden;
+          if (s.pending.length || (b.policy || 'always') !== pol) modified.add(rel);
           continue;
         }
       }
       modified.add(rel);
     }
+    for (const rel of new Set([...Object.keys(keyMap(ws.localKeys)), ...Object.keys(keyMap(ws.mergePick))])) {
+      if (!scan.files.has(rel)) storeMerge(ws, rel, {}, {});
+    }
     const removed = Object.keys(base).filter((rel) => !scan.files.has(rel) && !isCslPath(rel));
-    return { added, modified, removed, merge };
+    return { added, modified, removed, merge, mergeKept };
   }
 
   async quickWs(id) {
@@ -634,6 +671,7 @@ class Admin extends EventEmitter {
       removed,
       changes: { added: diff.added.size, modified: diff.modified.size, removed: diff.removed.length, total: diff.added.size + diff.modified.size + diff.removed.length },
       merge: diff.merge,
+      mergeKept: diff.mergeKept,
       include: ws.include,
       candidates,
     };
@@ -842,7 +880,7 @@ class Admin extends EventEmitter {
         if (text != null) {
           await ensureDir(path.dirname(dest));
           await fsp.writeFile(dest, text);
-          if (ws.localKeys) delete ws.localKeys[rel];
+          storeMerge(ws, rel, {}, {});
           continue;
         }
       }
@@ -914,6 +952,27 @@ class Admin extends EventEmitter {
       newText: cur ? cur.toString('utf8') : '',
       oldError,
     };
+  }
+
+  async mergePick(id, rel, keys, on) {
+    const { st, dir } = await this.mustWs(id);
+    const ws = st.workspace;
+    const clean = normalizeRel(rel);
+    if (!clean || !ws.base?.[clean] || effPolicy(ws, clean) !== 'merge') throw err('Ese archivo no fusiona ajustes.');
+    const baseText = await this.baseText(id, clean);
+    const localText = await fsp.readFile(safeJoin(dir, clean), 'utf8').catch(() => null);
+    if (baseText == null || localText == null) throw err('No se pudo comparar ese archivo con la versión publicada. Pulsa Comprobar y vuelve a intentarlo.');
+    const changed = kv.changedKeys(baseText, localText);
+    const s = sortMerge(ws, clean, changed);
+    const want = new Set((Array.isArray(keys) ? keys : []).map(String));
+    for (const c of changed) {
+      if (!want.has(c.key)) continue;
+      if (on) s.picked[c.key] = c.to; else delete s.picked[c.key];
+    }
+    storeMerge(ws, clean, s.kept, s.picked);
+    await this.saveWs(id, ws);
+    const r = sortMerge(ws, clean, changed);
+    return { pending: r.pending, hidden: r.hidden };
   }
 
   async setPolicy(id, rel, policy) {
@@ -1118,7 +1177,7 @@ class Admin extends EventEmitter {
       const scan = await this.scanWs(id, st);
       const entries = [];
       const composed = new Map();
-      const localKeys = { ...(ws.localKeys || {}) };
+      const localKeys = {};
       const lookup = [];
       for (const f of scan.files.values()) {
         const policy = effPolicy(ws, f.path);
@@ -1131,11 +1190,13 @@ class Admin extends EventEmitter {
           const localText = await fsp.readFile(f.abs, 'utf8');
           let text = localText;
           if (baseText != null) {
-            const changed = kv.changedKeys(baseText, localText, localKeys[f.path] || []);
-            const pick = Array.isArray(mergeKeys[f.path]) ? new Set(mergeKeys[f.path]) : new Set(changed.filter((c) => !c.personal).map((c) => c.key));
-            const mine = changed.filter((c) => !pick.has(c.key)).map((c) => c.key);
-            if (mine.length) localKeys[f.path] = [...new Set([...(localKeys[f.path] || []), ...mine])];
-            text = kv.compose(baseText, localText, changed.filter((c) => pick.has(c.key)).map((c) => c.key));
+            const changed = kv.changedKeys(baseText, localText);
+            const s = sortMerge(ws, f.path, changed);
+            const want = Array.isArray(mergeKeys[f.path]) ? new Set(mergeKeys[f.path].map(String)) : new Set(Object.keys(s.picked));
+            const keep = {};
+            for (const c of changed) if (!want.has(c.key)) keep[c.key] = c.to;
+            if (Object.keys(keep).length) localKeys[f.path] = keep;
+            text = kv.compose(baseText, localText, changed.filter((c) => want.has(c.key)).map((c) => c.key));
           }
           composed.set(f.path, text);
           const buf = Buffer.from(text, 'utf8');
@@ -1156,6 +1217,17 @@ class Admin extends EventEmitter {
         const e = { path: f.path, sha1, size, source: 'upload', local, policy };
         if (/^(mods|resourcepacks|shaderpacks)\/[^/]+\.(jar|zip)$/i.test(f.path)) lookup.push(e);
         entries.push(e);
+      }
+      const baseCount = Object.keys(ws.base || {}).length;
+      const nothing = inst?.version && !Array.isArray(d.files) && !this.metaDirty(d, inst) && entries.length === baseCount && entries.every((e) => {
+        const x = ws.base?.[e.path];
+        return x && String(x.sha1).toLowerCase() === String(e.sha1).toLowerCase() && (x.policy || 'always') === (e.policy || 'always');
+      });
+      if (nothing) {
+        const now = (await this.instances.readState(id)) || st;
+        await this.instances.writeState(id, { ...now, workspace: { ...now.workspace, hash: ws.hash, localKeys, mergePick: {} } });
+        this.log.info(`Nada nuevo que publicar en ${id}: los ajustes sin marcar se quedan en este PC`);
+        return { ...inst, unchanged: true };
       }
       progress.setPhase('modrinth', 'Buscando mods en Modrinth…');
       if (lookup.length) {
@@ -1211,7 +1283,7 @@ class Admin extends EventEmitter {
         await fsp.writeFile(file, text);
       }
       const now = (await this.instances.readState(id)) || st;
-      const nws = { ...now.workspace, hash: ws.hash, baseVersion: version, base: Object.fromEntries(files.map((e) => [e.path, e])), localKeys };
+      const nws = { ...now.workspace, hash: ws.hash, baseVersion: version, base: Object.fromEntries(files.map((e) => [e.path, e])), localKeys, mergePick: {} };
       for (const rel of Object.keys(nws.known || {})) if (!scan.files.has(rel)) delete nws.known[rel];
       await this.instances.writeState(id, { ...now, workspace: nws, installedVersion: version, summary: r.instance, mc: meta.mc, loader: meta.loader });
       this.pub.set(id, r.instance);

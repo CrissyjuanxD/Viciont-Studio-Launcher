@@ -15,7 +15,7 @@ const FOLDERS = [
 const POLICY = {
   always: { label: 'Se reemplaza en cada actualización', short: 'Reemplazar', icon: 'refresh' },
   once: { label: 'Solo la primera vez (el jugador puede cambiarlo)', short: 'Solo 1.ª vez', icon: 'lock' },
-  merge: { label: 'Fusionar ajustes: el jugador solo recibe los que cambies tú', short: 'Fusionar', icon: 'layers' },
+  merge: { label: 'Fusionar ajustes: el jugador solo recibe los que confirmes al publicar', short: 'Fusionar', icon: 'layers' },
 };
 const PROTECT_LOADERS = ['fabric', 'quilt'];
 const BIN_RE = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
@@ -486,7 +486,7 @@ function renderEditor(root, id, app, route = {}) {
         <label class="field"><span class="field__label">Nombre <em>*</em></span><input class="input" data-m="name" maxlength="60" value="${esc(mt.name)}"></label>
         <label class="field"><span class="field__label">Resumen (una frase)</span><input class="input" data-m="summary" maxlength="180" value="${esc(mt.summary)}" placeholder="El hardcore más difícil de Viciont Studios"></label>
       </div>
-      <label class="field"><span class="field__label">Descripción</span><textarea class="input textarea" data-m="description" rows="5" maxlength="5000" placeholder="Explica de qué va la instancia. Usa **negrita** y deja una línea en blanco entre párrafos.">${esc(mt.description)}</textarea></label>
+      <label class="field"><span class="field__label">Descripción</span><textarea class="input textarea" data-m="description" rows="5" maxlength="5000" placeholder="Explica de qué va la instancia. Usa **negrita**, pega enlaces (https://…) o escribe [texto](https://…), y deja una línea en blanco entre párrafos.">${esc(mt.description)}</textarea><span class="field__hint">Admite **negrita** y enlaces: pega la dirección (https://…) o escribe [texto](https://…). Los jugadores los abren con un clic.</span></label>
       <div class="panel"><div class="panel__title"><span>Versión del juego</span></div>
         <div id="ed-vp" style="display:grid;gap:14px"></div>
         <div class="field__row" style="margin-top:12px"><button class="btn btn--sm" type="button" data-act="apply-version">${icon('check')}Usar esta versión</button><span class="field__hint">Si cambias de versión, revisa que tus mods sean compatibles.</span></div>
@@ -617,7 +617,7 @@ function renderEditor(root, id, app, route = {}) {
         <div class="chips-list" id="incl"></div>
         ${w.candidates?.length ? `<p class="field__hint" style="margin-top:12px">Estas carpetas están en tu PC pero <b>no</b> se publican (por ejemplo mundos o mapas de minimapas). Añádelas solo si quieres repartirlas:</p><div class="chips-list" id="cand" style="margin-top:8px"></div>` : ''}
       </div>
-      <p class="field__hint">Arrastra archivos aquí para añadirlos. <b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que cambies tú y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
+      <p class="field__hint">Arrastra archivos aquí para añadirlos. <b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que confirmes al publicar y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
     drawFiles(body);
     drawIncl(body);
     body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
@@ -691,9 +691,10 @@ function renderEditor(root, id, app, route = {}) {
           const name = f.title || f.path.split('/').pop();
           const src = f.source === 'modrinth' ? '<span class="src src--modrinth">Modrinth</span>' : '<span class="src src--upload">Propio</span>';
           const keys = w.merge?.[f.path];
+          const kept = w.mergeKept?.[f.path];
           return `<div class="frow ${f.state !== 'same' ? `frow--${f.state}` : ''}">
             <div class="frow__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon(g.ic)}</div>
-            <div class="frow__name"><b>${esc(name)}</b><small>${esc(f.path)}${f.versionName ? ` · ${esc(f.versionName)}` : ''}${keys ? ` · <a href="#" data-keys="${esc(f.path)}">${keys.length} ajuste(s) cambiado(s)</a>` : ''}</small></div>
+            <div class="frow__name"><b>${esc(name)}</b><small>${esc(f.path)}${f.versionName ? ` · ${esc(f.versionName)}` : ''}${keys ? ` · <a href="#" data-keys="${esc(f.path)}">${keys.length} ajuste(s) cambiado(s)</a>` : ''}${kept ? ` · <a href="#" data-keys="${esc(f.path)}">${kept.length} solo en tu PC</a>` : ''}</small></div>
             <span class="frow__badges">${stateBadge(f.state)}${src}</span>
             <span class="frow__size">${bytes(f.size || 0)}</span>
             <span class="field__row" style="gap:2px">
@@ -824,6 +825,12 @@ function renderEditor(root, id, app, route = {}) {
     draw();
   };
 
+  const refreshWs = async () => {
+    try { setWs(await call('admin:workspace', id)); } catch (er) { toastError(er); return; }
+    drawTab();
+    paintBar();
+  };
+
   const doSync = async () => {
     syncing = true;
     drawTab();
@@ -843,7 +850,7 @@ function renderEditor(root, id, app, route = {}) {
     const tb = e.target.closest('[data-tab]');
     if (tb) { tab = tb.dataset.tab; drawTab(); return; }
     const keysLink = e.target.closest('[data-keys]');
-    if (keysLink) { e.preventDefault(); keysModal(keysLink.dataset.keys, ws().merge?.[keysLink.dataset.keys] || []); return; }
+    if (keysLink) { e.preventDefault(); okeysModal(id, d, keysLink.dataset.keys, refreshWs); return; }
     const onlyBtn = e.target.closest('[data-only]');
     if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; drawTab(); return; }
     const fd = e.target.closest('[data-fdiff]');
@@ -886,7 +893,7 @@ function renderEditor(root, id, app, route = {}) {
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'back') app.go({ name: 'admin' });
-    if (act === 'changes') changesModal(id, d);
+    if (act === 'changes') changesModal(id, d, refreshWs);
     if (act === 'sync') doSync();
     if (act === 'pull') {
       try {
@@ -987,14 +994,115 @@ function renderEditor(root, id, app, route = {}) {
   return () => offs.forEach((f) => f());
 }
 
-function keysModal(file, keys) {
+const okind = (k) => (k.key.startsWith('key_') ? 'tecla' : k.key.startsWith('soundCategory_') ? 'volumen' : k.personal ? 'personal' : '');
+
+function okeyRow(file, k, on) {
+  const kind = okind(k);
+  const from = k.from == null ? 'no estaba' : k.from;
+  const long = from.length + k.to.length > 48;
+  return `<label class="okey check ${on ? 'is-on' : ''}">
+      <input type="checkbox" data-okey="${esc(k.key)}" data-ofile="${esc(file)}" ${on ? 'checked' : ''}>
+      <span class="okey__key"><b class="mono">${esc(k.key)}</b>${kind ? `<span class="tag">${kind}</span>` : ''}</span>
+      <span class="okey__vals mono" ${long ? `data-tip="${esc(`${from} → ${k.to}`)}"` : ''}><span class="okey__from ${k.from == null ? 'is-new' : ''}">${esc(from)}</span>${icon('arrowRight')}<span class="okey__to">${esc(k.to)}</span></span>
+      <span class="okey__state">${on ? 'Se sube' : 'No se sube'}</span>
+    </label>`;
+}
+
+function okeysHtml(file, pending = [], hidden = []) {
+  const keptList = hidden.length ? `<details class="okeys__kept"><summary>${hidden.length} ajuste(s) que no subiste en otra versión: siguen solo en tu PC</summary>
+      <p class="okeys__hint">Márcalos si ahora sí quieres que los reciban los jugadores.</p>
+      <div class="okeys__list">${hidden.map((k) => okeyRow(file, k, false)).join('')}</div></details>` : '';
+  if (!pending.length) return `<div class="okeys okeys--quiet" data-okeys="${esc(file)}"><div class="okeys__head"><div class="okeys__title">${icon('layers')}<span><b class="mono">${esc(file)}</b></span></div><span class="okeys__count" data-ocount></span></div>${keptList}</div>`;
+  return `<div class="okeys" data-okeys="${esc(file)}">
+      <div class="okeys__head">
+        <div class="okeys__title">${icon('layers')}<span>Ajustes cambiados en <b class="mono">${esc(file)}</b></span></div>
+        <span class="okeys__count" data-ocount></span>
+        <div class="field__row" style="gap:4px">
+          ${pending.length > 1 ? `<button class="btn btn--sm btn--ghost" type="button" data-oall>${icon('check')}<span>Marcar todos</span></button>` : ''}
+          <button class="btn btn--sm btn--ghost" type="button" data-odiff="${esc(file)}" data-tip="Ver las líneas que cambiaron">${icon('eye')}Líneas</button>
+        </div>
+      </div>
+      <p class="okeys__hint">Marca los cambios que quieres subir. Los que dejes sin marcar <b>no se suben</b>: se quedan solo en tu PC y a los jugadores no les cambia nada.</p>
+      <div class="okeys__list">${pending.map((k) => okeyRow(file, k, k.confirmed)).join('')}</div>
+      ${keptList}
+    </div>`;
+}
+
+function okeysAll(w) {
+  const files = [...new Set([...Object.keys(w.merge || {}), ...Object.keys(w.mergeKept || {})])].sort();
+  return files.map((f) => okeysHtml(f, w.merge?.[f] || [], w.mergeKept?.[f] || [])).join('');
+}
+
+function bindOkeys(box, id, onPick) {
+  const setRow = (row, on) => {
+    row.querySelector('input').checked = on;
+    row.classList.toggle('is-on', on);
+    row.querySelector('.okey__state').textContent = on ? 'Se sube' : 'No se sube';
+  };
+  const paint = (panel) => {
+    const main = [...panel.querySelectorAll(':scope > .okeys__list .okey')];
+    const extra = [...panel.querySelectorAll('.okeys__kept .okey')].filter((r) => r.querySelector('input').checked);
+    const on = main.filter((r) => r.querySelector('input').checked).length + extra.length;
+    const total = main.length + extra.length;
+    const count = panel.querySelector('[data-ocount]');
+    if (count) {
+      count.textContent = !total ? '' : !on ? 'No se sube ninguno' : on === total && total > 1 ? `Se suben los ${total}` : `Se sube${on > 1 ? 'n' : ''} ${on} de ${total}`;
+      count.classList.toggle('is-on', on > 0);
+    }
+    const all = panel.querySelector('[data-oall]');
+    if (all) {
+      const full = main.every((r) => r.querySelector('input').checked);
+      all.dataset.full = full ? '1' : '';
+      all.querySelector('span').textContent = full ? 'Desmarcar todos' : 'Marcar todos';
+    }
+  };
+  const save = async (file, keys, on) => {
+    try { await call('admin:mergePick', id, file, keys, on); onPick?.(); } catch (er) { toastError(er); }
+  };
+  box.querySelectorAll('.okeys').forEach(paint);
+  box.addEventListener('change', (e) => {
+    const cb = e.target.closest('input[data-okey]');
+    if (!cb) return;
+    setRow(cb.closest('.okey'), cb.checked);
+    paint(cb.closest('.okeys'));
+    save(cb.dataset.ofile, [cb.dataset.okey], cb.checked);
+  });
+  box.addEventListener('click', (e) => {
+    const all = e.target.closest('[data-oall]');
+    if (all) {
+      const panel = all.closest('.okeys');
+      const on = !all.dataset.full;
+      const rows = [...panel.querySelectorAll(':scope > .okeys__list .okey')];
+      rows.forEach((r) => setRow(r, on));
+      paint(panel);
+      save(panel.dataset.okeys, rows.map((r) => r.querySelector('input').dataset.okey), on);
+      return;
+    }
+    const od = e.target.closest('[data-odiff]');
+    if (od) diffModal(id, { path: od.dataset.odiff, state: 'modified' });
+  });
+}
+
+function okeysPicked(box) {
+  const out = {};
+  box.querySelectorAll('.okeys').forEach((p) => {
+    out[p.dataset.okeys] = [...p.querySelectorAll('input[data-okey]')].filter((c) => c.checked).map((c) => c.dataset.okey);
+  });
+  return out;
+}
+
+function okeysModal(id, d, file, onClose) {
+  const w = d.workspace || {};
+  let dirty = false;
   const m = modal({
     size: 'lg',
-    html: `<div class="modal__body"><h2 class="modal__title">Ajustes cambiados en ${esc(file)}</h2>
-      <p class="modal__text">Al publicar eliges cuáles se aplican a los jugadores. Los que no se apliquen se quedan solo en tu PC.</p>
-      <div class="keys-list" style="margin-top:14px">${keys.map((k) => `<div class="keys-row"><b class="mono">${esc(k.key)}</b><span class="mono muted">${esc(k.from ?? '(nuevo)')}</span>${icon('arrowRight')}<span class="mono">${esc(k.to)}</span>${k.personal ? '<span class="tag">personal</span>' : ''}</div>`).join('')}</div>
-      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
+    onClose: () => { if (dirty) onClose?.(); },
+    html: `<div class="modal__body"><h2 class="modal__title">Ajustes de ${esc(file)}</h2>
+      <p class="modal__text">Lo que cambió en tu PC respecto a la versión publicada (v${d.baseVersion}). Cada jugador conserva sus propios ajustes: solo recibe los que marques aquí.</p>
+      <div class="okeys-box">${okeysHtml(file, w.merge?.[file] || [], w.mergeKept?.[file] || [])}</div>
+      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Listo</button></div></div>`,
   });
+  bindOkeys(m.content, id, () => { dirty = true; });
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
@@ -1012,7 +1120,7 @@ function changesHtml(d, { compact = false } = {}) {
     if (f.state === 'modified') {
       if (f.policyOnly) detail = `solo cambió cómo se actualiza: ${POLICY[f.oldPolicy]?.short || f.oldPolicy} → ${POLICY[f.policy]?.short || f.policy}`;
       else if (f.oldVersionName && f.versionName && f.oldVersionName !== f.versionName) detail = `versión ${f.oldVersionName} → ${f.versionName}`;
-      else if (keys) detail = `${keys.length} ajuste(s) cambiado(s)`;
+      else if (keys) detail = `${keys.length} ajuste(s) cambiado(s): elige arriba cuáles se suben`;
     }
     const size = f.state === 'modified' && f.oldSize != null && f.oldSize !== f.size ? `<b>${bytes(f.oldSize)}</b> → ${bytes(f.size)}` : bytes(f.size || 0);
     const action = keys
@@ -1053,7 +1161,16 @@ function diffHtml(r) {
 function bindChanges(box, id, d) {
   box.addEventListener('click', async (e) => {
     const kb = e.target.closest('[data-chg-keys]');
-    if (kb) { keysModal(kb.dataset.chgKeys, d.workspace?.merge?.[kb.dataset.chgKeys] || []); return; }
+    if (kb) {
+      const panel = [...box.querySelectorAll('.okeys')].find((p) => p.dataset.okeys === kb.dataset.chgKeys);
+      if (panel) {
+        panel.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        panel.classList.remove('is-flash');
+        void panel.offsetWidth;
+        panel.classList.add('is-flash');
+      }
+      return;
+    }
     const b = e.target.closest('[data-diff]');
     if (!b) return;
     const card = b.closest('.chg');
@@ -1072,18 +1189,23 @@ function bindChanges(box, id, d) {
   });
 }
 
-function changesModal(id, d) {
+function changesModal(id, d, onChange) {
   const w = d.workspace || {};
   const ch = w.changes || { total: 0 };
   const metaN = d.baseVersion ? (d.metaChanges || []).length : 0;
+  const ok = okeysAll(w);
+  let dirty = false;
   const m = modal({
     size: 'xl',
+    onClose: () => { if (dirty) onChange?.(); },
     html: `<div class="modal__body"><h2 class="modal__title">Cambios sin publicar</h2>
       <p class="modal__text">Lo que cambia respecto a la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}: ${ch.total} archivo(s)${metaN ? ` y ${metaN} cambio(s) de textos o permisos` : ''}. Pulsa <b>Diferencias</b> para ver las líneas que cambiaron en una config.</p>
+      ${ok ? `<div class="okeys-box">${ok}</div>` : ''}
       ${changesHtml(d)}
       <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Cerrar</button></div></div>`,
   });
   bindChanges(m.content, id, d);
+  bindOkeys(m.content, id, () => { dirty = true; });
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
@@ -1279,31 +1401,27 @@ async function importMrpack(id, onDone) {
 async function publish(id, d, onDone) {
   const w = d.workspace || {};
   const ch = w.changes || { total: 0 };
-  const merge = Object.entries(w.merge || {});
   if (!ch.total && !d.dirtyMeta && d.baseVersion) { toast('No hay nada nuevo que publicar.', { kind: 'info' }); return; }
+  const ok = okeysAll(w);
+  let picked = false;
+  let answer;
+  const answered = new Promise((resolve) => { answer = resolve; });
   const m = modal({
     size: 'lg',
+    onClose: (r) => answer(r || null),
     html: `<div class="modal__body"><h2 class="modal__title">¿Publicar la versión ${(d.baseVersion || 0) + 1}?</h2>
       <p class="modal__text">${esc(d.meta.name)} · ${d.meta.visibility === 'private' ? `solo para ${d.meta.allow.length} nick(s)` : 'visible para todos'}. Los jugadores verán el botón <b>Actualizar</b> y solo se les descargará lo que cambió.</p>
       <div class="files__summary" style="margin-top:14px">${ch.total ? `${ch.added ? `<span class="state state--added">${ch.added} nuevo(s)</span>` : ''}${ch.modified ? `<span class="state state--modified">${ch.modified} modificado(s)</span>` : ''}${ch.removed ? `<span class="state state--removed">${ch.removed} se quitará(n)</span>` : ''}` : '<span>Sin cambios de archivos (solo textos, imágenes o permisos).</span>'}</div>
+      ${ok ? `<div class="okeys-box">${ok}</div>` : ''}
       ${changesHtml(d, { compact: true })}
-      ${merge.map(([file, keys]) => `<div class="panel" style="margin-top:14px"><div class="panel__title"><span>Ajustes de ${esc(file)} que reciben los jugadores</span></div>
-        <p class="field__hint" style="margin-bottom:10px">Cada jugador conserva el resto de sus ajustes. Los desmarcados se quedan solo en tu PC (los «personales» vienen desmarcados).</p>
-        <div class="keys-list">${keys.map((k) => `<label class="keys-row"><input type="checkbox" data-file="${esc(file)}" data-key="${esc(k.key)}" ${k.personal ? '' : 'checked'}><b class="mono">${esc(k.key)}</b><span class="mono muted">${esc(k.from ?? '(nuevo)')}</span>${icon('arrowRight')}<span class="mono">${esc(k.to)}</span>${k.personal ? '<span class="tag">personal</span>' : ''}</label>`).join('')}</div></div>`).join('')}
       <div class="modal__actions"><button class="btn btn--ghost" type="button" data-cancel>Cancelar</button><button class="btn btn--primary" type="button" data-go>${icon('upload')}Publicar</button></div></div>`,
   });
-  hydrateIcons(m.content);
   bindChanges(m.content, id, d);
-  const go = await new Promise((resolve) => {
-    m.content.querySelector('[data-cancel]').addEventListener('click', () => { m.close(); resolve(null); });
-    m.content.querySelector('[data-go]').addEventListener('click', () => {
-      const mergeKeys = {};
-      for (const [file] of merge) mergeKeys[file] = [...m.content.querySelectorAll(`[data-file="${CSS.escape(file)}"]`)].filter((c) => c.checked).map((c) => c.dataset.key);
-      m.close();
-      resolve({ mergeKeys });
-    });
-  });
-  if (!go) return;
+  bindOkeys(m.content, id, () => { picked = true; });
+  m.content.querySelector('[data-cancel]').addEventListener('click', () => m.close());
+  m.content.querySelector('[data-go]').addEventListener('click', () => m.close({ mergeKeys: okeysPicked(m.content) }));
+  const go = await answered;
+  if (!go) { if (picked) await onDone?.(); return; }
   const pm = modal({
     size: 'sm', locked: true,
     html: `<div class="modal__body"><h2 class="modal__title">Publicando…</h2>
@@ -1323,7 +1441,8 @@ async function publish(id, d, onDone) {
     const inst = await call('admin:publish', id, go);
     pm.setLocked(false);
     pm.close();
-    toast(`¡${inst?.name || 'Instancia'} publicada! (versión ${inst?.version}). Pruébala con «Copia de prueba».`, { kind: 'success', timeout: 7000 });
+    if (inst?.unchanged) toast('No había nada nuevo que publicar: los ajustes que no marcaste se quedan solo en tu PC.', { kind: 'info', timeout: 7000 });
+    else toast(`¡${inst?.name || 'Instancia'} publicada! (versión ${inst?.version}). Pruébala con «Copia de prueba».`, { kind: 'success', timeout: 7000 });
     await onDone?.();
   } catch (e) {
     pm.setLocked(false);

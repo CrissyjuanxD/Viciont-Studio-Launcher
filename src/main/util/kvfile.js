@@ -60,13 +60,12 @@ function merge3(playerText, baseText, newText) {
   return serialize(P);
 }
 
-function changedKeys(baseText, localText, ignore = []) {
+function changedKeys(baseText, localText) {
   const B = parse(baseText);
   const L = parse(localText);
-  const skip = new Set(ignore);
   const out = [];
   for (const e of L.entries) {
-    if (e.key == null || skip.has(e.key)) continue;
+    if (e.key == null) continue;
     const from = get(B, e.key);
     if (from === e.value) continue;
     out.push({ key: e.key, from: from ?? null, to: e.value, personal: isPersonal(e.key) });
