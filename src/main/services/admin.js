@@ -27,6 +27,7 @@ const PART = 48 * 1024 * 1024;
 const MIN_API = 3;
 const BATCH_API = 5;
 const SYNC_API = 7;
+const STORAGE_API = 9;
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
@@ -1561,6 +1562,7 @@ class Admin extends EventEmitter {
   }
 
   async storage({ fresh = false } = {}) {
+    if ((await this.serverVersion().catch(() => 0)) >= STORAGE_API && !this.can('storage')) return null;
     const r = await this.call(`/v1/admin/storage${fresh ? '?fresh=1' : ''}`, { timeout: 90000, ok: [404] });
     return r?.ok ? r : null;
   }

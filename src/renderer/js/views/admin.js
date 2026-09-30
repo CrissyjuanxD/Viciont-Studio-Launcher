@@ -185,7 +185,7 @@ function storageModal(initial, { reload, onChange }) {
           </div>
           <div class="stg-actions">${s.canClean && s.global
             ? `<button class="btn" type="button" data-logs="7">${icon('trash')}Borrar los de más de 7 días</button><button class="btn btn--danger" type="button" data-logs="0">Borrar todos</button>`
-            : '<span class="field__hint">Solo un administrador con acceso a todas las instancias y permiso de eliminar puede borrar registros.</span>'}</div>`
+            : `<span class="field__hint">${s.global ? 'No tienes permiso para borrar registros.' : 'Borrar registros solo lo puede hacer un administrador con acceso a todas las instancias.'}</span>`}</div>`
             : '<p class="field__hint">El servidor no tiene base de datos.</p>'}
         </section>
       </div>
