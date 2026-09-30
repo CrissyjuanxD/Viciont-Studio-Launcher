@@ -47,6 +47,7 @@ function start() {
   const prevVersion = settings.get().lastVersion;
   const justUpdated = app.isPackaged && ((Boolean(prevVersion) && prevVersion !== VERSION) || process.argv.includes('--updated'));
   if (prevVersion !== VERSION) settings.set({ lastVersion: VERSION });
+  if (settings.get().updateTried?.version === VERSION) settings.set({ updateTried: null });
   if (!settings.get().hardwareAcceleration) app.disableHardwareAcceleration();
   app.commandLine.appendSwitch('disable-features', 'HardwareMediaKeyHandling,MediaSessionService,SpareRendererForSitePerProcess');
 
@@ -295,8 +296,20 @@ function start() {
   accounts.on('change', (s) => send('accounts', s));
   accounts.on('track', (type, info) => track(type, info));
   let lastUpdateStatus = null;
+  const installOnStart = () => {
+    const s = updater.state;
+    if (quitting || !s.onStart || s.skipped || s.installing || !updater.canInstall()) return;
+    if (instances.busy() || instances.anyRunning() || admin.tasks.size) { updater.set({ skipped: true }); return; }
+    settings.set({ updateTried: { version: s.version, at: Date.now() } });
+    track('launcher.update', { message: `Instaló la actualización ${s.version} al abrir el launcher` });
+    log.info(`Instalando la actualización ${s.version} al abrir el launcher`);
+    quitting = true;
+    updater.set({ installing: true });
+    setTimeout(() => updater.install(), 1800);
+  };
   updater.on('state', (s) => {
     send('update', s);
+    if (s.status === 'ready' && s.onStart && !s.skipped && !s.installing) setImmediate(installOnStart);
     if (s.status === lastUpdateStatus) return;
     lastUpdateStatus = s.status;
     if (s.status === 'ready') track('launcher.update', { message: `Descargó la actualización ${s.version} del launcher` });
@@ -391,6 +404,7 @@ function start() {
     return true;
   });
   on('app:checkUpdates', () => updater.check());
+  on('app:skipStartUpdate', () => updater.skipStart());
   on('app:openDownload', () => shell.openExternal(`${backend.siteUrl().replace(/\/?$/, '/')}#launcher`).then(() => true));
   on('app:installUpdate', () => {
     if (!updater.canInstall()) throw new Error('No hay ninguna actualización lista para instalar.');
@@ -778,7 +792,7 @@ function start() {
     if (TEST_SCRIPT) {
       const run = require(path.resolve(TEST_SCRIPT));
       const ctx = {
-        win, log, instances, accounts, admin, settings,
+        win, log, instances, accounts, admin, settings, updater,
         exec: (js) => win.webContents.executeJavaScript(js, true),
         capture: async (file) => { const img = await win.webContents.capturePage(); fs.writeFileSync(file, img.toPNG()); },
         wait: (ms) => new Promise((r) => setTimeout(r, ms)),

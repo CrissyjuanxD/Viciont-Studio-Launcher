@@ -24,7 +24,7 @@ Descarga la última versión desde **[Releases](https://github.com/CrissyjuanxD/
 | Sistema | Archivo | Actualizaciones |
 | --- | --- | --- |
 | **Windows** 10 u 11 (64 bits) | `Viciont-Studios-Launcher-Setup-X.Y.Z.exe` | Automáticas |
-| **macOS** 13 Ventura o superior, chip Apple e Intel | `Viciont-Studios-Launcher-X.Y.Z-mac.dmg` | Te avisa y la descargas en un clic |
+| **macOS** 13 Ventura o superior, chip Apple e Intel | `Viciont-Studios-Launcher-X.Y.Z-mac.dmg` | Te avisa al abrirlo y la descargas en un clic |
 | **Linux** 64 bits | `.AppImage` (cualquier distribución), `.deb` (Ubuntu, Debian, Linux Mint) o `.rpm` (Fedora, openSUSE) | Automáticas con la AppImage; con `.deb` o `.rpm` te avisa |
 
 No necesitas tener Java instalado: el launcher descarga el Java oficial que necesita cada versión de Minecraft.
@@ -35,7 +35,7 @@ No necesitas tener Java instalado: el launcher descarga el Java oficial que nece
    - **Edge:** en Descargas, pulsa la flecha **⌄** junto a *Eliminar* → **Conservar** → **Mostrar más** → **Conservar de todas formas**.
    - **Chrome:** en Descargas, pulsa **Conservar** (o *Descargar archivo no seguro*).
 2. Ábrelo. Si Windows muestra *"Windows protegió tu PC"*, pulsa **Más información → Ejecutar de todas formas**.
-3. Elige dónde instalarlo y listo: se instala solo para tu usuario, sin pedir permisos de administrador. El launcher se **actualiza solo**: cuando hay una versión nueva, arriba a la izquierda sale el botón **Hay una versión disponible** (con el progreso de la descarga). Cuando termina, al pulsarlo el launcher se cierra, sale una ventanita con el progreso de la actualización y se vuelve a abrir solo, ya actualizado; si no, se actualiza solo la próxima vez que lo cierres. Cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
+3. Elige dónde instalarlo y listo: se instala solo para tu usuario, sin pedir permisos de administrador. El launcher se **actualiza solo**: al abrirlo, si hay una versión nueva, sale la pantalla **Actualizando** con el progreso de la descarga; al terminar se cierra un momento, sale una ventanita con el progreso de la instalación y se vuelve a abrir solo, ya actualizado. Si tienes prisa, pulsa **Seguir sin actualizar**: la descarga sigue y se instala al cerrar el launcher o al pulsar **Hay una versión disponible** (arriba a la izquierda). Cada versión nueva cambia su nombre, por ejemplo *Viciont Studios Launcher 1.0.1*.
 
 ### macOS
 

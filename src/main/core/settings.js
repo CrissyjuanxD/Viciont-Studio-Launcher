@@ -32,6 +32,7 @@ const DEFAULTS = {
   discordHidePrivate: false,
   lastInstance: null,
   lastVersion: null,
+  updateTried: null,
 };
 
 const clampInt = (v, min, max, def) => {
@@ -70,6 +71,8 @@ function sanitize(s) {
   out.dataDir = typeof s?.dataDir === 'string' && s.dataDir.length > 2 ? s.dataDir : null;
   out.lastInstance = typeof s?.lastInstance === 'string' ? s.lastInstance : null;
   out.lastVersion = typeof s?.lastVersion === 'string' && /^\d+\.\d+\.\d+$/.test(s.lastVersion) ? s.lastVersion : null;
+  const tried = s?.updateTried;
+  out.updateTried = tried && typeof tried.version === 'string' && /^\d+\.\d+\.\d+$/.test(tried.version) && Number.isFinite(tried.at) ? { version: tried.version, at: tried.at } : null;
   return out;
 }
 

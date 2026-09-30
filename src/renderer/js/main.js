@@ -1,6 +1,6 @@
 import { call, on, state, setInstances, instance } from './api.js';
 import { icon, hydrateIcons } from './icons.js';
-import { esc, instIcon, mediaUrl, isVideo } from './util.js';
+import { esc, instIcon, mediaUrl, isVideo, bytes, speed } from './util.js';
 import { initTooltips, toast, toastError, confirm, menu, anyModalOpen } from './ui.js';
 import { initIdle, setEffects, startGlitchBursts, glitchTransition, bootScreen, isIdle, onIdleChange } from './fx.js';
 import { createBackground } from './bg.js';
@@ -187,7 +187,8 @@ let tooltips = null;
 function paintUpdateButton() {
   const b = $('upd-btn');
   const u = state.update;
-  const shown = ['downloading', 'ready', 'available'].includes(u?.status);
+  const starting = u?.onStart && !u.manual && !u.skipped && ['downloading', 'ready'].includes(u.status);
+  const shown = !starting && ['downloading', 'ready', 'available'].includes(u?.status);
   b.hidden = !shown;
   if (!shown) return;
   const ready = u.status === 'ready' || u.status === 'available';
@@ -214,6 +215,71 @@ function updatingScreen(version) {
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add('on'));
   return () => { el.classList.remove('on'); setTimeout(() => el.remove(), 250); };
+}
+
+let startBox = null;
+let booted = false;
+
+function startUpdateScreen() {
+  const el = document.createElement('div');
+  el.className = 'updating updating--start';
+  el.innerHTML = `
+    <div class="updating__box">
+      <img class="updating__logo" src="img/emblem.webp" alt="">
+      <h2 class="updating__title">Actualizando</h2>
+      <p class="updating__ver mono" data-f="ver"></p>
+      <div class="updating__bar is-progress" data-f="bar"><span></span></div>
+      <p class="updating__stats mono" data-f="stats"></p>
+      <p class="updating__text" data-f="text"></p>
+      <button class="btn btn--sm btn--ghost" type="button" data-f="skip">Seguir sin actualizar</button>
+    </div>`;
+  document.body.appendChild(el);
+  requestAnimationFrame(() => el.classList.add('on'));
+  const f = (n) => el.querySelector(`[data-f="${n}"]`);
+  f('skip').addEventListener('click', async (e) => {
+    e.currentTarget.disabled = true;
+    try { await call('app:skipStartUpdate'); } catch (er) { toastError(er); }
+  });
+  return {
+    paint(u) {
+      const installing = u.installing || u.status === 'ready';
+      const pct = installing ? 100 : Math.max(0, Math.min(100, Math.round(u.percent || 0)));
+      f('ver').textContent = `Versión ${u.version || ''}`;
+      f('bar').classList.toggle('is-progress', !installing);
+      f('bar').style.setProperty('--p', `${pct}%`);
+      f('stats').textContent = installing ? '' : u.total ? `${bytes(u.transferred || 0)} de ${bytes(u.total)}${u.bps ? ` · ${speed(u.bps)}` : ''} · ${pct}%` : `${pct}%`;
+      f('text').textContent = installing
+        ? 'Instalando: el launcher se cerrará un momento y se volverá a abrir solo, ya actualizado.'
+        : 'Hay una versión nueva del launcher. Se está descargando y se instalará sola en cuanto termine.';
+      f('skip').hidden = installing;
+    },
+    close() { el.classList.remove('on'); setTimeout(() => el.remove(), 250); },
+  };
+}
+
+function paintStartUpdate() {
+  const u = state.update;
+  if (!u?.onStart) return;
+  if (u.manual) {
+    if (!booted || u.status !== 'available') return;
+    let asked = null;
+    try { asked = localStorage.getItem('vsl-upd-asked'); } catch {}
+    if (asked === u.version) return;
+    try { localStorage.setItem('vsl-upd-asked', u.version); } catch {}
+    onUpdateButton();
+    return;
+  }
+  const show = !u.skipped && (u.status === 'downloading' || u.status === 'ready');
+  if (show) {
+    startBox ||= startUpdateScreen();
+    startBox.paint(u);
+    return;
+  }
+  if (!startBox) return;
+  startBox.close();
+  startBox = null;
+  if (u.status === 'error') toast('No se pudo descargar la actualización del launcher. Se volverá a intentar la próxima vez que lo abras.', { kind: 'error', timeout: 8000 });
+  else if (u.skipped) toast('La actualización se sigue descargando: se instalará al cerrar el launcher o cuando pulses «Hay una versión disponible».', { timeout: 8000 });
 }
 
 async function onUpdateButton() {
@@ -298,7 +364,7 @@ on('task-done', (d) => {
   else if (!d.ok) toast(`No se pudo instalar ${name}: ${d.error}`, { kind: 'error', timeout: 9000, actions: [{ label: 'Reintentar', onClick: () => call('instances:install', d.id) }] });
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
-on('update', paintUpdateButton);
+on('update', () => { paintUpdateButton(); paintStartUpdate(); });
 on('admin-locked', () => {
   app.onAdminChange(false);
   toast('Se cerró el modo administrador: tu clave o tus permisos cambiaron.', { kind: 'error', timeout: 8000 });
@@ -393,6 +459,8 @@ async function boot() {
   if (!state.accounts.active) showLogin();
   else showShell();
   bootFx.done();
+  booted = true;
+  paintStartUpdate();
   if (state.info?.justUpdated) setTimeout(() => toast(`Launcher actualizado a la versión ${state.info.version}.`, { kind: 'success', timeout: 6000 }), 1200);
 }
 
