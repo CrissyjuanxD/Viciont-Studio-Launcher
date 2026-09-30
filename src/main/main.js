@@ -510,6 +510,7 @@ function start() {
     return accounts.remove(uuid, { forgetMicrosoft: opts?.forgetMicrosoft === true, forgetRecovery: opts?.forgetRecovery === true });
   });
   on('accounts:recoveryCode', (uuid) => accounts.recoveryCode(uuid));
+  on('accounts:newRecovery', (uuid) => accounts.newRecovery(uuid));
   on('accounts:refresh', async () => {
     const a = accounts.active();
     if (a?.type === 'microsoft') await accounts.refreshProfile(a);
@@ -778,6 +779,7 @@ function start() {
     accounts.load();
     admin.load();
     await backend.init();
+    accounts.enrollDevices().catch((e) => log.warn('No se pudo vincular este PC a tus nicks:', e.message));
     await instances.loadCache();
     instances.recoverStaged().catch((e) => log.warn('No se pudieron revisar los archivos ocultos:', e.message));
     updater.init();

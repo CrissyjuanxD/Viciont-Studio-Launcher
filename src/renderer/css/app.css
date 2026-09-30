@@ -452,6 +452,8 @@
 .kv dt { color: var(--muted); }
 .kv dd { color: var(--text); font-family: var(--font-mono); word-break: break-all; }
 .code-box { font: 400 0.95rem var(--font-mono); letter-spacing: 0.08em; padding: 12px 14px; border-radius: 11px; border: 1px dashed var(--line-strong); background: rgba(6, 1, 14, 0.8); word-break: break-all; user-select: all; }
+.rec-device { display: flex; align-items: flex-start; gap: 8px; color: #b9f6ca; }
+.rec-device .i { flex: none; width: 16px; height: 16px; margin-top: 1px; }
 .opt-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 10px; }
 .opt { display: grid; gap: 4px; padding: 12px 14px; border-radius: 14px; border: 1px solid var(--line); background: rgba(255, 255, 255, 0.03); color: var(--text-2); text-align: left; transition: 0.2s; }
 .opt b { color: #fff; font-size: 0.88rem; }

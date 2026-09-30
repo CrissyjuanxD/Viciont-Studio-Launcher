@@ -12,6 +12,11 @@ const DEFAULT_DATA_ROOT = TEST_HOME || (process.platform === 'linux'
   ? path.join(process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share'), APP_DIR_NAME)
   : CONFIG_ROOT);
 const DATA_MARKER = '.vsl-data';
+const DEVICE_DIR = TEST_HOME ? path.join(TEST_HOME, 'device') : process.platform === 'win32'
+  ? path.join(process.env.LOCALAPPDATA || path.join(app.getPath('home'), 'AppData', 'Local'), 'Viciont Studios')
+  : process.platform === 'darwin'
+    ? path.join(app.getPath('home'), 'Library', 'Application Support', 'Viciont Studios')
+    : path.join(process.env.XDG_DATA_HOME || path.join(app.getPath('home'), '.local', 'share'), 'viciont-studios');
 
 app.setPath('userData', path.join(CONFIG_ROOT, 'electron'));
 app.setPath('sessionData', path.join(CONFIG_ROOT, 'electron'));
@@ -50,4 +55,4 @@ function registerDataDir(root) {
 
 const configFile = (name) => path.join(CONFIG_ROOT, name);
 
-module.exports = { APP_DIR_NAME, CONFIG_ROOT, DEFAULT_DATA_ROOT, DATA_MARKER, dataDirs, ensureDataRoot, registerDataDir, configFile };
+module.exports = { APP_DIR_NAME, CONFIG_ROOT, DEFAULT_DATA_ROOT, DATA_MARKER, DEVICE_DIR, dataDirs, ensureDataRoot, registerDataDir, configFile };

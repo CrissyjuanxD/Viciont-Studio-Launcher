@@ -89,8 +89,11 @@ StopApp
 
 Quiet
 Write-Host '== Instalación nueva'
+$el = Join-Path $env:APPDATA 'ViciontStudioLauncher\electron'
+Write-Host "Antes de desinstalar: Local State $(Test-Path (Join-Path $el 'Local State')) · GPUCache $(Test-Path (Join-Path $el 'GPUCache')) · Code Cache $(Test-Path (Join-Path $el 'Code Cache'))"
 Start-Process $uninstaller -ArgumentList '/S' -Wait
 Start-Sleep 8
+Write-Host "Tras desinstalar conservando los datos: Local State $(Test-Path (Join-Path $el 'Local State')) · GPUCache $(Test-Path (Join-Path $el 'GPUCache')) · Code Cache $(Test-Path (Join-Path $el 'Code Cache')) · settings $(Test-Path (Join-Path $env:APPDATA 'ViciontStudioLauncher\settings.json'))"
 $p = Start-Process $Setup -PassThru
 $h = WaitTitle 'Instalación de Viciont Studios Launcher*'
 Start-Sleep 3

@@ -79,6 +79,19 @@ class Backend {
   }
 
   url(pathname) { return `${this.base()}${pathname}`; }
+
+  async version() {
+    const base = this.base();
+    if (!base) return 0;
+    if (this.ver?.base === base && Date.now() - this.ver.at < 10 * 60 * 1000) return this.ver.value;
+    try {
+      const h = await this.call('/v1/health', { timeout: 8000, retries: 0 });
+      this.ver = { base, at: Date.now(), value: Number(h?.version) || 0 };
+      return this.ver.value;
+    } catch {
+      return this.ver?.base === base ? this.ver.value : 0;
+    }
+  }
 }
 
 module.exports = { Backend, REMOTE_CONFIG, path };

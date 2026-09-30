@@ -5,8 +5,10 @@ const { readSecure, writeSecure } = require('../core/secure');
 const { configFile } = require('../core/paths');
 const microsoft = require('../auth/microsoft');
 const offline = require('../auth/offline');
+const device = require('../core/device');
 
 const FILE = configFile('accounts.dat');
+const DEVICE_API = 8;
 
 function publicAccount(a, activeUuid) {
   if (!a) return null;
@@ -20,6 +22,7 @@ function publicAccount(a, activeUuid) {
     needsLogin: Boolean(a.needsLogin),
     skin: skin ? { url: skin.url || null, hash: skin.hash || null, variant: String(skin.variant || skin.model || 'classic').toLowerCase() } : null,
     hasRecovery: Boolean(a.claimSecret),
+    device: Boolean(a.deviceAt),
   };
 }
 
@@ -96,8 +99,10 @@ class Accounts extends EventEmitter {
     if (this.data.active === uuid) this.data.active = this.data.list[0]?.uuid || null;
     this.meCache.delete(uuid);
     if (acc?.type === 'offline') {
-      if (forgetRecovery) delete this.data.vault[acc.name.toLowerCase()];
-      else this.rememberCode(acc, false);
+      if (forgetRecovery) {
+        delete this.data.vault[acc.name.toLowerCase()];
+        this.forgetDevice(acc.name).catch(() => {});
+      } else this.rememberCode(acc, false);
     }
     this.save();
     if (acc?.type === 'microsoft' && forgetMicrosoft) microsoft.clearWebSession().catch(() => {});
@@ -180,7 +185,9 @@ class Accounts extends EventEmitter {
     if (this.data.vault[nick.toLowerCase()]) return { ok: true, reason: 'mine', message: 'Este nick es tuyo en este PC: puedes entrar sin el código.' };
     if (this.backend.configured()) {
       try {
-        const r = await this.backend.call('/v1/auth/offline/check', { method: 'POST', json: { name: nick }, timeout: 10000 });
+        const dev = await this.devProof(nick);
+        const r = await this.backend.call('/v1/auth/offline/check', { method: 'POST', json: dev ? { name: nick, device: dev } : { name: nick }, timeout: 10000 });
+        if (r?.claimed && r.device) return { ok: true, reason: 'device', message: 'Este PC ya usaba este nick: puedes entrar sin el código.' };
         if (r?.claimed) return { ok: false, reason: 'claimed', message: 'Este nick ya está registrado. Si es tuyo, escribe tu código de recuperación (lo ves en Ajustes → Cuenta del PC donde lo creaste).' };
       } catch (e) {
         this.log.warn('No se pudo comprobar el nick en el servidor:', e.message);
@@ -222,29 +229,117 @@ class Accounts extends EventEmitter {
     this.save();
     this.clearSessionFails(acc.uuid);
     this.log.info(`Sesión no premium iniciada: ${nick}`);
-    this.track('auth.login', { uuid: acc.uuid, message: typed ? 'Entró con su nick no premium (código de recuperación)' : 'Entró con un nick no premium' });
+    this.track('auth.login', { uuid: acc.uuid, message: typed ? 'Entró con su nick no premium (código de recuperación)' : acc.backend?.token && !acc.claimSecret ? 'Entró con su nick no premium (el launcher reconoció su PC)' : 'Entró con un nick no premium' });
     return this.summary();
   }
 
+  async enrollDevices() {
+    if (!this.backend.configured() || (await this.backend.version()) < DEVICE_API) return 0;
+    let n = 0;
+    for (const acc of this.data.list) {
+      if (acc.type !== 'offline' || !acc.claimSecret || acc.deviceAt) continue;
+      try {
+        await this.offlineSession(acc);
+        this.upsert(acc);
+        n++;
+      } catch (e) {
+        this.log.warn(`No se pudo vincular este PC al nick ${acc.name}:`, e.message);
+      }
+    }
+    if (n) this.save();
+    return n;
+  }
+
+  async forgetDevice(name) {
+    const dev = await this.devProof(name);
+    if (dev) await this.backend.call('/v1/auth/offline/forget', { method: 'POST', json: { name, device: dev }, timeout: 10000, retries: 0 });
+  }
+
+  async newRecovery(uuid) {
+    const acc = this.find(uuid);
+    if (acc?.type !== 'offline') throw new Error('Solo las cuentas no premium tienen código de recuperación.');
+    const dev = await this.devProof(acc.name);
+    if (!dev) throw new Error('El servidor de Viciont Studios todavía no permite generar códigos nuevos. Prueba más tarde.');
+    const rotate = async () => this.backend.call('/v1/auth/offline/rotate', { method: 'POST', token: await this.session(acc), json: { name: acc.name, device: dev } });
+    let r;
+    try {
+      r = await rotate();
+    } catch (e) {
+      if (e.status === 401) {
+        this.invalidateSession(acc);
+        r = await rotate();
+      } else if (e.status === 403 && acc.claimSecret) {
+        await this.offlineSession(acc);
+        r = await rotate();
+      } else if (e.status === 403) {
+        throw new Error('Este PC todavía no está vinculado a tu nick. Cierra sesión y vuelve a entrar con tu código de recuperación.');
+      } else throw e;
+    }
+    acc.claimSecret = r.secret;
+    acc.deviceAt ||= Date.now();
+    this.rememberCode(acc, false);
+    this.upsert(acc);
+    this.save();
+    this.log.info(`Código de recuperación nuevo para ${acc.name}`);
+    return r.secret;
+  }
+
+  async devProof(name) {
+    if (!this.backend.configured() || (await this.backend.version()) < DEVICE_API) return null;
+    try {
+      return await device.proof(name);
+    } catch (e) {
+      this.log.warn('No se pudo preparar la llave de este PC:', e.message);
+      return null;
+    }
+  }
+
+  async deviceLogin(acc, dev) {
+    const r = await this.backend.call('/v1/auth/offline/login', { method: 'POST', json: { name: acc.name, device: dev } });
+    acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+    acc.deviceAt = Date.now();
+    return acc.backend.token;
+  }
+
   async offlineSession(acc, { forceNew = false } = {}) {
+    const dev = await this.devProof(acc.name);
+    let released = false;
     if (acc.claimSecret) {
       try {
-        const r = await this.backend.call('/v1/auth/offline/login', { method: 'POST', json: { name: acc.name, secret: acc.claimSecret } });
+        const r = await this.backend.call('/v1/auth/offline/login', { method: 'POST', json: dev ? { name: acc.name, secret: acc.claimSecret, device: dev } : { name: acc.name, secret: acc.claimSecret } });
         acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+        if (dev) acc.deviceAt = Date.now();
         this.rememberCode(acc);
         return acc.backend.token;
       } catch (e) {
         if (e.status === 404 && !forceNew) {
           delete acc.claimSecret;
+          released = true;
         } else if (e.status === 401 || e.status === 403) {
+          if (dev) {
+            const token = await this.deviceLogin(acc, dev).catch(() => null);
+            if (token) {
+              if (this.data.vault[acc.name.toLowerCase()]?.code === acc.claimSecret) delete this.data.vault[acc.name.toLowerCase()];
+              delete acc.claimSecret;
+              return token;
+            }
+          }
           throw Object.assign(new Error('El código de recuperación no es correcto para este nick.'), { code: 'EBADCODE' });
         } else if (e.status !== 404) throw e;
       }
     }
+    if (dev && !released) {
+      try {
+        return await this.deviceLogin(acc, dev);
+      } catch (e) {
+        if (e.status !== 401 && e.status !== 404) throw e;
+      }
+    }
     try {
-      const r = await this.backend.call('/v1/auth/offline/claim', { method: 'POST', json: { name: acc.name } });
+      const r = await this.backend.call('/v1/auth/offline/claim', { method: 'POST', json: dev ? { name: acc.name, device: dev } : { name: acc.name } });
       acc.claimSecret = r.secret;
       acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+      if (dev) acc.deviceAt = Date.now();
       this.rememberCode(acc);
       return acc.backend.token;
     } catch (e) {

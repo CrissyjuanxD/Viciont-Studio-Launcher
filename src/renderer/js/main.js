@@ -450,7 +450,7 @@ async function boot() {
       ok: 'Cerrar sesión', danger: true, icon: 'logout',
       extra: ms
         ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido: la próxima vez pedirá la contraseña)</label>'
-        : '<label class="check"><input type="checkbox" name="forget"> Olvidar también el código de este nick en este PC (recomendado si el PC es compartido: para volver a entrar necesitarás el código)</label>',
+        : '<label class="check"><input type="checkbox" name="forget"> Olvidar también este nick en este PC: se borra su código y el PC deja de reconocerlo (recomendado si el PC es compartido: para volver a entrar necesitarás el código)</label>',
     });
     if (!r?.value) return;
     try {

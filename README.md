@@ -67,6 +67,7 @@ No necesitas tener Java instalado: el launcher descarga el Java oficial que nece
 **Para los jugadores**
 - **Iniciar sesión** con una cuenta de Microsoft (premium) o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar un nick de una cuenta premium: lo comprueba en la misma base de datos de Mojang que usa NameMC.
 - Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC (cifrado), así que puedes cerrar sesión y volver a entrar sin escribirlo.
+- **Tu PC queda vinculado a tu nick**: aunque desinstales el launcher borrándolo todo y lo vuelvas a instalar, en ese mismo PC entras con tu nick sin el código. El launcher guarda una llave aleatoria de ese PC fuera de su carpeta de datos, y el servidor solo guarda un hash que no sirve desde otro PC. Si has entrado así, en **Ajustes → Cuenta** puedes generar un código nuevo para jugar en otro PC, y al cerrar sesión puedes marcar que el PC olvide el nick (recomendado en PCs compartidos).
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
@@ -135,7 +136,7 @@ La carpeta de datos se puede mover desde **Ajustes → Almacenamiento**.
 - **macOS:** arrastra la app de **Aplicaciones** a la Papelera. Si quieres borrarlo todo, borra también su carpeta de datos (arriba).
 - **Linux:** si usas la AppImage, borra el archivo; si instalaste el paquete, `sudo apt remove viciont-studios-launcher` o `sudo dnf remove viciont-studios-launcher`. Si quieres borrarlo todo, borra también sus carpetas (arriba).
 
-Las actualizaciones nunca borran datos.
+Las actualizaciones nunca borran datos. La llave que vincula tu PC a tu nick no premium (`%LOCALAPPDATA%\Viciont Studios` en Windows, `~/Library/Application Support/Viciont Studios` en macOS, `~/.local/share/viciont-studios` en Linux) se queda aunque lo borres todo, para que al reinstalar te reconozca; si quieres que ese PC olvide tu nick, cierra sesión marcando esa opción antes de desinstalar.
 
 ## Servidor
 

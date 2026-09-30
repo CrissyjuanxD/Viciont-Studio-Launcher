@@ -336,8 +336,12 @@ const PANES = {
         <div class="settings__section">
           <h3>Código de recuperación</h3>
           <p class="field__hint">Tu nick <b>${esc(active.name)}</b> queda reservado para ti en el launcher. Si juegas en otro PC, entra con tu nick y este código. <b>No se lo pases a nadie.</b></p>
+          ${active.device ? `<p class="field__hint rec-device">${icon('check')}<span>Este PC está vinculado a tu nick: aunque desinstales el launcher y lo vuelvas a instalar aquí, te reconocerá sin pedirte el código.</span></p>` : ''}
+          ${active.hasRecovery ? `
           <div class="code-box" id="rec-code">••••••••••••••••••••</div>
-          <div class="field__row"><button class="btn btn--sm" type="button" id="rec-show">${icon('eye')}Mostrar</button><button class="btn btn--sm btn--ghost" type="button" id="rec-copy">${icon('copy')}Copiar</button></div>
+          <div class="field__row"><button class="btn btn--sm" type="button" id="rec-show">${icon('eye')}Mostrar</button><button class="btn btn--sm btn--ghost" type="button" id="rec-copy">${icon('copy')}Copiar</button><button class="btn btn--sm btn--ghost" type="button" id="rec-new">${icon('refresh')}Generar uno nuevo</button></div>` : `
+          <p class="field__hint">Entraste porque el launcher reconoció este PC, así que aquí no tienes tu código. Si quieres jugar con este nick en otro PC, genera uno nuevo.</p>
+          <div class="field__row"><button class="btn btn--sm btn--primary" type="button" id="rec-new">${icon('refresh')}Generar código nuevo</button></div>`}
         </div>` : ''}
         ${active?.type === 'microsoft' ? `
         <div class="settings__section">
@@ -356,7 +360,7 @@ const PANES = {
           title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Su código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
           extra: ms
             ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido)</label>'
-            : '<label class="check"><input type="checkbox" name="forget"> Olvidar también el código de este nick en este PC (recomendado si el PC es compartido)</label>',
+            : '<label class="check"><input type="checkbox" name="forget"> Olvidar también este nick en este PC: se borra su código y el PC deja de reconocerlo (recomendado si el PC es compartido)</label>',
         });
         if (!r?.value) return;
         state.accounts = await call('accounts:logout', b.dataset.out, ms ? { forgetMicrosoft: Boolean(r.inputs?.forget) } : { forgetRecovery: Boolean(r.inputs?.forget) });
@@ -391,6 +395,22 @@ const PANES = {
           if (c) { await call('app:copy', c); toast('Código copiado.', { kind: 'success' }); }
         });
       }
+      pane.querySelector('#rec-new')?.addEventListener('click', async (e) => {
+        const ok = await confirm({
+          title: '¿Generar un código nuevo?',
+          text: `Tendrás un código de recuperación nuevo para ${active.name}. El anterior dejará de funcionar en cualquier PC, y este PC te seguirá reconociendo.`,
+          ok: 'Generar código', icon: 'refresh',
+        });
+        if (!ok) return;
+        try {
+          const code = await busy(e.currentTarget, () => call('accounts:newRecovery', active.uuid));
+          state.accounts = await call('accounts:get');
+          draw();
+          const box = pane.querySelector('#rec-code');
+          if (box) box.textContent = code;
+          toast('Código nuevo creado. Guárdalo en un lugar seguro y no se lo pases a nadie.', { kind: 'success', timeout: 8000 });
+        } catch (er) { toastError(er); }
+      });
       pane.querySelector('#namemc')?.addEventListener('click', () => call('app:openExternal', `https://namemc.com/profile/${encodeURIComponent(active.name)}`));
       pane.querySelector('#refresh-prof')?.addEventListener('click', async (e) => {
         try { state.accounts = await busy(e.currentTarget, () => call('accounts:refresh')); app.onAccountChange(); toast('Perfil actualizado.', { kind: 'success' }); } catch (er) { toastError(er); }
