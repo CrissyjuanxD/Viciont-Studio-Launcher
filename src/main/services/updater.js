@@ -5,6 +5,10 @@ const { app } = require('electron');
 
 const MANUAL = process.platform === 'darwin' || (process.platform === 'linux' && !process.env.APPIMAGE);
 const RETRY_MS = 30 * 60 * 1000;
+const CHECK_MS = 5 * 60 * 1000;
+const FOCUS_MS = 2 * 60 * 1000;
+const NOT_READY_MS = 90 * 1000;
+const NOT_READY = new Set(['ERR_UPDATER_CHANNEL_FILE_NOT_FOUND', 'ERR_UPDATER_ASSET_NOT_FOUND', 'ERR_UPDATER_LATEST_VERSION_NOT_FOUND', 'ERR_UPDATER_NO_PUBLISHED_VERSIONS']);
 
 class Updater extends EventEmitter {
   constructor({ log, settings }) {
@@ -39,13 +43,42 @@ class Updater extends EventEmitter {
     au.on('update-not-available', () => { this.firstCheck = false; this.set({ status: 'latest' }); });
     au.on('download-progress', (p) => this.set({ status: 'downloading', percent: Math.round(p.percent || 0), transferred: p.transferred || 0, total: p.total || 0, bps: p.bytesPerSecond || 0 }));
     au.on('update-downloaded', (i) => this.set({ status: 'ready', version: i.version, percent: 100 }));
-    au.on('error', (e) => { this.firstCheck = false; this.set({ status: 'error', error: String(e?.message || e).split(/\r?\n/)[0].slice(0, 200) }); });
-    if (this.settings.get().autoUpdate) {
+    au.on('error', (e) => this.failed(e));
+    this.auto = this.settings.get().autoUpdate;
+    this.settings.on('change', (s) => {
+      if (s.autoUpdate === this.auto) return;
+      this.auto = s.autoUpdate;
+      this.schedule();
+    });
+    this.schedule();
+    if (this.auto) {
       this.firstCheck = true;
       this.check();
-      this.timer = setInterval(() => this.check(), 6 * 60 * 60 * 1000);
-      this.timer.unref?.();
     }
+  }
+
+  schedule() {
+    clearInterval(this.timer);
+    this.timer = null;
+    if (!this.au || !this.auto) return;
+    this.timer = setInterval(() => this.check({ auto: true }), CHECK_MS);
+    this.timer.unref?.();
+  }
+
+  checkSoon() {
+    if (this.auto && Date.now() - (this.lastCheck || 0) > FOCUS_MS) this.check({ auto: true });
+  }
+
+  failed(e) {
+    this.firstCheck = false;
+    if (NOT_READY.has(e?.code)) {
+      if (this.state.status === 'checking') this.set({ status: 'latest' });
+      clearTimeout(this.retry);
+      this.retry = setTimeout(() => this.check({ auto: true }), NOT_READY_MS);
+      this.retry.unref?.();
+      return;
+    }
+    this.set({ status: 'error', error: String(e?.message || e).split(/\r?\n/)[0].slice(0, 200) });
   }
 
   startAllowed(version) {
@@ -58,10 +91,12 @@ class Updater extends EventEmitter {
     this.emit('state', this.state);
   }
 
-  async check() {
+  async check({ auto = false } = {}) {
     if (!this.au) return { ...this.state, status: app.isPackaged ? 'unavailable' : 'dev' };
     if (['downloading', 'ready', 'available'].includes(this.state.status)) return this.state;
-    try { await this.au.checkForUpdates(); } catch (e) { this.firstCheck = false; this.set({ status: 'error', error: e.message }); }
+    if (auto && this.canAutoCheck?.() === false) return this.state;
+    this.lastCheck = Date.now();
+    try { await this.au.checkForUpdates(); } catch (e) { this.failed(e); }
     return this.state;
   }
 

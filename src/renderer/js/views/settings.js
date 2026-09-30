@@ -212,7 +212,7 @@ const PANES = {
       <div class="settings__section">
         <h3>Actualizaciones del launcher</h3>
         <label class="switch"><input type="checkbox" id="autoupd" ${s.autoUpdate ? 'checked' : ''}> Buscar e instalar actualizaciones automáticamente</label>
-        <p class="field__hint">${state.update?.manual ? 'Al abrir el launcher te avisa si hay una versión nueva para que la descargues desde la web.' : 'Al abrir el launcher, si hay una versión nueva, se descarga y se instala sola: se cierra un momento y se vuelve a abrir ya actualizado.'}</p>
+        <p class="field__hint">${state.update?.manual ? 'Al abrir el launcher, y cada pocos minutos mientras está abierto, te avisa si hay una versión nueva para que la descargues desde la web.' : 'Al abrir el launcher, si hay una versión nueva, se descarga y se instala sola: se cierra un momento y se vuelve a abrir ya actualizado. Si ya lo tienes abierto, lo comprueba cada pocos minutos, la descarga y te avisa arriba para que actualices cuando quieras.'}</p>
         <div class="field__row"><button class="btn btn--sm" type="button" id="check-upd">${icon('refresh')}Buscar ahora</button><span class="field__hint" id="upd-state"></span></div>
       </div>`;
     pane.querySelectorAll('[data-k]').forEach((b) => b.addEventListener('click', async () => {

@@ -67,6 +67,7 @@ function start() {
   const media = new Media({ getDirs, backend, log });
   const admin = new Admin({ getDirs, backend, accounts, instances, log });
   const updater = new Updater({ log, settings });
+  updater.canAutoCheck = () => !instances.anyRunning() && !instances.busy();
   const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
   const track = (type, info) => { try { telemetry.track(type, info); } catch {} };
   const instName = (id) => `${instances.remote.get(baseId(id))?.name || baseId(id)}${isTestId(id) ? ' (copia de prueba)' : ''}`;
@@ -177,7 +178,7 @@ function start() {
       if (!quitting && instances.anyRunning()) ensureTray('El juego sigue abierto');
     });
     win.on('session-end', () => { quitting = true; instances.cancelAll(); });
-    win.on('focus', () => send('focus', true));
+    win.on('focus', () => { send('focus', true); updater.checkSoon(); });
     win.on('blur', () => send('focus', false));
     win.on('minimize', () => send('visibility', 'minimized'));
     win.on('restore', () => send('visibility', 'visible'));

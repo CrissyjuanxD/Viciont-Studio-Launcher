@@ -219,6 +219,20 @@ function updatingScreen(version) {
 
 let startBox = null;
 let booted = false;
+let notified = null;
+
+function notifyUpdate() {
+  const u = state.update;
+  if (!booted || !u?.version || notified === u.version || (u.onStart && !u.skipped)) return;
+  const ready = !u.manual && u.status === 'ready';
+  const web = u.manual && u.status === 'available' && !u.onStart;
+  if (!ready && !web) return;
+  notified = u.version;
+  toast(ready
+    ? `La versión ${u.version} del launcher ya está descargada. Pulsa «Hay una versión disponible», arriba a la izquierda, para actualizar.`
+    : `Hay una versión nueva del launcher (${u.version}). Pulsa «Hay una versión disponible», arriba a la izquierda, para descargarla.`,
+  { kind: 'success', timeout: 12000, actions: [{ label: ready ? 'Actualizar' : 'Ver', onClick: () => onUpdateButton() }] });
+}
 
 function startUpdateScreen() {
   const el = document.createElement('div');
@@ -364,7 +378,7 @@ on('task-done', (d) => {
   else if (!d.ok) toast(`No se pudo instalar ${name}: ${d.error}`, { kind: 'error', timeout: 9000, actions: [{ label: 'Reintentar', onClick: () => call('instances:install', d.id) }] });
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
-on('update', () => { paintUpdateButton(); paintStartUpdate(); });
+on('update', () => { paintUpdateButton(); paintStartUpdate(); notifyUpdate(); });
 on('admin-sync-revoked', (list) => {
   for (const x of list || []) toast(`${x.by || 'Viciont Studios'} revocó desde el panel tu sincronización de «${x.name}». Tu carpeta vuelve a ser una instancia normal y se actualizará como la de cualquier jugador.`, { kind: 'error', timeout: 12000 });
 });
