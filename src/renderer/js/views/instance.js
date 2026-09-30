@@ -172,6 +172,11 @@ export function render(root, route, app) {
   const offInst = on(`instance:${id}`, (d) => {
     const prev = inst;
     inst = d;
+    if (Boolean(prev.workspace) !== Boolean(d.workspace)) {
+      lastStatus = d.status;
+      renderAll();
+      return;
+    }
     if (d.status !== lastStatus) {
       lastStatus = d.status;
       if (prev.installedVersion !== d.installedVersion || prev.available !== d.available || prev.version !== d.version) renderAll();
@@ -190,6 +195,14 @@ export function render(root, route, app) {
       burst(b);
       try { await call('instances:install', id); } catch (err) { toastError(err); }
     } else if (act === 'play') {
+      if (inst.workspace) {
+        const ok = await confirm({
+          title: 'Instancia sincronizada con tu carpeta',
+          text: 'Estás a punto de jugar con tu carpeta de trabajo. Todo lo que cambies durante la partida (mods, configuraciones o cualquier otro archivo de la instancia) quedará como cambios sin publicar y llegará a los jugadores cuando publiques la próxima versión desde Administración. Si solo quieres jugar sin modificarla, usa una «Copia de prueba».',
+          ok: 'Jugar de todas formas', icon: 'refresh',
+        });
+        if (!ok) return;
+      }
       burst(b);
       try {
         await busy(b, () => call('instances:play', id), 'Iniciando…');

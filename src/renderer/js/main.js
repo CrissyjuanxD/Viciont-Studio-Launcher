@@ -365,6 +365,9 @@ on('task-done', (d) => {
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
 on('update', () => { paintUpdateButton(); paintStartUpdate(); });
+on('admin-sync-revoked', (list) => {
+  for (const x of list || []) toast(`${x.by || 'Viciont Studios'} revocó desde el panel tu sincronización de «${x.name}». Tu carpeta vuelve a ser una instancia normal y se actualizará como la de cualquier jugador.`, { kind: 'error', timeout: 12000 });
+});
 on('admin-locked', () => {
   app.onAdminChange(false);
   toast('Se cerró el modo administrador: tu clave o tus permisos cambiaron.', { kind: 'error', timeout: 8000 });

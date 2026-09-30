@@ -617,6 +617,12 @@
 .editor__tab .count--hot { background: rgba(255, 200, 80, 0.2); color: #ffe08a; }
 .switch.is-disabled { opacity: 0.55; cursor: not-allowed; }
 .banner-note .btn { margin-left: auto; }
+.banner-note--sync .btn .i { color: inherit; width: 16px; height: 16px; }
+.banner-note--sync { border-color: rgba(168, 85, 247, 0.45); background: linear-gradient(90deg, rgba(168, 85, 247, 0.16), rgba(12, 4, 22, 0.75) 60%); }
+.banner-note--sync > .i { color: #c4b5fd; flex: none; }
+.banner-note--sync b { color: #fff; }
+.banner-note--sync small { display: block; margin-top: 3px; font-size: 0.72rem; color: var(--muted); word-break: break-all; }
+.banner-note--sync .btn { flex: none; }
 .rail-inst__tag { position: absolute; left: -4px; bottom: -4px; padding: 1px 4px; border-radius: 5px; border: 2px solid #0a0414; background: #38bdf8; color: #06020c; font: 700 0.55rem/1.2 var(--font-ui); letter-spacing: 0.06em; }
 .tag--test { color: #bae6fd; }
 

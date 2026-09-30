@@ -581,21 +581,25 @@ function renderEditor(root, id, app, route = {}) {
     const w = ws();
     if (!w.synced) {
       const p = state.progress.get(id);
+      const needPerm = Boolean(d.baseVersion) && (d.apiVersion || 0) >= 7 && !can('sync');
       body.innerHTML = `
         <div class="panel sync-panel">
           <div class="sync-panel__icon">${icon('refresh')}</div>
           <div>
             <h3 class="title-md">Sincroniza esta instancia con tu PC</h3>
-            <p class="field__hint" style="margin-top:6px">Se ${d.baseVersion ? `descarga la versión publicada (v${d.baseVersion})` : 'crea la carpeta'} en tu PC. Desde ahí la cambias como quieras —desde aquí, desde el ${fileManager(state.info?.platform)} o jugando— y al publicar solo se sube lo que cambió. A los jugadores solo se les actualizan esos archivos.</p>
+            <p class="field__hint" style="margin-top:6px">Se ${d.baseVersion ? `descarga la versión publicada (v${d.baseVersion})` : 'crea la carpeta'} en tu PC. Desde ahí la cambias como quieras —desde aquí, desde el ${fileManager(state.info?.platform)} o jugando— y al publicar solo se sube lo que cambió. A los jugadores solo se les actualizan esos archivos.${d.baseVersion && (d.apiVersion || 0) >= 7 ? ' La sincronización queda registrada en el panel de Viciont Studios.' : ''}</p>
+            ${d.sync?.revokedAt ? `<p class="inst__warn" style="margin-top:10px">${icon('alert')}${esc(d.sync.revokedBy || 'Viciont Studios')} revocó ${esc(timeAgo(d.sync.revokedAt))} tu sincronización de esta instancia desde el panel.</p>` : ''}
+            ${needPerm ? `<p class="inst__warn" style="margin-top:10px">${icon('lock')}Para sincronizarla necesitas el permiso «Sincronizar con su carpeta». Pídeselo a quien administra el panel web de Viciont Studios.</p>` : ''}
             ${d.legacy ? `<p class="inst__warn" style="margin-top:10px">${icon('alert')}Tienes cambios de una versión anterior del launcher: al sincronizar se pasarán a tu carpeta.</p>` : ''}
             ${w.error ? `<div class="form-error" style="margin-top:10px">${esc(w.error)}</div>` : ''}
-            <div class="field__row" style="margin-top:14px"><button class="btn btn--primary" type="button" data-act="sync" ${syncing ? 'disabled' : ''}>${syncing ? '<span class="spin"></span>' : icon('download')}${syncing ? esc(p?.label || 'Sincronizando…') : 'Sincronizar con mi PC'}</button></div>
+            <div class="field__row" style="margin-top:14px"><button class="btn btn--primary" type="button" data-act="sync" ${syncing || needPerm ? 'disabled' : ''}>${syncing ? '<span class="spin"></span>' : icon('download')}${syncing ? esc(p?.label || 'Sincronizando…') : 'Sincronizar con mi PC'}</button></div>
           </div>
         </div>`;
       return;
     }
     const ch = w.changes || { total: 0 };
     body.innerHTML = `
+      <div class="banner-note banner-note--sync">${icon('refresh')}<span><b>Sincronizada con tu carpeta.</b> Todo lo que cambies en ella —desde aquí, desde el ${fileManager(state.info?.platform)} o jugando— queda como cambios sin publicar.${w.dir ? `<small class="mono">${esc(w.dir)}</small>` : ''}</span>${d.baseVersion ? `<button class="btn btn--sm" type="button" data-act="unsync">${icon('eyeOff')}Dejar de sincronizar</button>` : ''}</div>
       ${w.behind ? `<div class="banner-note">${icon('alert')}<span>Otro administrador publicó la versión ${w.remoteVersion}. Tráela antes de publicar: lo que hayas cambiado tú se respeta.</span><button class="btn btn--sm btn--primary" type="button" data-act="pull">${icon('download')}Traer cambios</button></div>` : ''}
       <div class="files" id="files">
         <div class="files__toolbar">
@@ -895,6 +899,16 @@ function renderEditor(root, id, app, route = {}) {
     if (act === 'back') app.go({ name: 'admin' });
     if (act === 'changes') changesModal(id, d, refreshWs);
     if (act === 'sync') doSync();
+    if (act === 'unsync') {
+      const pending = ws().changes?.total || 0;
+      const ok = await confirm({
+        title: '¿Dejar de sincronizar esta instancia?',
+        text: `Tu carpeta dejará de ser la carpeta de trabajo de ${d.meta.name} y pasará a ser una instancia normal, que se actualiza sola como la de cualquier jugador.${pending ? ` Tienes ${pending} cambio(s) sin publicar: se perderán en la próxima actualización.` : ''} Podrás volver a sincronizarla cuando quieras${(d.apiVersion || 0) >= 7 ? ' si tienes el permiso «Sincronizar con su carpeta»' : ''}.`,
+        ok: 'Dejar de sincronizar', danger: true, icon: 'eyeOff',
+      });
+      if (!ok) return;
+      try { await busy(b, () => call('admin:unsync', id)); toast('Has dejado de sincronizar la instancia.', { kind: 'success' }); await reload(); } catch (er) { toastError(er); }
+    }
     if (act === 'pull') {
       try {
         const r = await busy(b, () => call('admin:pull', id));
@@ -958,11 +972,6 @@ function renderEditor(root, id, app, route = {}) {
           await reload();
         } }] : []),
         ...(ws().synced ? [{ label: 'Abrir mi carpeta', icon: 'folder', onClick: () => call('admin:openFolder', id).catch(toastError) }] : []),
-        ...(ws().synced && d.baseVersion ? [{ label: 'Dejar de sincronizar', icon: 'eyeOff', onClick: async () => {
-          const ok = await confirm({ title: '¿Dejar de sincronizar?', text: 'La carpeta se queda como una instancia normal: se actualizará sola como la de cualquier jugador y perderá lo que no hayas publicado.', ok: 'Dejar de sincronizar', danger: true, icon: 'eyeOff' });
-          if (!ok) return;
-          try { await call('admin:unsync', id); await reload(); } catch (er) { toastError(er); }
-        } }] : []),
         ...(d.baseVersion && can('delete') ? ['-', { label: 'Eliminar del servidor', icon: 'trash', danger: true, onClick: async () => {
           const ok = await confirm({ title: `¿Eliminar ${d.meta.name}?`, text: 'Desaparecerá para todos los jugadores y se borrarán sus archivos del servidor. Tu carpeta se queda en este PC. No se puede deshacer.', ok: 'Eliminar', danger: true, icon: 'trash' });
           if (!ok) return;
@@ -991,6 +1000,7 @@ function renderEditor(root, id, app, route = {}) {
     root.querySelector('[data-back]').addEventListener('click', () => app.go({ name: 'admin' }));
   });
   root.innerHTML = '<div class="page"><div class="empty"><span class="spin"></span><p>Abriendo…</p></div></div>';
+  offs.push(on('admin-sync-revoked', (list) => { if (d && list.some((x) => x.id === id)) reload().catch(() => {}); }));
   return () => offs.forEach((f) => f());
 }
 
@@ -1448,6 +1458,7 @@ async function publish(id, d, onDone) {
     pm.setLocked(false);
     pm.close();
     toastError(e, 'No se pudo publicar: ');
+    if (e.code === 'EREVOKED') await onDone?.();
   } finally { off(); }
 }
 

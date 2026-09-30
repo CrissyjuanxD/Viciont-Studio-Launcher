@@ -293,6 +293,7 @@ function start() {
   });
   admin.on('progress', (p) => send('admin-progress', p));
   admin.on('locked', () => send('admin-locked', true));
+  admin.on('sync-revoked', (list) => send('admin-sync-revoked', list));
   accounts.on('change', (s) => send('accounts', s));
   accounts.on('track', (type, info) => track(type, info));
   let lastUpdateStatus = null;

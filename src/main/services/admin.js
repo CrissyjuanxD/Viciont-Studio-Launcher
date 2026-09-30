@@ -26,6 +26,7 @@ const SINGLE_MAX = 64 * 1024 * 1024;
 const PART = 48 * 1024 * 1024;
 const MIN_API = 3;
 const BATCH_API = 5;
+const SYNC_API = 7;
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
@@ -214,7 +215,31 @@ class Admin extends EventEmitter {
     const r = await this.request(acc, key, '/v1/admin/ping', { timeout: 12000, retries: 0 });
     const s = { key, nick: r.nick, perms: Array.isArray(r.perms) ? r.perms : [], scope: r.scope };
     this.sessions.set(acc.uuid, s);
+    this.applySyncs(r.syncs).catch((e) => this.log.warn('No se pudieron revisar las sincronizaciones:', e.message));
     return s;
+  }
+
+  async applySyncs(list) {
+    const revoked = [];
+    for (const s of Array.isArray(list) ? list : []) {
+      if (!s?.revokedAt || !ID_RE.test(String(s.instance || ''))) continue;
+      const st = await this.instances.readState(s.instance).catch(() => null);
+      if (!st?.workspace?.baseVersion) continue;
+      await this.dropWs(s.instance);
+      revoked.push({ id: s.instance, name: st.summary?.name || s.instance, by: s.revokedBy || null });
+      this.log.warn(`Sincronización revocada desde el panel: ${s.instance}${s.revokedBy ? ` (por ${s.revokedBy})` : ''}`);
+    }
+    if (revoked.length) this.emit('sync-revoked', revoked);
+    return revoked;
+  }
+
+  async dropWs(id) {
+    const st = await this.instances.readState(id);
+    if (!st?.workspace) return false;
+    const { workspace, ...rest } = st;
+    await this.instances.writeState(id, { ...rest, installedVersion: workspace.baseVersion });
+    this.instances.emitChange(id);
+    return true;
   }
 
   async unlock(key, remember) {
@@ -407,6 +432,7 @@ class Admin extends EventEmitter {
       const r = await this.call('/v1/admin/instances');
       out.published = r.instances || [];
       for (const p of out.published) this.pub.set(p.id, p.version ? p : null);
+      await this.applySyncs(r.syncs).catch(() => []);
     } catch (e) {
       out.error = e.message;
     }
@@ -465,7 +491,8 @@ class Admin extends EventEmitter {
       delete d.files;
       await this.persistMeta(d, inst);
     }
-    return this.view(id, d, inst);
+    if (pub?.sync?.revokedAt) await this.applySyncs([pub.sync]).catch(() => []);
+    return { ...(await this.view(id, d, inst)), sync: pub?.sync || null };
   }
 
   async discard(id) {
@@ -701,7 +728,14 @@ class Admin extends EventEmitter {
     let version = 0;
     if (inst?.version) {
       const pub = await this.fetchPublished(id);
-      await this.instances.install(id);
+      const register = (await this.serverVersion()) >= SYNC_API;
+      if (register) await this.call(`/v1/admin/instances/${id}/sync`, { method: 'POST', json: {} });
+      try {
+        await this.instances.install(id);
+      } catch (e) {
+        if (register) await this.call(`/v1/admin/instances/${id}/sync`, { method: 'DELETE' }).catch(() => {});
+        throw e;
+      }
       version = pub.manifest?.version || inst.version;
       base = Object.fromEntries((pub.manifest?.files || []).map((f) => [f.path, { ...f }]));
     } else {
@@ -1169,6 +1203,15 @@ class Admin extends EventEmitter {
     if ((inst?.version || 0) !== (ws.baseVersion || 0)) {
       throw err(`Hay una versión más nueva publicada (v${inst?.version}). Pulsa "Traer cambios" antes de publicar.`, 'EBEHIND');
     }
+    if (inst?.version && (await this.serverVersion()) >= SYNC_API) {
+      const pub = await this.fetchPublished(id);
+      if (pub?.sync?.revokedAt) {
+        await this.applySyncs([pub.sync]);
+        throw err(`${pub.sync.revokedBy || 'Viciont Studios'} revocó desde el panel tu sincronización de esta instancia: tu carpeta vuelve a ser una instancia normal y ya no puedes publicar desde ella.`, 'EREVOKED');
+      }
+      const creator = String(pub?.instance?.createdBy || '').toLowerCase() === String(this.current()?.nick || '').toLowerCase();
+      if (!pub?.sync && !creator && !this.can('sync')) throw err('Para publicar versiones de esta instancia necesitas el permiso «Sincronizar con su carpeta». Pídeselo a quien administra el panel web.', 'ENEEDSYNC');
+    }
     const key = `publish:${id}`;
     if (this.tasks.has(key)) throw err('Ya se está publicando esta instancia.');
     const progress = this.startProgress(key, 'Comprobando cambios…');
@@ -1275,6 +1318,13 @@ class Admin extends EventEmitter {
       const r = await this.call(`/v1/admin/instances/${id}/publish`, {
         method: 'POST', timeout: 60000,
         json: { baseVersion: ws.baseVersion || 0, meta, media: this.mediaNames(d), files },
+      }).catch(async (e) => {
+        if (e.code === 'sync_revoked') {
+          if (ws.baseVersion) await this.dropWs(id).catch(() => {});
+          throw err(ws.baseVersion ? `${e.message} Tu carpeta vuelve a ser una instancia normal.` : e.message, 'EREVOKED');
+        }
+        if (e.code === 'need_sync') throw err(e.message, 'ENEEDSYNC');
+        throw e;
       });
       const version = r.instance?.version;
       for (const [rel, text] of composed) {
@@ -1473,9 +1523,8 @@ class Admin extends EventEmitter {
     const st = await this.instances.readState(id);
     if (!st?.workspace) return true;
     if (!st.workspace.baseVersion) throw err('Esta instancia nunca se publicó: no se puede dejar de sincronizar.');
-    const { workspace, ...rest } = st;
-    await this.instances.writeState(id, { ...rest, installedVersion: workspace.baseVersion });
-    this.instances.emitChange(id);
+    if ((await this.serverVersion()) >= SYNC_API) await this.call(`/v1/admin/instances/${id}/sync`, { method: 'DELETE' });
+    await this.dropWs(id);
     return true;
   }
 
