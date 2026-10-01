@@ -671,6 +671,8 @@ function start() {
   on('admin:storage', needAdmin((opts) => admin.storage({ fresh: opts?.fresh === true })));
   on('admin:cleanStorage', needAdmin(() => admin.cleanStorage()));
   on('admin:cleanLogs', needAdmin((days) => admin.cleanLogs(days)));
+  on('admin:discord', needAdmin(() => admin.discordInfo()));
+  on('admin:discordNicks', needAdmin((channels) => admin.discordNicks(channels)));
 
   on('catalog:mcVersions', async () => {
     const m = await getVersionManifest(dirs);

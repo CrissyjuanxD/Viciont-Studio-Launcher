@@ -28,6 +28,7 @@ const MIN_API = 3;
 const BATCH_API = 5;
 const SYNC_API = 7;
 const STORAGE_API = 9;
+const DISCORD_API = 11;
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
@@ -79,6 +80,8 @@ function cleanMeta(m = {}, id) {
     changelog: str(m.changelog, 2000),
     showFolder: m.showFolder !== false,
     protect: [...new Set((Array.isArray(m.protect) ? m.protect : []).filter((x) => PROTECTABLE.includes(x)))].sort(),
+    discord: [...new Set((Array.isArray(m.discord) ? m.discord : []).map((x) => String(x)).filter((x) => /^\d{17,20}$/.test(x)))].slice(0, 5),
+    deny: [...new Set((Array.isArray(m.deny) ? m.deny : []).map((x) => str(x, 40)).filter((x) => NICK_RE.test(x)))].slice(0, 500),
   };
 }
 
@@ -388,6 +391,7 @@ class Admin extends EventEmitter {
       name: 'Nombre', summary: 'Resumen', description: 'Descripción', mc: 'Versión de Minecraft', loader: 'Cargador',
       visibility: 'Visibilidad', allow: 'Nicks con permiso', memory: 'RAM recomendada', server: 'Servidor', tags: 'Etiquetas',
       order: 'Orden en la lista', accent: 'Color', changelog: 'Novedades', showFolder: 'Botón «Carpeta»', protect: 'Carpetas ocultas',
+      discord: 'Acceso con Discord', deny: 'Nicks retirados',
     };
     const short = (v) => { const s = String(v ?? '').replace(/\s+/g, ' ').trim(); return s.length > 160 ? `${s.slice(0, 160)}…` : (s || '—'); };
     const fmt = (k, v) => {
@@ -398,17 +402,19 @@ class Admin extends EventEmitter {
       if (k === 'tags') return v.join(', ') || '—';
       if (k === 'showFolder') return v ? 'Sí' : 'No';
       if (k === 'protect') return v.length ? v.join(', ') : 'ninguna';
+      if (k === 'discord') return v.length ? `${v.length} canal(es)` : 'desactivado';
+      if (k === 'deny') return `${v.length} nick(s)`;
       return short(v);
     };
     const out = [];
     for (const k of Object.keys(LABEL)) {
       if (JSON.stringify(a[k]) === JSON.stringify(b[k])) continue;
       const c = { key: k, label: LABEL[k], from: fmt(k, a[k]), to: fmt(k, b[k]) };
-      if (k === 'allow') {
-        const A = new Set(a.allow);
-        const B = new Set(b.allow);
-        c.added = b.allow.filter((n) => !A.has(n)).slice(0, 50);
-        c.removed = a.allow.filter((n) => !B.has(n)).slice(0, 50);
+      if (k === 'allow' || k === 'deny') {
+        const A = new Set(a[k]);
+        const B = new Set(b[k]);
+        c.added = b[k].filter((n) => !A.has(n)).slice(0, 50);
+        c.removed = a[k].filter((n) => !B.has(n)).slice(0, 50);
       }
       out.push(c);
     }
@@ -1220,7 +1226,7 @@ class Admin extends EventEmitter {
     const meta = cleanMeta(d.meta, id);
     if (!meta.mc) throw err('Elige la versión de Minecraft.');
     if (meta.loader.type !== 'vanilla' && !meta.loader.version) throw err('Elige la versión del cargador de mods.');
-    if (meta.visibility === 'private' && !meta.allow.length) throw err('Una instancia privada necesita al menos un nick con permiso.');
+    if (meta.visibility === 'private' && !meta.allow.length && !meta.discord.length) throw err('Una instancia privada necesita al menos un nick con permiso o el acceso con Discord.');
     if ((inst?.version || 0) !== (ws.baseVersion || 0)) {
       throw err(`Hay una versión más nueva publicada (v${inst?.version}). Pulsa "Traer cambios" antes de publicar.`, 'EBEHIND');
     }
@@ -1585,6 +1591,19 @@ class Admin extends EventEmitter {
     if ((await this.serverVersion().catch(() => 0)) >= STORAGE_API && !this.can('storage')) return null;
     const r = await this.call(`/v1/admin/storage${fresh ? '?fresh=1' : ''}`, { timeout: 90000, ok: [404] });
     return r?.ok ? r : null;
+  }
+
+  async discordInfo() {
+    if ((await this.serverVersion().catch(() => 0)) < DISCORD_API) return { supported: false, enabled: false, channels: [] };
+    const r = await this.call('/v1/admin/discord', { timeout: 15000 });
+    return { supported: true, enabled: Boolean(r.enabled), channels: Array.isArray(r.channels) ? r.channels : [], error: r.error || null };
+  }
+
+  async discordNicks(channels) {
+    const ids = (Array.isArray(channels) ? channels : []).map(String).filter((x) => /^\d{17,20}$/.test(x)).slice(0, 5);
+    if (!ids.length || (await this.serverVersion().catch(() => 0)) < DISCORD_API) return [];
+    const r = await this.call(`/v1/admin/discord/nicks?channels=${ids.join(',')}`, { timeout: 20000 });
+    return Array.isArray(r.nicks) ? r.nicks : [];
   }
 
   async cleanStorage() {
