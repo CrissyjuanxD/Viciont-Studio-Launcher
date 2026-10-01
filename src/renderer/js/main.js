@@ -1,4 +1,4 @@
-import { call, on, state, setInstances, instance } from './api.js';
+import { call, on, emit, state, setInstances, instance } from './api.js';
 import { icon, hydrateIcons } from './icons.js';
 import { esc, instIcon, mediaUrl, isVideo, bytes, speed } from './util.js';
 import { initTooltips, toast, toastError, confirm, menu, anyModalOpen } from './ui.js';
@@ -15,6 +15,7 @@ import { crashModal } from './views/instance.js';
 
 const VIEWS = { home: homeView, instance: instanceView, skins: skinsView, admin: adminView };
 const $ = (id) => document.getElementById(id);
+const permKey = (a) => JSON.stringify([Boolean(a?.unlocked), [...(a?.perms || [])].sort(), a?.scope ?? null]);
 
 const scene = (() => {
   const root = $('scene');
@@ -125,11 +126,13 @@ const app = {
     if (current.name === 'home' || current.name === 'skins' || current.name === 'admin') { current.key = ''; app.go(current.name === 'admin' ? { name: 'home' } : state.route, { instant: true }); }
   },
   async refreshAdmin({ fresh = false } = {}) {
-    try { state.admin = await call('admin:status', { fresh }); } catch { state.admin = { access: false, unlocked: false, perms: [] }; }
-    app.onAdminChange(Boolean(state.admin?.unlocked));
+    let st;
+    try { st = await call('admin:status', { fresh }); } catch { st = { access: false, unlocked: false, perms: [] }; }
+    app.onAdminChange(Boolean(st?.unlocked), st);
     return state.admin;
   },
   onAdminChange(unlocked, st) {
+    const before = permKey(state.admin);
     if (st) state.admin = st;
     state.admin = { ...(state.admin || {}), unlocked };
     if (!unlocked) state.admin.perms = [];
@@ -137,6 +140,7 @@ const app = {
     $('rail-admin').hidden = !unlocked;
     paintTitlebar();
     if (!unlocked && current.name === 'admin') app.go({ name: 'home' });
+    else if (permKey(state.admin) !== before) emit('admin-perms', state.admin);
   },
   addAccount() { showLogin({ canCancel: true }); },
   openSettings(tab) { return openSettings(app, tab); },

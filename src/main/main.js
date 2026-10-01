@@ -569,6 +569,10 @@ function start() {
     if (!admin.unlocked()) throw Object.assign(new Error('Activa el modo administrador para continuar.'), { code: 'ELOCKED' });
     return fn(...a);
   };
+  const needEdit = (fn) => needAdmin(async (id, ...a) => {
+    await admin.mustEdit(id);
+    return fn(id, ...a);
+  });
   on('admin:status', (opts) => admin.status({ fresh: opts?.fresh === true }));
   on('admin:unlock', (key, remember) => admin.unlock(key, remember));
   on('admin:lock', () => admin.lock());
@@ -576,8 +580,8 @@ function start() {
   on('admin:create', needAdmin((d) => admin.create(d)));
   on('admin:open', needAdmin((id) => admin.open(id)));
   on('admin:discard', needAdmin((id) => admin.discard(id)));
-  on('admin:saveMeta', needAdmin((id, meta) => admin.saveMeta(id, meta)));
-  on('admin:addFiles', needAdmin(async (id, targetDir, folders) => {
+  on('admin:saveMeta', needEdit((id, meta) => admin.saveMeta(id, meta)));
+  on('admin:addFiles', needEdit(async (id, targetDir, folders) => {
     const r = await dialog.showOpenDialog(parentWin(), {
       title: folders ? 'Elegir carpetas' : 'Elegir archivos',
       properties: folders ? ['openDirectory', 'multiSelections'] : ['openFile', 'multiSelections'],
@@ -585,17 +589,17 @@ function start() {
     if (r.canceled || !r.filePaths.length) return null;
     return admin.addLocal(id, r.filePaths, targetDir);
   }));
-  on('admin:addPaths', needAdmin((id, list, targetDir) => {
+  on('admin:addPaths', needEdit((id, list, targetDir) => {
     const ok = (Array.isArray(list) ? list : []).filter((p) => admin.granted(p));
     if (!ok.length) throw new Error(`Arrastra los archivos desde ${({ darwin: 'el Finder', linux: 'tu gestor de archivos' })[process.platform] || 'el Explorador de Windows'}.`);
     return admin.addLocal(id, ok, targetDir);
   }));
-  on('admin:addModrinth', needAdmin((id, ref) => admin.addModrinth(id, ref)));
-  on('admin:setPolicy', needAdmin((id, p, policy) => admin.setPolicy(id, p, policy)));
-  on('admin:mergePick', needAdmin((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
-  on('admin:removeFiles', needAdmin((id, list) => admin.removeFiles(id, list)));
-  on('admin:restoreFiles', needAdmin((id, list) => admin.restoreFiles(id, list)));
-  on('admin:setInclude', needAdmin((id, name, onOff) => admin.setInclude(id, name, onOff === true)));
+  on('admin:addModrinth', needEdit((id, ref) => admin.addModrinth(id, ref)));
+  on('admin:setPolicy', needEdit((id, p, policy) => admin.setPolicy(id, p, policy)));
+  on('admin:mergePick', needEdit((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
+  on('admin:removeFiles', needEdit((id, list) => admin.removeFiles(id, list)));
+  on('admin:restoreFiles', needEdit((id, list) => admin.restoreFiles(id, list)));
+  on('admin:setInclude', needEdit((id, name, onOff) => admin.setInclude(id, name, onOff === true)));
   on('admin:workspace', needAdmin((id) => admin.wsStatus(id)));
   on('admin:fileDiff', needAdmin((id, rel) => admin.fileDiff(id, rel)));
   on('admin:sync', needAdmin(async (id) => {
@@ -624,15 +628,15 @@ function start() {
     await fsp.mkdir(target, { recursive: true });
     return shell.openPath(target);
   }));
-  on('admin:setMedia', needAdmin((id, kind, data) => admin.setMedia(id, kind, data)));
-  on('admin:clearMedia', needAdmin((id, kind) => admin.clearMedia(id, kind)));
+  on('admin:setMedia', needEdit((id, kind, data) => admin.setMedia(id, kind, data)));
+  on('admin:clearMedia', needEdit((id, kind) => admin.clearMedia(id, kind)));
   on('admin:scanFolder', needAdmin(async () => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Carpeta de la instancia (CurseForge, Prism, Modrinth, .minecraft…)', properties: ['openDirectory'] });
     if (r.canceled || !r.filePaths[0]) return null;
     admin.grant(r.filePaths[0]);
     return admin.scanFolder(r.filePaths[0]);
   }));
-  on('admin:importFolder', needAdmin((id, root, include) => {
+  on('admin:importFolder', needEdit((id, root, include) => {
     if (!admin.granted(root)) throw new Error('Vuelve a elegir la carpeta.');
     return admin.importFolder(id, root, include);
   }));
@@ -642,17 +646,17 @@ function start() {
     if (!admin.granted(dir)) throw new Error('Vuelve a elegir la instancia.');
     return admin.scanFolder(dir);
   }));
-  on('admin:importMrpack', needAdmin(async (id) => {
+  on('admin:importMrpack', needEdit(async (id) => {
     const r = await dialog.showOpenDialog(parentWin(), { title: 'Modpack de Modrinth', properties: ['openFile'], filters: [{ name: 'Modpack de Modrinth', extensions: ['mrpack'] }] });
     if (r.canceled || !r.filePaths[0]) return null;
     return admin.importMrpack(id, r.filePaths[0]);
   }));
-  on('admin:publish', needAdmin(async (id, opts) => {
+  on('admin:publish', needEdit(async (id, opts) => {
     const inst = await admin.publish(id, { mergeKeys: opts?.mergeKeys && typeof opts.mergeKeys === 'object' ? opts.mergeKeys : {} });
     instances.refresh().then((l) => send('instances', l));
     return inst;
   }));
-  on('admin:updateMeta', needAdmin(async (id, meta) => {
+  on('admin:updateMeta', needEdit(async (id, meta) => {
     const inst = await admin.updateMeta(id, meta);
     instances.refresh().then((l) => send('instances', l));
     return inst;

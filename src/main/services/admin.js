@@ -52,6 +52,8 @@ const SUGGESTED = new Set(['mods', 'config', 'defaultconfigs', 'kubejs', 'resour
 const IGNORE_FILE_RE = /(^|\/)(desktop\.ini|thumbs\.db|\.ds_store)$|\.(log|tmp|part)$|(^|\/)\.git(\/|$)/i;
 const isCslPath = (rel) => /^mods\/[^/]*customskinloader[^/]*\.jar$/i.test(rel);
 const topOf = (rel) => String(rel).split('/')[0];
+const NO_EDIT = 'No tienes el permiso «Editar y publicar»: puedes ver esta instancia, pero no cambiarla. Pídeselo a quien administra el panel web de Viciont Studios.';
+const NO_CREATE = 'No tienes el permiso «Crear instancias». Pídeselo a quien administra el panel web de Viciont Studios.';
 
 function err(message, code) { return Object.assign(new Error(message), { code }); }
 
@@ -201,6 +203,10 @@ class Admin extends EventEmitter {
       return base;
     }
     let s = this.sessions.get(acc.uuid);
+    if (s && fresh && Array.isArray(me.admin.perms)) {
+      s.perms = me.admin.perms;
+      if (me.admin.scope !== undefined) s.scope = me.admin.scope;
+    }
     if (!s && this.saved[acc.uuid]) {
       try { s = await this.verify(acc, this.saved[acc.uuid]); } catch (e) {
         if (e.code === 'EBADKEY' || e.code === 'ENOACCESS') this.forget(acc.uuid);
@@ -308,6 +314,13 @@ class Admin extends EventEmitter {
     if (!((await this.serverVersion()) >= MIN_API)) {
       throw err('El servidor de Viciont Studios necesita actualizarse para esta versión del launcher: pega el código nuevo del servidor en Cloudflare y pulsa Deploy.', 'EOLDSERVER');
     }
+  }
+
+  async mustEdit(id) {
+    if (!ID_RE.test(String(id || ''))) throw err('Identificador no válido', 'EBADID');
+    let inst = this.pub.get(id);
+    if (inst === undefined) inst = (await this.fetchPublished(id).catch(() => null))?.instance || null;
+    if (inst?.version ? !this.can('edit') : !this.can('create')) throw err(inst?.version ? NO_EDIT : NO_CREATE, 'ENOPERM');
   }
 
   grant(p) {
@@ -461,6 +474,8 @@ class Admin extends EventEmitter {
   }
 
   async create({ id, name, mc, loader }) {
+    await this.status({ fresh: true }).catch(() => null);
+    if (!this.can('create')) throw err(NO_CREATE, 'ENOPERM');
     const clean = String(id || '').trim().toLowerCase();
     if (!ID_RE.test(clean)) throw err('Identificador no válido: usa minúsculas, números y guiones (2-48 caracteres).', 'EBADID');
     if (await exists(this.draftFile(clean))) throw err('Ya tienes una instancia nueva con ese identificador.', 'EEXISTS');
@@ -493,7 +508,12 @@ class Admin extends EventEmitter {
       await this.persistMeta(d, inst);
     }
     if (pub?.sync?.revokedAt) await this.applySyncs([pub.sync]).catch(() => []);
-    return { ...(await this.view(id, d, inst)), sync: pub?.sync || null };
+    const v = await this.view(id, d, inst);
+    const publishedFiles = v.workspace?.synced ? null : (pub?.manifest?.files || []).map((f) => ({
+      path: f.path, size: f.size || 0, policy: f.policy || 'always', source: f.source === 'modrinth' ? 'modrinth' : 'local',
+      title: f.title || null, icon: f.icon || null, versionName: f.versionName || null,
+    }));
+    return { ...v, sync: pub?.sync || null, publishedFiles };
   }
 
   async discard(id) {

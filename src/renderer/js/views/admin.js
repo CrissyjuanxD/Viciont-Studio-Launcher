@@ -1,7 +1,7 @@
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
 import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce, fileManager } from '../util.js';
-import { modal, toast, toastError, confirm, menu, busy } from '../ui.js';
+import { modal, toast, toastError, confirm, menu, busy, anyModalOpen } from '../ui.js';
 import { diffLines, prettyIfJson } from '../linediff.js';
 
 const FOLDERS = [
@@ -24,6 +24,21 @@ const fileIcon = (p) => (FOLDERS.find(([dir]) => dir && p.startsWith(`${dir}/`))
 const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <= DIFF_MAX && (f.oldSize || 0) <= DIFF_MAX;
 
 const can = (perm) => (state.admin?.perms || []).includes(perm);
+const NEED_CREATE = 'Necesitas el permiso «Crear instancias»';
+const NEED_EDIT = 'Necesitas el permiso «Editar y publicar»';
+const ASK = 'Pídeselo a quien administra el panel web de Viciont Studios.';
+let permsAt = 0;
+const permsStale = () => Date.now() - permsAt > 15000;
+const freshPerms = (app) => { permsAt = Date.now(); return app.refreshAdmin({ fresh: true }).catch(() => null); };
+let deniedAt = 0;
+const denied = (need) => {
+  if (Date.now() - deniedAt < 2500) return;
+  deniedAt = Date.now();
+  toast(`${need}. ${ASK}`, { kind: 'error', timeout: 6000 });
+};
+
+const RO_SEL = ['apply-version', 'modrinth', 'upload', 'upload-folder', 'content-more'].map((a) => `[data-act="${a}"]`)
+  .concat(['[data-l]', '[data-pick]', '[data-clear]', '[data-policy]', '[data-restore]', '[data-del]', '[data-incl]', '[data-excl]', '[data-v]', '#allow', '.media-pick']).join(', ');
 
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
@@ -40,16 +55,21 @@ function renderList(root, app) {
     <div class="page page--admin">
       <div class="page__head">
         <div><h1 class="title-lg">Administrar <span class="hl">instancias</span></h1><p class="lead">Cada instancia es una carpeta en tu PC: cámbiala como quieras (mods, configs, resource packs…), pruébala jugando y publica solo lo que cambió.</p></div>
-        <div class="field__row">
-          ${can('players') ? `<button class="btn" type="button" data-act="players">${icon('users')}Jugadores</button>` : ''}
-          ${can('create') ? `<button class="btn btn--primary" type="button" data-act="new">${icon('plus')}Nueva instancia</button>` : ''}
-        </div>
+        <div class="field__row" id="adm-head"></div>
       </div>
       <div id="adm-note"></div>
       <div class="admin-grid" id="adm-grid"><div class="empty"><span class="spin"></span><p>Cargando…</p></div></div>
       <div id="adm-storage"></div>
     </div>`;
   hydrateIcons(root);
+
+  const paintHead = () => {
+    const box = root.querySelector('#adm-head');
+    box.innerHTML = `${can('players') ? `<button class="btn" type="button" data-act="players">${icon('users')}Jugadores</button>` : ''}
+      ${can('create') ? `<button class="btn btn--primary" type="button" data-act="new">${icon('plus')}Nueva instancia</button>` : `<button class="btn btn--primary is-ro" type="button" data-act="new" data-tip="${NEED_CREATE}">${icon('lock')}Nueva instancia</button>`}`;
+    hydrateIcons(box);
+  };
+  paintHead();
 
   let storage = null;
   const loadStorage = async (fresh = false) => {
@@ -59,8 +79,10 @@ function renderList(root, app) {
     return storage;
   };
 
+  let loadedAt = 0;
   const load = async () => {
     const grid = root.querySelector('#adm-grid');
+    loadedAt = Date.now();
     try {
       const r = await call('admin:list');
       const note = root.querySelector('#adm-note');
@@ -90,6 +112,7 @@ function renderList(root, app) {
         </button>`);
       }
       if (can('create')) cards.push(`<button class="acard acard--new" type="button" data-act="new">${icon('plus')}<span>Crear una instancia nueva</span></button>`);
+      else if (cards.length) cards.push(`<button class="acard acard--new is-ro" type="button" data-act="new" data-tip="${NEED_CREATE}">${icon('lock')}<span>Crear una instancia nueva</span></button>`);
       if (!cards.length) cards.push(`<div class="empty">${icon('lock')}<h3>Sin instancias</h3><p>Todavía no tienes permisos sobre ninguna instancia.</p></div>`);
       grid.innerHTML = cards.join('');
       hydrateIcons(grid);
@@ -105,13 +128,25 @@ function renderList(root, app) {
     if (open) { app.go({ name: 'admin', id: open.dataset.open }); return; }
     const b = e.target.closest('[data-act]');
     if (!b) return;
-    if (b.dataset.act === 'new' && can('create')) newInstanceModal(app);
+    if (b.dataset.act === 'new') {
+      if (permsStale()) await busy(b, () => freshPerms(app));
+      if (can('create')) newInstanceModal(app); else denied(NEED_CREATE);
+    }
     if (b.dataset.act === 'players' && can('players')) playersModal();
     if (b.dataset.act === 'storage' && storage) storageModal(storage, { reload: () => loadStorage(true), onChange: load });
   });
   load();
   loadStorage();
-  return () => {};
+  if (permsStale()) freshPerms(app);
+  const offs = [
+    on('admin-perms', () => { paintHead(); load(); loadStorage(); }),
+    on('focus', (f) => {
+      if (!f) return;
+      if (permsStale()) freshPerms(app);
+      if (Date.now() - loadedAt > 10000) load();
+    }),
+  ];
+  return () => offs.forEach((off) => off());
 }
 
 const pct = (used, limit) => (limit ? Math.min(1, used / limit) : 0);
@@ -411,6 +446,20 @@ function renderEditor(root, id, app, route = {}) {
   let syncing = false;
   const offs = [];
   const ws = () => d?.workspace || { synced: false };
+  const ro = () => Boolean(d) && !can(d.baseVersion ? 'edit' : 'create');
+  const need = () => (d?.baseVersion ? NEED_EDIT : NEED_CREATE);
+  const lockIn = (box) => {
+    if (!box || !ro()) return;
+    box.querySelectorAll('input, textarea, select').forEach((el) => { if (el.id !== 'ffilter') el.disabled = true; });
+    box.querySelectorAll('.switch').forEach((el) => el.classList.add('is-disabled'));
+    box.querySelectorAll('.field__label, .panel__title > span:first-child').forEach((el) => {
+      if (!el.querySelector('.ro-lock')) el.insertAdjacentHTML('beforeend', `<span class="ro-lock">${icon('lock')}</span>`);
+    });
+    box.querySelectorAll(RO_SEL).forEach((el) => {
+      el.classList.add('is-ro');
+      if (el.dataset.tip) el.dataset.tipSub = need(); else el.dataset.tip = need();
+    });
+  };
 
   const saveMeta = debounce(async (patch) => {
     try { d = { ...(await call('admin:saveMeta', id, patch)), workspace: d.workspace }; paintBar(); } catch (e) { toastError(e); }
@@ -428,7 +477,7 @@ function renderEditor(root, id, app, route = {}) {
           <button class="btn btn--icon btn--ghost" type="button" data-act="back" data-tip="Volver">${icon('arrowLeft')}</button>
           <div class="acard__icon" style="width:44px;height:44px;border-radius:12px">${iconSrc ? `<img src="${iconSrc}" alt="">` : coverMini(d.meta.name)}</div>
           <div style="min-width:0;flex:1"><div class="title-md">${esc(d.meta.name)}</div>
-            <div class="acard__meta" style="margin-top:4px"><span class="tag mono">${esc(d.id)}</span>${d.baseVersion ? `<span class="tag">publicada v${d.baseVersion}</span>` : '<span class="chip chip--hot">nueva</span>'}<span class="tag">${esc(d.meta.mc)} · ${esc(loaderLabel(d.meta.loader))}</span>${w.synced ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}</div></div>
+            <div class="acard__meta" style="margin-top:4px"><span class="tag mono">${esc(d.id)}</span>${d.baseVersion ? `<span class="tag">publicada v${d.baseVersion}</span>` : '<span class="chip chip--hot">nueva</span>'}<span class="tag">${esc(d.meta.mc)} · ${esc(loaderLabel(d.meta.loader))}</span>${w.synced ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}${ro() ? `<span class="tag tag--ro">${icon('lock')} solo lectura</span>` : ''}</div></div>
           ${w.synced ? `<button class="btn btn--sm btn--ghost" type="button" data-act="play-ws" data-tip="Juega con tu carpeta para probar los cambios">${icon('play')}Jugar</button>` : ''}
           ${d.baseVersion ? `<button class="btn btn--sm btn--ghost" type="button" data-act="test" data-tip="Instala otra copia como la de un jugador para probar las actualizaciones">${icon('eye')}Copia de prueba</button>` : ''}
           <button class="btn btn--sm btn--ghost" type="button" data-act="more">${icon('more')}</button>
@@ -457,10 +506,12 @@ function renderEditor(root, id, app, route = {}) {
       ${pending ? `<button type="button" class="chip chip--hot" data-act="changes" data-tip="Ver qué cambió">${ch.total ? `${ch.total} cambio(s) de archivos` : ''}${ch.total && d.dirtyMeta ? ' + ' : ''}${d.dirtyMeta && d.baseVersion ? 'textos o permisos' : ''}${!d.baseVersion ? 'sin publicar' : ''}</button>` : `<span>${icon('check')} Todo publicado</span>`}
       <span>${d.meta.visibility === 'private' ? `${icon('lock')} privada · ${d.meta.allow.length} nick(s)` : `${icon('globe')} pública`}</span>`;
     const acts = root.querySelector('#ed-actions');
-    const canPub = can(d.baseVersion ? 'edit' : 'create');
-    acts.innerHTML = `
-      ${d.baseVersion && can('edit') && d.dirtyMeta ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
-      ${canPub ? `<button class="btn btn--primary" type="button" data-act="publish" ${w.synced && !w.behind ? '' : 'disabled'} data-tip="${w.synced ? (w.behind ? 'Primero trae la versión más nueva' : 'Sube solo lo que cambió') : 'Primero sincroniza la instancia con tu PC'}">${icon('upload')}Publicar versión ${(d.baseVersion || 0) + 1}</button>` : '<span class="field__hint">No tienes permiso para publicar cambios en esta instancia.</span>'}`;
+    const next = (d.baseVersion || 0) + 1;
+    acts.innerHTML = ro()
+      ? `${d.baseVersion && d.dirtyMeta ? `<button class="btn btn--ghost is-ro" type="button" data-act="meta-only" data-tip="${need()}">${icon('lock')}Guardar solo textos y permisos</button>` : ''}
+        <button class="btn btn--primary is-ro" type="button" data-act="publish" data-tip="${need()}">${icon('lock')}Publicar versión ${next}</button>`
+      : `${d.baseVersion && d.dirtyMeta ? `<button class="btn btn--ghost" type="button" data-act="meta-only" data-tip="Publica textos, imágenes y permisos sin subir una versión nueva">${icon('check')}Guardar solo textos y permisos</button>` : ''}
+        <button class="btn btn--primary" type="button" data-act="publish" ${w.synced && !w.behind ? '' : 'disabled'} data-tip="${w.synced ? (w.behind ? 'Primero trae la versión más nueva' : 'Sube solo lo que cambió') : 'Primero sincroniza la instancia con tu PC'}">${icon('upload')}Publicar versión ${next}</button>`;
     hydrateIcons(info);
     hydrateIcons(acts);
     const c = root.querySelector('[data-tab="content"] .count');
@@ -476,6 +527,12 @@ function renderEditor(root, id, app, route = {}) {
     if (tab === 'look') tabLook(body);
     if (tab === 'content') tabContent(body);
     if (tab === 'access') tabAccess(body);
+    if (ro()) {
+      body.insertAdjacentHTML('afterbegin', `<div class="banner-note banner-note--ro">${icon('lock')}<span><b>Solo lectura.</b> ${d.baseVersion
+        ? 'No tienes el permiso «Editar y publicar»: puedes ver toda la instancia, pero no cambiarla ni publicar versiones.'
+        : 'No tienes el permiso «Crear instancias»: puedes ver esta instancia nueva, pero no cambiarla ni publicarla.'} ${ASK}</span></div>`);
+      lockIn(body);
+    }
     hydrateIcons(body);
   };
 
@@ -533,21 +590,21 @@ function renderEditor(root, id, app, route = {}) {
         <div class="field"><span class="field__label">Icono</span>
           <div class="media-pick media-pick--icon ${iconM ? 'has-media' : ''}" data-pick="icon">
             ${iconM ? `<img src="${src(iconM)}" alt="">` : ''}
-            <span class="media-pick__label">${icon('image')}Elegir icono<small>PNG, JPG, WEBP o GIF</small></span>
+            <span class="media-pick__label">${icon('image')}${ro() ? 'Sin icono' : 'Elegir icono<small>PNG, JPG, WEBP o GIF</small>'}</span>
           </div>
           ${iconM ? '<button class="btn btn--sm btn--ghost" type="button" data-clear="icon">Quitar</button>' : ''}
         </div>
         <div class="field"><span class="field__label">Fondo de la instancia</span>
           <div class="media-pick media-pick--bg ${bgM ? 'has-media' : ''}" data-pick="background">
             ${bgM ? (bgIsVideo ? `<video src="${src(bgM)}" muted loop autoplay playsinline></video>` : `<img src="${src(bgM)}" alt="">`) : ''}
-            <span class="media-pick__label">${icon('video')}Elegir fondo<small>Imagen, GIF o vídeo (MP4/WEBM, hasta 80 MB)</small></span>
+            <span class="media-pick__label">${icon('video')}${ro() ? 'Sin fondo' : 'Elegir fondo<small>Imagen, GIF o vídeo (MP4/WEBM, hasta 80 MB)</small>'}</span>
           </div>
           <div class="field__row">${bgM ? '<button class="btn btn--sm btn--ghost" type="button" data-clear="background">Quitar</button>' : ''}<span class="field__hint">Se ve detrás del botón Jugar. Las imágenes se optimizan solas; para vídeo usa algo corto que se pueda repetir en bucle.</span></div>
         </div>
         <div class="field"><span class="field__label">Banner de la tarjeta</span>
           <div class="media-pick media-pick--banner ${bannerM ? 'has-media' : ''} ${bannerOk ? '' : 'is-disabled'}" ${bannerOk ? 'data-pick="banner"' : ''}>
             ${bannerM ? `<img src="${src(bannerM)}" alt="">` : ''}
-            <span class="media-pick__label">${icon('image')}Elegir banner<small>PNG, JPG, WEBP o GIF</small></span>
+            <span class="media-pick__label">${icon('image')}${ro() ? 'Sin banner' : 'Elegir banner<small>PNG, JPG, WEBP o GIF</small>'}</span>
           </div>
           <div class="field__row">${bannerM ? '<button class="btn btn--sm btn--ghost" type="button" data-clear="banner">Quitar</button>' : ''}<span class="field__hint">Es la imagen de la tarjeta en <b>Inicio → Instancias disponibles</b> (se ve recortada a 16:9). Si no eliges ninguno, se usa el fondo.</span></div>
           ${bannerOk ? '' : `<p class="inst__warn">${icon('alert')}Para usarlo hay que actualizar el servidor de Viciont Studios (versión 6 o más nueva).</p>`}
@@ -594,7 +651,15 @@ function renderEditor(root, id, app, route = {}) {
             ${w.error ? `<div class="form-error" style="margin-top:10px">${esc(w.error)}</div>` : ''}
             <div class="field__row" style="margin-top:14px"><button class="btn btn--primary" type="button" data-act="sync" ${syncing || needPerm ? 'disabled' : ''}>${syncing ? '<span class="spin"></span>' : icon('download')}${syncing ? esc(p?.label || 'Sincronizando…') : 'Sincronizar con mi PC'}</button></div>
           </div>
-        </div>`;
+        </div>${ro() && d.publishedFiles?.length ? `
+        <div class="files" id="files">
+          <div class="files__toolbar"><span class="files__title">${icon('package')}Contenido publicado (v${d.baseVersion})</span><input class="input" id="ffilter" placeholder="Filtrar…" value="${esc(filter)}" style="margin-left:auto"></div>
+          <div id="flist"></div>
+        </div>` : ''}`;
+      if (body.querySelector('#flist')) {
+        drawFiles(body);
+        body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
+      }
       return;
     }
     const ch = w.changes || { total: 0 };
@@ -621,16 +686,17 @@ function renderEditor(root, id, app, route = {}) {
         <div class="chips-list" id="incl"></div>
         ${w.candidates?.length ? `<p class="field__hint" style="margin-top:12px">Estas carpetas están en tu PC pero <b>no</b> se publican (por ejemplo mundos o mapas de minimapas). Añádelas solo si quieres repartirlas:</p><div class="chips-list" id="cand" style="margin-top:8px"></div>` : ''}
       </div>
-      <p class="field__hint">Arrastra archivos aquí para añadirlos. <b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que confirmes al publicar y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
+      <p class="field__hint">${ro() ? '' : 'Arrastra archivos aquí para añadirlos. '}<b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que confirmes al publicar y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
     drawFiles(body);
     drawIncl(body);
     body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
     const zone = body.querySelector('#files');
-    zone.addEventListener('dragover', (e) => { e.preventDefault(); zone.classList.add('drop-hint'); });
+    zone.addEventListener('dragover', (e) => { e.preventDefault(); if (!ro()) zone.classList.add('drop-hint'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('drop-hint'));
     zone.addEventListener('drop', async (e) => {
       e.preventDefault();
       zone.classList.remove('drop-hint');
+      if (ro()) { denied(need()); return; }
       const paths = [...e.dataTransfer.files].map((f) => pathFor(f)).filter(Boolean);
       if (!paths.length) return;
       const target = await askFolder(paths.every((p) => /\.jar$/i.test(p)) ? 'mods' : '');
@@ -651,6 +717,8 @@ function renderEditor(root, id, app, route = {}) {
     if (cand) {
       cand.innerHTML = w.candidates.map((c) => `<button class="chip chip--add" type="button" data-incl="${esc(c.name)}" data-tip="Publicar también">${icon(c.dir ? 'folder' : 'file')}${esc(c.name)} <small>${c.dir ? `${c.count} archivos · ` : ''}${bytes(c.size)}</small>${icon('plus')}</button>`).join('');
     }
+    lockIn(box);
+    lockIn(cand);
     hydrateIcons(body);
   };
 
@@ -668,13 +736,14 @@ function renderEditor(root, id, app, route = {}) {
   const drawFiles = (body) => {
     const list = body.querySelector('#flist');
     if (!list) return;
-    const w = ws();
+    const pubList = !ws().synced;
+    const w = pubList ? { files: (d.publishedFiles || []).map((f) => ({ ...f, state: 'same' })), removed: [] } : ws();
     const all = w.files || [];
     const match = (f) => !filter || f.path.toLowerCase().includes(filter) || (f.title || '').toLowerCase().includes(filter);
     const files = only === 'removed' ? [] : all.filter((f) => match(f) && (!only || f.state === only));
     const removed = !only || only === 'removed' ? (w.removed || []).filter(match) : [];
     if (!all.length && !(w.removed || []).length) {
-      list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Carpeta vacía</h3><p>Busca mods en Modrinth, añade tus archivos, importa una instancia o abre la carpeta y pon ahí lo que quieras.</p></div>`;
+      list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Carpeta vacía</h3><p>${ro() ? 'Todavía no hay archivos en esta carpeta.' : 'Busca mods en Modrinth, añade tus archivos, importa una instancia o abre la carpeta y pon ahí lo que quieras.'}</p></div>`;
       hydrateIcons(list);
       return;
     }
@@ -705,7 +774,7 @@ function renderEditor(root, id, app, route = {}) {
               ${f.state !== 'same' && canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Ver su contenido' : 'Ver qué cambió'}">${icon('eye')}</button>` : ''}
               <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${esc(POLICY[f.policy]?.label || '')}">${icon(POLICY[f.policy]?.icon || 'refresh')}</button>
               ${f.state !== 'same' && d.baseVersion ? `<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Quitar (no estaba publicado)' : 'Deshacer: dejarlo como está publicado'}">${icon('history')}</button>` : ''}
-              <button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>
+              ${pubList ? '' : `<button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>`}
             </span>
           </div>`;
         }).join('')}
@@ -720,6 +789,7 @@ function renderEditor(root, id, app, route = {}) {
           <span class="field__row" style="gap:2px">${canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="Ver lo que se quita">${icon('eye')}</button>` : ''}<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="Recuperar">${icon('history')}</button></span>
         </div>`).join('')}
       </div>` : '');
+    lockIn(list);
     hydrateIcons(list);
   };
 
@@ -735,7 +805,7 @@ function renderEditor(root, id, app, route = {}) {
       </div>
       <div class="panel" id="allow-box">
         <div class="panel__title"><span>Nicks con permiso</span><span class="muted mono" style="font-size:.8rem" id="allow-count"></span></div>
-        <div class="chips-input" id="allow"><input placeholder="Escribe un nick y pulsa Enter (o pega varios separados por comas)"></div>
+        <div class="chips-input" id="allow"><input placeholder="${ro() ? (mt.allow.length ? '' : 'Ningún nick') : 'Escribe un nick y pulsa Enter (o pega varios separados por comas)'}"></div>
         <p class="field__hint" style="margin-top:10px">Vale para cuentas premium y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
       </div>
       <div class="panel">
@@ -776,8 +846,8 @@ function renderEditor(root, id, app, route = {}) {
         const c = document.createElement('span');
         c.className = 'chip';
         c.dataset.nick = n;
-        c.innerHTML = `${esc(n)} ${icon('close')}`;
-        c.title = 'Quitar';
+        c.innerHTML = ro() ? esc(n) : `${esc(n)} ${icon('close')}`;
+        if (!ro()) c.title = 'Quitar';
         allowBox.insertBefore(c, input);
       }
       body.querySelector('#allow-count').textContent = `${d.meta.allow.length} nick(s)`;
@@ -850,11 +920,41 @@ function renderEditor(root, id, app, route = {}) {
     }
   };
 
+  let scanAt = 0;
+  let scanning = false;
+  const autoScan = async () => {
+    if (!d || !ws().synced || syncing || scanning || anyModalOpen() || Date.now() - scanAt < 2000) return;
+    scanning = true;
+    try {
+      const before = JSON.stringify(d.workspace);
+      const w = await call('admin:workspace', id);
+      scanAt = Date.now();
+      if (!d || JSON.stringify(w) === before) return;
+      setWs(w);
+      if (tab === 'content') {
+        const y = root.scrollTop;
+        const typing = document.activeElement?.id === 'ffilter';
+        drawTab();
+        if (root.scrollTop !== y) { root.style.scrollBehavior = 'auto'; root.scrollTop = y; root.style.scrollBehavior = ''; }
+        if (typing) root.querySelector('#ffilter')?.focus();
+      }
+      paintBar();
+    } catch {} finally { scanning = false; }
+  };
+
+  root.addEventListener('click', (e) => {
+    const l = e.target.closest('.is-ro');
+    if (!l || !root.contains(l)) return;
+    e.preventDefault();
+    e.stopPropagation();
+    denied(need());
+  }, true);
+
   root.addEventListener('click', async (e) => {
     const tb = e.target.closest('[data-tab]');
-    if (tb) { tab = tb.dataset.tab; drawTab(); return; }
+    if (tb) { tab = tb.dataset.tab; drawTab(); if (tab === 'content') autoScan(); return; }
     const keysLink = e.target.closest('[data-keys]');
-    if (keysLink) { e.preventDefault(); okeysModal(id, d, keysLink.dataset.keys, refreshWs); return; }
+    if (keysLink) { e.preventDefault(); okeysModal(id, d, keysLink.dataset.keys, refreshWs, ro()); return; }
     const onlyBtn = e.target.closest('[data-only]');
     if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; drawTab(); return; }
     const fd = e.target.closest('[data-fdiff]');
@@ -897,7 +997,7 @@ function renderEditor(root, id, app, route = {}) {
     if (!b) return;
     const act = b.dataset.act;
     if (act === 'back') app.go({ name: 'admin' });
-    if (act === 'changes') changesModal(id, d, refreshWs);
+    if (act === 'changes') changesModal(id, d, refreshWs, ro());
     if (act === 'sync') doSync();
     if (act === 'unsync') {
       const pending = ws().changes?.total || 0;
@@ -1001,46 +1101,54 @@ function renderEditor(root, id, app, route = {}) {
   });
   root.innerHTML = '<div class="page"><div class="empty"><span class="spin"></span><p>Abriendo…</p></div></div>';
   offs.push(on('admin-sync-revoked', (list) => { if (d && list.some((x) => x.id === id)) reload().catch(() => {}); }));
+  offs.push(on('admin-perms', () => { if (d) draw(); }));
+  offs.push(on('focus', (f) => {
+    if (!f) return;
+    if (permsStale()) freshPerms(app);
+    autoScan();
+  }));
+  offs.push(on('game', (g) => { if (g?.state === 'exit' && g.id === id) setTimeout(autoScan, 800); }));
+  if (permsStale()) freshPerms(app);
   return () => offs.forEach((f) => f());
 }
 
 const okind = (k) => (k.key.startsWith('key_') ? 'tecla' : k.key.startsWith('soundCategory_') ? 'volumen' : k.personal ? 'personal' : '');
 
-function okeyRow(file, k, on) {
+function okeyRow(file, k, on, ro = false) {
   const kind = okind(k);
   const from = k.from == null ? 'no estaba' : k.from;
   const long = from.length + k.to.length > 48;
   return `<label class="okey check ${on ? 'is-on' : ''}">
-      <input type="checkbox" data-okey="${esc(k.key)}" data-ofile="${esc(file)}" ${on ? 'checked' : ''}>
+      <input type="checkbox" data-okey="${esc(k.key)}" data-ofile="${esc(file)}" ${on ? 'checked' : ''} ${ro ? 'disabled' : ''}>
       <span class="okey__key"><b class="mono">${esc(k.key)}</b>${kind ? `<span class="tag">${kind}</span>` : ''}</span>
       <span class="okey__vals mono" ${long ? `data-tip="${esc(`${from} → ${k.to}`)}"` : ''}><span class="okey__from ${k.from == null ? 'is-new' : ''}">${esc(from)}</span>${icon('arrowRight')}<span class="okey__to">${esc(k.to)}</span></span>
       <span class="okey__state">${on ? 'Se sube' : 'No se sube'}</span>
     </label>`;
 }
 
-function okeysHtml(file, pending = [], hidden = []) {
+function okeysHtml(file, pending = [], hidden = [], ro = false) {
   const keptList = hidden.length ? `<details class="okeys__kept"><summary>${hidden.length} ajuste(s) que no subiste en otra versión: siguen solo en tu PC</summary>
-      <p class="okeys__hint">Márcalos si ahora sí quieres que los reciban los jugadores.</p>
-      <div class="okeys__list">${hidden.map((k) => okeyRow(file, k, false)).join('')}</div></details>` : '';
+      ${ro ? '' : '<p class="okeys__hint">Márcalos si ahora sí quieres que los reciban los jugadores.</p>'}
+      <div class="okeys__list">${hidden.map((k) => okeyRow(file, k, false, ro)).join('')}</div></details>` : '';
   if (!pending.length) return `<div class="okeys okeys--quiet" data-okeys="${esc(file)}"><div class="okeys__head"><div class="okeys__title">${icon('layers')}<span><b class="mono">${esc(file)}</b></span></div><span class="okeys__count" data-ocount></span></div>${keptList}</div>`;
   return `<div class="okeys" data-okeys="${esc(file)}">
       <div class="okeys__head">
         <div class="okeys__title">${icon('layers')}<span>Ajustes cambiados en <b class="mono">${esc(file)}</b></span></div>
         <span class="okeys__count" data-ocount></span>
         <div class="field__row" style="gap:4px">
-          ${pending.length > 1 ? `<button class="btn btn--sm btn--ghost" type="button" data-oall>${icon('check')}<span>Marcar todos</span></button>` : ''}
+          ${pending.length > 1 && !ro ? `<button class="btn btn--sm btn--ghost" type="button" data-oall>${icon('check')}<span>Marcar todos</span></button>` : ''}
           <button class="btn btn--sm btn--ghost" type="button" data-odiff="${esc(file)}" data-tip="Ver las líneas que cambiaron">${icon('eye')}Líneas</button>
         </div>
       </div>
-      <p class="okeys__hint">Marca los cambios que quieres subir. Los que dejes sin marcar <b>no se suben</b>: se quedan solo en tu PC y a los jugadores no les cambia nada.</p>
-      <div class="okeys__list">${pending.map((k) => okeyRow(file, k, k.confirmed)).join('')}</div>
+      <p class="okeys__hint">${ro ? `${NEED_EDIT} para elegir qué ajustes se suben.` : 'Marca los cambios que quieres subir. Los que dejes sin marcar <b>no se suben</b>: se quedan solo en tu PC y a los jugadores no les cambia nada.'}</p>
+      <div class="okeys__list">${pending.map((k) => okeyRow(file, k, k.confirmed, ro)).join('')}</div>
       ${keptList}
     </div>`;
 }
 
-function okeysAll(w) {
+function okeysAll(w, ro = false) {
   const files = [...new Set([...Object.keys(w.merge || {}), ...Object.keys(w.mergeKept || {})])].sort();
-  return files.map((f) => okeysHtml(f, w.merge?.[f] || [], w.mergeKept?.[f] || [])).join('');
+  return files.map((f) => okeysHtml(f, w.merge?.[f] || [], w.mergeKept?.[f] || [], ro)).join('');
 }
 
 function bindOkeys(box, id, onPick) {
@@ -1101,7 +1209,7 @@ function okeysPicked(box) {
   return out;
 }
 
-function okeysModal(id, d, file, onClose) {
+function okeysModal(id, d, file, onClose, ro = false) {
   const w = d.workspace || {};
   let dirty = false;
   const m = modal({
@@ -1109,7 +1217,7 @@ function okeysModal(id, d, file, onClose) {
     onClose: () => { if (dirty) onClose?.(); },
     html: `<div class="modal__body"><h2 class="modal__title">Ajustes de ${esc(file)}</h2>
       <p class="modal__text">Lo que cambió en tu PC respecto a la versión publicada (v${d.baseVersion}). Cada jugador conserva sus propios ajustes: solo recibe los que marques aquí.</p>
-      <div class="okeys-box">${okeysHtml(file, w.merge?.[file] || [], w.mergeKept?.[file] || [])}</div>
+      <div class="okeys-box">${okeysHtml(file, w.merge?.[file] || [], w.mergeKept?.[file] || [], ro)}</div>
       <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Listo</button></div></div>`,
   });
   bindOkeys(m.content, id, () => { dirty = true; });
@@ -1199,11 +1307,11 @@ function bindChanges(box, id, d) {
   });
 }
 
-function changesModal(id, d, onChange) {
+function changesModal(id, d, onChange, ro = false) {
   const w = d.workspace || {};
   const ch = w.changes || { total: 0 };
   const metaN = d.baseVersion ? (d.metaChanges || []).length : 0;
-  const ok = okeysAll(w);
+  const ok = okeysAll(w, ro);
   let dirty = false;
   const m = modal({
     size: 'xl',
