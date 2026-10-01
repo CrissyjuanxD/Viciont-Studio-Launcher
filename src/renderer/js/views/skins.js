@@ -109,7 +109,7 @@ export function render(root, _route, app) {
     const acc = data?.account;
     const premium = acc?.type === 'microsoft';
     root.querySelector('#sk-name').textContent = acc?.name || 'Skins';
-    root.querySelector('#sk-badge').innerHTML = acc ? `<span class="chip ${premium ? 'chip--hot' : ''}">${icon(premium ? 'microsoft' : 'user')}${premium ? 'Cuenta verificada de Microsoft' : 'No premium'}</span>` : '';
+    root.querySelector('#sk-badge').innerHTML = acc ? `<span class="chip ${premium ? 'chip--hot' : ''}">${icon(premium ? 'microsoft' : 'user')}${premium ? 'Cuenta de Microsoft' : 'No premium'}</span>` : '';
     root.querySelector('#sk-lead').textContent = premium
       ? 'Tu skin se cambia en tu cuenta de Minecraft: la verá todo el mundo, en cualquier servidor.'
       : data?.serverReady
@@ -227,7 +227,7 @@ export function render(root, _route, app) {
       const m = modal({
         size: 'sm',
         html: `<div class="modal__body"><h2 class="modal__title">Copiar skin de un nick</h2>
-          <p class="modal__text">Escribe el nick de cualquier jugador con cuenta verificada de Microsoft y se añadirá su skin a tu biblioteca.</p>
+          <p class="modal__text">Escribe el nick de cualquier jugador con cuenta de Microsoft y se añadirá su skin a tu biblioteca.</p>
           <form id="nf" style="display:grid;gap:12px;margin-top:16px"><input class="input" name="n" maxlength="16" placeholder="Nick del jugador" autofocus>
           <div class="modal__actions" style="margin-top:6px"><button class="btn btn--primary" type="submit">${icon('download')}Copiar skin</button></div></form></div>`,
       });

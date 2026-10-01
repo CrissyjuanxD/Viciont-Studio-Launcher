@@ -20,7 +20,7 @@ function validateSkin(buf, { premium }) {
   if (!info) throw new Error('El archivo no es una imagen PNG válida.');
   const { width: w, height: h } = info;
   if (premium) {
-    if (!(w === 64 && (h === 64 || h === 32))) throw new Error('Para cuentas verificadas de Microsoft la skin debe medir 64×64 o 64×32 píxeles.');
+    if (!(w === 64 && (h === 64 || h === 32))) throw new Error('Para cuentas de Microsoft la skin debe medir 64×64 o 64×32 píxeles.');
   } else if (!([64, 128, 256, 512].includes(w) && (h === w || h === w / 2))) {
     throw new Error('La skin debe medir 64×64 (o 64×32). También se admiten skins HD de 128, 256 o 512.');
   }
@@ -128,7 +128,7 @@ class Skins {
     const nick = String(name || '').trim();
     if (!/^[A-Za-z0-9_]{3,16}$/.test(nick)) throw new Error('Escribe un nick válido.');
     const { status, data } = await request(`https://api.mojang.com/users/profiles/minecraft/${encodeURIComponent(nick)}`, { ok: [404, 204], timeout: 10000 });
-    if (status !== 200 || !data?.id) throw new Error(`No hay ninguna cuenta verificada de Microsoft con el nick "${nick}".`);
+    if (status !== 200 || !data?.id) throw new Error(`No hay ninguna cuenta de Microsoft con el nick "${nick}".`);
     const prof = await getJson(`https://sessionserver.mojang.com/session/minecraft/profile/${data.id}`, { timeout: 10000 });
     const prop = prof?.properties?.find((p) => p.name === 'textures');
     const tex = prop ? JSON.parse(Buffer.from(prop.value, 'base64').toString('utf8')) : null;
@@ -212,7 +212,7 @@ class Skins {
 
   async setCape(capeId) {
     const acc = this.accounts.active();
-    if (acc?.type !== 'microsoft') throw new Error('Las capas solo están disponibles en cuentas verificadas de Microsoft.');
+    if (acc?.type !== 'microsoft') throw new Error('Las capas solo están disponibles en cuentas de Microsoft.');
     const fresh = await this.accounts.ensureFresh(acc);
     const headers = { Authorization: `Bearer ${fresh.mcToken}` };
     if (capeId) {

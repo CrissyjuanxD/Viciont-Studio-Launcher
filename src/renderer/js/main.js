@@ -103,7 +103,7 @@ const app = {
     const acc = state.accounts.active;
     const btn = $('rail-avatar');
     btn.dataset.tip = acc ? acc.name : 'Sin sesión';
-    btn.dataset.tipSub = acc ? (acc.type === 'microsoft' ? 'Cuenta verificada de Microsoft' : 'Cuenta no premium') : '';
+    btn.dataset.tipSub = acc ? (acc.type === 'microsoft' ? 'Cuenta de Microsoft' : 'Cuenta no premium') : '';
     $('rail-avatar-type').innerHTML = acc ? icon(acc.type === 'microsoft' ? 'microsoft' : 'user') : '';
     let cur = null;
     try { cur = await call('skins:current'); } catch { cur = null; }

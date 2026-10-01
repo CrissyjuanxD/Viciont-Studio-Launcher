@@ -318,7 +318,7 @@ const PANES = {
           <div style="display:grid;gap:10px">
             ${list.map((a) => `
               <div class="field__row" style="justify-content:space-between;padding:12px 14px;border:1px solid ${a.active ? 'rgba(236,72,153,.6)' : 'var(--line)'};border-radius:14px;background:${a.active ? 'var(--grad-soft)' : 'transparent'}">
-                <span class="field__row">${icon(a.type === 'microsoft' ? 'microsoft' : 'user')}<b>${esc(a.name)}</b><span class="chip">${a.type === 'microsoft' ? 'Cuenta verificada de Microsoft' : 'No premium'}</span>${a.active ? '<span class="chip chip--hot">En uso</span>' : ''}${a.needsLogin ? '<span class="chip chip--warn">Inicia sesión otra vez</span>' : ''}</span>
+                <span class="field__row">${icon(a.type === 'microsoft' ? 'microsoft' : 'user')}<b>${esc(a.name)}</b><span class="chip">${a.type === 'microsoft' ? 'Cuenta de Microsoft' : 'No premium'}</span>${a.active ? '<span class="chip chip--hot">En uso</span>' : ''}${a.needsLogin ? '<span class="chip chip--warn">Inicia sesión otra vez</span>' : ''}</span>
                 <span class="field__row">
                   ${a.active ? '' : `<button class="btn btn--sm" type="button" data-use="${esc(a.uuid)}">Usar</button>`}
                   <button class="btn btn--sm btn--ghost" type="button" data-out="${esc(a.uuid)}">${icon('logout')}Cerrar sesión</button>
@@ -376,7 +376,7 @@ const PANES = {
         const st = await call('accounts:serverStatus').catch((e) => ({ ok: false, message: e.message }));
         if (!box.isConnected) return;
         box.innerHTML = st.ok
-          ? `<span class="chip">${icon('check')}Conectada</span> ${st.type === 'premium' ? 'Tu cuenta verificada de Microsoft' : 'Tu cuenta'} <b>${esc(st.name || '')}</b> está conectada al servidor de Viciont Studios.`
+          ? `<span class="chip">${icon('check')}Conectada</span> ${st.type === 'premium' ? 'Tu cuenta de Microsoft' : 'Tu cuenta'} <b>${esc(st.name || '')}</b> está conectada al servidor de Viciont Studios.`
           : `<span class="chip chip--warn">${icon('alert')}Sin conexión</span> ${esc(st.message || 'No se pudo conectar.')}`;
         hydrateIcons(box);
       };
@@ -511,7 +511,7 @@ const PANES = {
         <h3>Privacidad y seguridad</h3>
         <ul class="plain-list">
           <li><b>Tu contraseña de Microsoft</b> solo se escribe en la página oficial de Microsoft (igual que en Modrinth o el launcher oficial). El launcher nunca la ve ni la guarda.</li>
-          <li><b>Tus sesiones</b> se guardan cifradas con ${keyring()} en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta verificada de Microsoft se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
+          <li><b>Tus sesiones</b> se guardan cifradas con ${keyring()} en este PC y nunca se envían al servidor de Viciont Studios: tu cuenta de Microsoft se comprueba con Mojang como en cualquier servidor de Minecraft.</li>
           <li><b>Registro de actividad:</b> para ayudarte si algo falla, el launcher envía al servidor de Viciont Studios lo básico: cuándo entras o sales, cambios de skin, descargas y actualizaciones, cuándo juegas y los errores (con tu nick, la versión del launcher, tu sistema y tu RAM). Si el juego se cierra con un error, también su informe (crash report y registro del juego, sin tu nombre de usuario del sistema). Nunca se envían contraseñas, tokens, códigos de recuperación, tus archivos ni tu IP. Se borra a los 30 días.</li>
           <li><b>Archivos:</b> todo lo que se descarga se comprueba con su huella SHA-1; si algo no coincide, se descarta.</li>
         </ul>

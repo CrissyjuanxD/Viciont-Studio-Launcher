@@ -1,8 +1,8 @@
 {
   "name": "viciont-studio-launcher",
   "productName": "Viciont Studios Launcher",
-  "version": "1.3.0",
-  "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas verificadas de Microsoft y no premium, skins y descargas rápidas.",
+  "version": "1.3.1",
+  "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas de Microsoft y no premium, skins y descargas rápidas.",
   "author": {
     "name": "CrissyjuanxD",
     "url": "https://github.com/CrissyjuanxD"
@@ -165,7 +165,7 @@
       "maintainer": "CrissyjuanxD <113305236+CrissyjuanxD@users.noreply.github.com>",
       "vendor": "Viciont Studios",
       "synopsis": "Launcher de Minecraft de Viciont Studios",
-      "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas verificadas de Microsoft y no premium, skins y descargas rápidas."
+      "description": "Launcher de Minecraft de Viciont Studios: instancias públicas y privadas, cuentas de Microsoft y no premium, skins y descargas rápidas."
     },
     "deb": {
       "packageName": "viciont-studios-launcher",
