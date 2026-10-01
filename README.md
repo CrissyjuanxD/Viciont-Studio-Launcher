@@ -6,7 +6,7 @@
 
 <p align="center">
   El launcher de Minecraft oficial de <b>Viciont Studios</b>, creado por <b>CrissyjuanxD</b>.<br>
-  Instancias públicas y privadas, cuentas premium y no premium, skins, y descargas rápidas y seguras.
+  Instancias públicas y privadas, cuentas verificadas de Microsoft y no premium, skins, y descargas rápidas y seguras.
 </p>
 
 <p align="center">
@@ -65,11 +65,11 @@ No necesitas tener Java instalado: el launcher descarga el Java oficial que nece
 ## Qué hace
 
 **Para los jugadores**
-- **Iniciar sesión** con una cuenta de Microsoft (premium) o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar un nick de una cuenta premium: lo comprueba en la misma base de datos de Mojang que usa NameMC.
+- **Iniciar sesión** con una cuenta verificada de Microsoft o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar el nick de una cuenta verificada de Microsoft: lo comprueba en la misma base de datos de Mojang que usa NameMC.
 - Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC (cifrado), así que puedes cerrar sesión y volver a entrar sin escribirlo.
 - **Tu PC queda vinculado a tu nick**: aunque desinstales el launcher borrándolo todo y lo vuelvas a instalar, en ese mismo PC entras con tu nick sin el código. El launcher guarda una llave aleatoria de ese PC fuera de su carpeta de datos, y el servidor solo guarda un hash que no sirve desde otro PC. Si has entrado así, en **Ajustes → Cuenta** puedes generar un código nuevo para jugar en otro PC, y al cerrar sesión puedes marcar que el PC olvide el nick (recomendado en PCs compartidos).
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
-  - Premium: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
+  - Cuenta verificada de Microsoft: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
 - **Inicio** con todas las instancias que puedes jugar: en cada una se ve cuándo jugaste por última vez y cuánto tiempo llevas jugado. Abajo siempre queda el pie con las redes de Viciont Studios, aunque haya muchas instancias.
 - **Barra lateral** con las instancias que tienes permiso para ver, la casita para volver al inicio, las skins, los ajustes, tu cabeza de la skin (al pasar el cursor dice qué cuenta tienes) y el botón de cerrar sesión.
@@ -144,8 +144,8 @@ Las instancias, los permisos, los archivos privados, las skins no premium, los r
 
 ## Seguridad
 
-- **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión, Microsoft también olvida la cuenta en esa ventana.
-- Las sesiones se guardan **cifradas por el sistema** en tu PC (DPAPI en Windows, el llavero de macOS y el llavero del sistema en Linux, como GNOME Keyring o KWallet). Las cuentas premium se verifican con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
+- **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión puedes marcar que esa ventana olvide también la cuenta de Microsoft.
+- Las sesiones se guardan **cifradas por el sistema** en tu PC (DPAPI en Windows, el llavero de macOS y el llavero del sistema en Linux, como GNOME Keyring o KWallet). Las cuentas verificadas de Microsoft se comprueban con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
 - La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta). La versión instalada lleva los "fusibles" de seguridad de Electron activados: no se puede arrancar como Node, ni con depuradores, ni cargar código que no sea el suyo.
 - **Sin servidores falsos**: en la versión instalada el servidor de Viciont Studios sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
 - La administración necesita **dos llaves** (nick autorizado desde el panel + clave personal vinculada a su cuenta) y el servidor comprueba los permisos en cada acción.

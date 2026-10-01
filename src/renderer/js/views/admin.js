@@ -806,7 +806,7 @@ function renderEditor(root, id, app, route = {}) {
       <div class="panel" id="allow-box">
         <div class="panel__title"><span>Nicks con permiso</span><span class="muted mono" style="font-size:.8rem" id="allow-count"></span></div>
         <div class="chips-input" id="allow"><input placeholder="${ro() ? (mt.allow.length ? '' : 'Ningún nick') : 'Escribe un nick y pulsa Enter (o pega varios separados por comas)'}"></div>
-        <p class="field__hint" style="margin-top:10px">Vale para cuentas premium y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
+        <p class="field__hint" style="margin-top:10px">Vale para cuentas verificadas de Microsoft y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
       </div>
       <div class="panel">
         <div class="panel__title"><span>Qué ven los jugadores de sus archivos</span></div>

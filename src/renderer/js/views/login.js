@@ -34,7 +34,7 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
         <div class="login__options">
           <button class="login-opt" type="button" data-opt="ms">
             <span class="login-opt__icon">${icon('microsoft')}</span>
-            <span><span class="login-opt__title">Cuenta de Microsoft (premium)</span><span class="login-opt__desc">Si compraste Minecraft: Java Edition. Tu skin se verá en todos los servidores.</span></span>
+            <span><span class="login-opt__title">Cuenta de Microsoft</span><span class="login-opt__desc">Inicia sesión con una cuenta verificada de Microsoft.</span></span>
           </button>
           <button class="login-opt" type="button" data-opt="offline">
             <span class="login-opt__icon">${icon('user')}</span>

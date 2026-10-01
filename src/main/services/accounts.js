@@ -178,7 +178,7 @@ class Accounts extends EventEmitter {
     const nick = name.trim();
     const p = await offline.premiumLookup(nick);
     if (p.premium) {
-      return { ok: false, reason: 'premium', message: `"${p.name}" es el nick de una cuenta premium. Elige otro o entra con tu cuenta de Microsoft.`, premiumName: p.name };
+      return { ok: false, reason: 'premium', message: `"${p.name}" pertenece a una cuenta verificada de Microsoft. Elige otro nick o, si es tuya, entra con tu cuenta de Microsoft.`, premiumName: p.name };
     }
     const mine = this.data.list.find((a) => a.type === 'offline' && a.name.toLowerCase() === nick.toLowerCase());
     if (mine) return { ok: true, reason: 'mine', message: 'Ya tienes este nick guardado en el launcher.' };
@@ -201,7 +201,7 @@ class Accounts extends EventEmitter {
     const problem = offline.validateNick(nick);
     if (problem) throw Object.assign(new Error(problem), { code: 'EFORMAT' });
     const p = await offline.premiumLookup(nick);
-    if (p.premium) throw Object.assign(new Error(`"${p.name}" pertenece a una cuenta premium. Elige otro nick.`), { code: 'EPREMIUM' });
+    if (p.premium) throw Object.assign(new Error(`"${p.name}" pertenece a una cuenta verificada de Microsoft. Elige otro nick.`), { code: 'EPREMIUM' });
     const uuid = offline.offlineUuid(nick);
     const existing = this.find(uuid);
     const acc = existing ? { ...existing, name: nick } : { type: 'offline', uuid, name: nick, addedAt: Date.now() };
@@ -344,7 +344,7 @@ class Accounts extends EventEmitter {
       return acc.backend.token;
     } catch (e) {
       if (e.status === 409) throw Object.assign(new Error('Este nick ya está registrado. Si es tuyo, escribe tu código de recuperación (lo ves en Ajustes → Cuenta del PC donde lo creaste).'), { code: 'ENICKTAKEN' });
-      if (e.status === 403 && e.code === 'premium') throw Object.assign(new Error(e.message), { code: 'EPREMIUM' });
+      if (e.status === 403 && e.code === 'premium') throw Object.assign(new Error(`"${acc.name}" pertenece a una cuenta verificada de Microsoft. Elige otro nick.`), { code: 'EPREMIUM' });
       throw e;
     }
   }

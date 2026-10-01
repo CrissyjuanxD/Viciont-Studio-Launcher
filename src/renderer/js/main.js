@@ -103,7 +103,7 @@ const app = {
     const acc = state.accounts.active;
     const btn = $('rail-avatar');
     btn.dataset.tip = acc ? acc.name : 'Sin sesión';
-    btn.dataset.tipSub = acc ? (acc.type === 'microsoft' ? 'Cuenta premium (Microsoft)' : 'Cuenta no premium') : '';
+    btn.dataset.tipSub = acc ? (acc.type === 'microsoft' ? 'Cuenta verificada de Microsoft' : 'Cuenta no premium') : '';
     $('rail-avatar-type').innerHTML = acc ? icon(acc.type === 'microsoft' ? 'microsoft' : 'user') : '';
     let cur = null;
     try { cur = await call('skins:current'); } catch { cur = null; }
@@ -233,8 +233,8 @@ function notifyUpdate() {
   if (!ready && !web) return;
   notified = u.version;
   toast(ready
-    ? `La versión ${u.version} del launcher ya está descargada. Pulsa «Hay una versión disponible», arriba a la izquierda, para actualizar.`
-    : `Hay una versión nueva del launcher (${u.version}). Pulsa «Hay una versión disponible», arriba a la izquierda, para descargarla.`,
+    ? `La versión ${u.version} del launcher ya está descargada. Para instalarla, pulsa «Actualizar» aquí o «Hay una versión disponible», arriba a la izquierda.`
+    : `Hay una versión nueva del launcher (${u.version}). Para descargarla, pulsa «Ver» aquí o «Hay una versión disponible», arriba a la izquierda.`,
   { kind: 'success', timeout: 12000, actions: [{ label: ready ? 'Actualizar' : 'Ver', onClick: () => onUpdateButton() }] });
 }
 
