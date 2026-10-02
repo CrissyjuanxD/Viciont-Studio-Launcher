@@ -29,6 +29,8 @@ const BATCH_API = 5;
 const SYNC_API = 7;
 const STORAGE_API = 9;
 const DISCORD_API = 11;
+const ACCESS_API = 12;
+const ACCESS_KEYS = ['allow', 'deny', 'discord'];
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
@@ -160,7 +162,16 @@ class Admin extends EventEmitter {
     this.tasks = new Map();
     this.grants = new Map();
     this.pub = new Map();
+    this.metaLocks = new Map();
     this.apiOk = 0;
+  }
+
+  withMeta(id, fn) {
+    const run = (this.metaLocks.get(id) || Promise.resolve()).then(fn);
+    const tail = run.catch(() => {});
+    this.metaLocks.set(id, tail);
+    tail.then(() => { if (this.metaLocks.get(id) === tail) this.metaLocks.delete(id); });
+    return run;
   }
 
   load() {
@@ -523,20 +534,47 @@ class Admin extends EventEmitter {
   }
 
   async discard(id) {
-    await fsp.rm(this.draftFile(id), { force: true });
-    await rmrf(path.join(this.dirs().imports, id));
-    return true;
+    return this.withMeta(id, async () => {
+      await fsp.rm(this.draftFile(id), { force: true });
+      await rmrf(path.join(this.dirs().imports, id));
+      return true;
+    });
   }
 
   async saveMeta(id, patch) {
-    const { d, inst } = await this.metaDraft(id);
-    d.meta = cleanMeta({ ...d.meta, ...patch }, id);
-    await this.persistMeta(d, inst);
-    if (patch.mc || patch.loader) {
-      const st = await this.instances.readState(id);
-      if (st?.workspace) await this.instances.writeState(id, { ...st, mc: d.meta.mc, loader: d.meta.loader });
-    }
-    return this.view(id, d, inst, { ws: false });
+    return this.withMeta(id, async () => {
+      const { d, inst } = await this.metaDraft(id);
+      d.meta = cleanMeta({ ...d.meta, ...patch }, id);
+      await this.persistMeta(d, inst);
+      if (patch.mc || patch.loader) {
+        const st = await this.instances.readState(id);
+        if (st?.workspace) await this.instances.writeState(id, { ...st, mc: d.meta.mc, loader: d.meta.loader });
+      }
+      return this.view(id, d, inst, { ws: false });
+    });
+  }
+
+  async saveAccess(id, patch) {
+    return this.withMeta(id, async () => {
+      const { d, inst } = await this.metaDraft(id);
+      const access = {};
+      for (const k of ACCESS_KEYS) if (Array.isArray(patch?.[k])) access[k] = patch[k];
+      d.meta = cleanMeta({ ...d.meta, ...access }, id);
+      let pub = inst;
+      let error = null;
+      const live = Boolean(inst?.version) && (await this.serverVersion().catch(() => this.apiVer || 0)) >= ACCESS_API;
+      if (live) {
+        try {
+          const r = await this.call(`/v1/admin/instances/${id}/access`, { method: 'PUT', json: { allow: d.meta.allow, deny: d.meta.deny, discord: d.meta.discord }, timeout: 20000 });
+          if (r?.instance?.version) { pub = r.instance; this.pub.set(id, pub); }
+        } catch (e) {
+          if (e.code === 'ELOCKED' || e.code === 'EBADKEY' || e.code === 'ENOACCESS') throw e;
+          error = e.message;
+        }
+      }
+      await this.persistMeta(d, pub);
+      return { ...(await this.view(id, d, pub, { ws: false })), access: { live, saved: live && !error, error } };
+    });
   }
 
   async setMedia(id, kind, { bytes, type }) {
@@ -547,24 +585,28 @@ class Admin extends EventEmitter {
     const buf = Buffer.from(bytes);
     const max = /^video/.test(type) ? 80 : ext === 'gif' ? 15 : 8;
     if (buf.length > max * 1024 * 1024) throw err(`El archivo es demasiado grande (máximo ${max} MB).`);
-    const { d, inst } = await this.metaDraft(id);
     const name = `${crypto.createHash('sha256').update(buf).digest('hex')}.${ext}`;
     const file = path.join(this.dirs().media, name);
     await ensureDir(this.dirs().media);
     if (!(await exists(file))) await fsp.writeFile(file, buf);
-    d.media = d.media || {};
-    d.media[kind] = { name, type, size: buf.length, local: true };
-    await this.persistMeta(d, inst);
-    return this.view(id, d, inst, { ws: false });
+    return this.withMeta(id, async () => {
+      const { d, inst } = await this.metaDraft(id);
+      d.media = d.media || {};
+      d.media[kind] = { name, type, size: buf.length, local: true };
+      await this.persistMeta(d, inst);
+      return this.view(id, d, inst, { ws: false });
+    });
   }
 
   async clearMedia(id, kind) {
     if (!MEDIA_KINDS.includes(kind)) throw err('Tipo de imagen no válido');
-    const { d, inst } = await this.metaDraft(id);
-    d.media = d.media || {};
-    d.media[kind] = null;
-    await this.persistMeta(d, inst);
-    return this.view(id, d, inst, { ws: false });
+    return this.withMeta(id, async () => {
+      const { d, inst } = await this.metaDraft(id);
+      d.media = d.media || {};
+      d.media[kind] = null;
+      await this.persistMeta(d, inst);
+      return this.view(id, d, inst, { ws: false });
+    });
   }
 
   async mustWs(id) {
@@ -1556,13 +1598,15 @@ class Admin extends EventEmitter {
   }
 
   async updateMeta(id, meta) {
-    const { d } = await this.metaDraft(id);
-    d.meta = cleanMeta({ ...d.meta, ...meta }, id);
-    await this.uploadMedia(id, d, null);
-    const r = await this.call(`/v1/admin/instances/${id}/meta`, { method: 'PUT', json: { meta: d.meta, media: this.mediaNames(d) } });
-    this.pub.set(id, r.instance);
-    await this.persistMeta({ id, meta: d.meta, media: mediaFrom(r.instance) }, r.instance);
-    return r.instance;
+    return this.withMeta(id, async () => {
+      const { d } = await this.metaDraft(id);
+      d.meta = cleanMeta({ ...d.meta, ...meta }, id);
+      await this.uploadMedia(id, d, null);
+      const r = await this.call(`/v1/admin/instances/${id}/meta`, { method: 'PUT', json: { meta: d.meta, media: this.mediaNames(d) } });
+      this.pub.set(id, r.instance);
+      await this.persistMeta({ id, meta: d.meta, media: mediaFrom(r.instance) }, r.instance);
+      return r.instance;
+    });
   }
 
   async remove(id) {

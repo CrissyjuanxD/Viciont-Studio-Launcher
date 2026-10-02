@@ -581,6 +581,7 @@ function start() {
   on('admin:open', needAdmin((id) => admin.open(id)));
   on('admin:discard', needAdmin((id) => admin.discard(id)));
   on('admin:saveMeta', needEdit((id, meta) => admin.saveMeta(id, meta)));
+  on('admin:saveAccess', needEdit((id, patch) => admin.saveAccess(id, patch)));
   on('admin:addFiles', needEdit(async (id, targetDir, folders) => {
     const r = await dialog.showOpenDialog(parentWin(), {
       title: folders ? 'Elegir carpetas' : 'Elegir archivos',

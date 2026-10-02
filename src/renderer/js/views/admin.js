@@ -461,16 +461,85 @@ function renderEditor(root, id, app, route = {}) {
     });
   };
 
-  const saveMeta = debounce(async (patch) => {
+  let metaPatch = {};
+  const flushMeta = debounce(async () => {
+    const patch = metaPatch;
+    metaPatch = {};
     try {
       const r = await call('admin:saveMeta', id, patch);
       d = { ...r, meta: { ...r.meta, allow: d.meta.allow, deny: d.meta.deny || [], discord: d.meta.discord || [] }, workspace: d.workspace };
       paintBar();
     } catch (e) { toastError(e); }
   }, 450);
-  const saveAccess = () => saveMeta({ allow: d.meta.allow, deny: d.meta.deny || [], discord: d.meta.discord || [] });
+  const saveMeta = (patch) => { metaPatch = { ...metaPatch, ...patch }; flushMeta(); };
+
+  let acc = { s: '' };
+  let accVer = 0;
+  let accRetry = null;
+  const paintAcc = () => {
+    const label = {
+      saving: '<span class="spin"></span>Guardando…',
+      saved: `${icon('check')}Guardado`,
+      error: `${icon('alert')}No se guardó`,
+      draft: d?.baseVersion ? `${icon('alert')}Sin guardar` : 'Se aplica al publicar',
+    }[acc.s] || '';
+    const tip = acc.s === 'error'
+      ? `${acc.error || 'No se pudo conectar con el servidor'}. Se vuelve a intentar sola; también puedes pulsar «Guardar solo textos y permisos».`
+      : acc.s === 'draft' && d?.baseVersion ? 'Pulsa «Guardar solo textos y permisos» para aplicarlo. Con el servidor 12 o más nuevo se guarda solo.' : '';
+    const cls = acc.s === 'draft' && !d?.baseVersion ? 'later' : acc.s;
+    document.querySelectorAll('[data-acc-state]').forEach((el) => {
+      el.className = `save-state${cls ? ` is-${cls}` : ''}`;
+      el.innerHTML = label;
+      if (tip) el.dataset.tip = tip; else delete el.dataset.tip;
+      hydrateIcons(el);
+    });
+  };
+  const pushAccess = debounce(async () => {
+    const ver = accVer;
+    let next;
+    try {
+      const r = await call('admin:saveAccess', id, { allow: d.meta.allow, deny: d.meta.deny || [], discord: d.meta.discord || [] });
+      d = { ...d, dirtyMeta: r.dirtyMeta, metaChanges: r.metaChanges, apiVersion: r.apiVersion };
+      next = !r.access?.live ? { s: 'draft' } : r.access.saved ? { s: 'saved' } : { s: 'error', error: r.access.error };
+    } catch (e) {
+      next = { s: 'error', error: e.message };
+      toastError(e);
+    }
+    if (ver !== accVer || !root.isConnected) return;
+    acc = next;
+    paintAcc();
+    paintBar();
+    clearTimeout(accRetry);
+    if (acc.s === 'error') accRetry = setTimeout(() => { if (acc.s === 'error' && root.isConnected) saveAccess(); }, 8000);
+  }, 400);
+  const saveAccess = () => { accVer++; acc = { s: 'saving' }; paintAcc(); pushAccess(); };
+  offs.push(() => clearTimeout(accRetry));
+
   let dcOn = null;
   let dcInfo = null;
+  let dcKey = '';
+  let dcAt = 0;
+  let dcBusy = null;
+  let redrawDc = null;
+  let accessOpen = null;
+  const loadDiscord = () => {
+    dcBusy ??= call('admin:discord').then((r) => {
+      dcInfo = r;
+      const key = JSON.stringify([r.enabled, r.error, (r.channels || []).map((c) => [c.id, c.name, c.guild, c.nicks, c.people, c.error])]);
+      if (key !== dcKey) { dcKey = key; redrawDc?.(); }
+      accessOpen?.refresh();
+      return dcInfo;
+    }).finally(() => { dcAt = Date.now(); dcBusy = null; });
+    return dcBusy;
+  };
+  const tickDiscord = () => {
+    if (!d || !root.isConnected || (document.hidden && !window.__vslForceActive) || (d.apiVersion || 0) < 11) return;
+    if (tab !== 'access' && !accessOpen) return;
+    if (Date.now() - dcAt < (state.focused ? 5000 : 30000)) return;
+    loadDiscord().catch(() => {});
+  };
+  const dcTimer = setInterval(tickDiscord, 1000);
+  offs.push(() => clearInterval(dcTimer));
   const updateAccess = (patch) => {
     d.meta = { ...d.meta, ...patch };
     const seen = new Set();
@@ -819,7 +888,7 @@ function renderEditor(root, id, app, route = {}) {
         <p class="field__hint" style="margin-top:10px" id="vis-hint"></p>
       </div>
       <div class="panel" id="allow-box">
-        <div class="panel__title"><span>Nicks con permiso</span><span class="field__row" style="gap:10px"><span class="muted mono" style="font-size:.8rem" id="allow-count"></span><button class="btn btn--sm btn--ghost" type="button" data-act="access-list" data-tip="Lista de todos los que pueden verla, también los de Discord">${icon('users')}Ver todos</button></span></div>
+        <div class="panel__title"><span>Nicks con permiso</span><span class="field__row" style="gap:10px"><span data-acc-state></span><span class="muted mono" style="font-size:.8rem" id="allow-count"></span><button class="btn btn--sm btn--ghost" type="button" data-act="access-list" data-tip="Lista de todos los que pueden verla, también los de Discord">${icon('users')}Ver todos</button></span></div>
         <div class="chips-input" id="allow"><input placeholder="${ro() ? (mt.allow.length ? '' : 'Ningún nick') : 'Escribe un nick y pulsa Enter (o pega varios separados por comas)'}"></div>
         <p class="field__hint" id="allow-more" style="margin-top:8px" hidden></p>
         <p class="field__hint" style="margin-top:10px">Vale para cuentas de Microsoft y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
@@ -827,7 +896,7 @@ function renderEditor(root, id, app, route = {}) {
       <div class="panel" id="dc-box">
         <div class="panel__title"><span>Acceso con Discord</span></div>
         <label class="switch"><input type="checkbox" id="dc-on"> Dar acceso a quien escriba su nick en un canal de Discord</label>
-        <p class="field__hint" style="margin-top:6px">Viciont Studios Bot lee el canal: quien escriba ahí su nick de Minecraft puede ver la instancia en menos de un minuto, sin que tengas que añadirlo a mano. Si borra su mensaje, pierde el acceso. Para quitar a alguien concreto, usa «Ver todos».</p>
+        <p class="field__hint" style="margin-top:6px">Viciont Studios Bot lee el canal: quien escriba ahí su nick de Minecraft puede ver la instancia en unos segundos, sin que tengas que añadirlo a mano. Cada persona puede apuntar hasta 5 nicks. Si borra su mensaje, pierde ese acceso. Para quitar a alguien concreto, usa «Ver todos».</p>
         <div id="dc-list" style="margin-top:12px"></div>
       </div>
       <div class="panel">
@@ -911,12 +980,12 @@ function renderEditor(root, id, app, route = {}) {
       if (!dcOn) { dcList.innerHTML = ''; return; }
       if (!dcInfo) {
         dcList.innerHTML = '<p class="field__hint"><span class="spin"></span> Buscando los canales de nicks…</p>';
-        try { dcInfo = await call('admin:discord'); } catch (e) {
+        try { await loadDiscord(); } catch (e) {
           dcList.innerHTML = `<div class="form-error">${icon('alert')}<span>${esc(e.message)}</span></div>`;
           hydrateIcons(dcList);
           return;
         }
-        if (!dcList.isConnected) return;
+        if (!dcList.isConnected || !dcInfo) return;
       }
       const chans = dcInfo.channels || [];
       const sel = new Set(d.meta.discord || []);
@@ -926,13 +995,14 @@ function renderEditor(root, id, app, route = {}) {
       } else if (!chans.length && !gone.length) {
         dcList.innerHTML = `<p class="field__hint">${dcInfo.error ? `${esc(dcInfo.error)} ` : ''}Todavía no hay ningún canal de nicks. Invita a <b>Viciont Studios Bot</b> a tu servidor de Discord y escribe <code>/nicks activar</code> en el canal donde la gente pone su nick.</p>`;
       } else {
-        dcList.innerHTML = `<div class="dc-list">${chans.map((c) => `<label class="check dc-ch"><input type="checkbox" data-dc="${esc(c.id)}" ${sel.has(c.id) ? 'checked' : ''}><span><b>#${esc(c.name || c.id)}</b><small>${esc(c.guild || 'Discord')} · ${Number(c.nicks) || 0} nick(s)${c.error ? ` · ${esc(c.error)}` : ''}</small></span></label>`).join('')}
+        dcList.innerHTML = `<div class="dc-list">${chans.map((c) => `<label class="check dc-ch"><input type="checkbox" data-dc="${esc(c.id)}" ${sel.has(c.id) ? 'checked' : ''}><span><b>#${esc(c.name || c.id)}</b><small>${esc(c.guild || 'Discord')} · ${Number(c.nicks) || 0} nick(s)${c.people != null ? ` de ${Number(c.people) || 0} persona(s)` : ''}${c.error ? ` · ${esc(c.error)}` : ''}</small></span></label>`).join('')}
           ${gone.map((x) => `<label class="check dc-ch is-gone"><input type="checkbox" data-dc="${esc(x)}" checked><span><b>Canal ${esc(x)}</b><small>Viciont Studios Bot ya no lee este canal: desmárcalo</small></span></label>`).join('')}</div>
           ${sel.size ? '' : '<p class="field__hint" style="margin-top:8px">Marca el canal de nicks que da acceso a esta instancia.</p>'}`;
       }
       lockIn(dcList);
       hydrateIcons(dcList);
     };
+    redrawDc = () => { if (dcOn && dcList.isConnected) drawDiscord(); };
     dcSwitch.addEventListener('change', async () => {
       dcOn = dcSwitch.checked;
       if (!dcOn) { if (d.meta.discord?.length) setDiscord([]); drawDiscord(); return; }
@@ -979,10 +1049,12 @@ function renderEditor(root, id, app, route = {}) {
     drawVis();
     drawAllow();
     drawDiscord();
+    paintAcc();
   };
 
   const reload = async () => {
     d = await call('admin:open', id);
+    acc = { s: '' };
     draw();
   };
 
@@ -1087,8 +1159,17 @@ function renderEditor(root, id, app, route = {}) {
     if (act === 'changes') changesModal(id, d, refreshWs, ro());
     if (act === 'access-list') {
       e.preventDefault();
-      const names = new Map((dcInfo?.channels || []).map((c) => [c.id, c.name]));
-      accessModal({ name: d.meta.name, getMeta: () => d.meta, update: updateAccess, ro: ro(), apiVersion: d.apiVersion, channelName: (cid) => names.get(cid) });
+      accessModal({
+        name: d.meta.name, getMeta: () => d.meta, update: updateAccess, ro: ro(), apiVersion: d.apiVersion,
+        mode: !d.baseVersion ? 'draft' : (d.apiVersion || 0) >= 12 ? 'auto' : 'manual',
+        channels: () => dcInfo?.channels || null,
+        attach: (api) => {
+          accessOpen = api;
+          if (!api) return;
+          paintAcc();
+          if ((d.meta.discord || []).length && Date.now() - dcAt > 3000) loadDiscord().catch(() => {});
+        },
+      });
     }
     if (act === 'sync') doSync();
     if (act === 'unsync') {
@@ -1198,6 +1279,7 @@ function renderEditor(root, id, app, route = {}) {
     if (!f) return;
     if (permsStale()) freshPerms(app);
     autoScan();
+    if (d && (tab === 'access' || accessOpen) && (d.apiVersion || 0) >= 11 && Date.now() - dcAt > 2000) loadDiscord().catch(() => {});
   }));
   offs.push(on('game', (g) => { if (g?.state === 'exit' && g.id === id) setTimeout(autoScan, 800); }));
   if (permsStale()) freshPerms(app);
@@ -1316,22 +1398,51 @@ function okeysModal(id, d, file, onClose, ro = false) {
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
-function accessModal({ name, getMeta, update, ro, apiVersion, channelName }) {
+function accessModal({ name, getMeta, update, ro, apiVersion, mode, channels, attach }) {
   let filter = '';
   let dc = null;
   let dcError = null;
+  let stamp = null;
+  let loading = false;
+  let closed = false;
+  const HINT = {
+    auto: 'Los cambios se guardan solos: los jugadores los ven en unos segundos.',
+    draft: 'Los cambios se aplican al publicar la instancia.',
+    manual: 'Los cambios quedan como borrador: para aplicarlos pulsa «Guardar solo textos y permisos», abajo en el editor.',
+  };
   const m = modal({
     size: 'lg',
+    onClose: () => { closed = true; attach?.(null); },
     html: `<div class="modal__body">
       <h2 class="modal__title">Quién puede ver «${esc(name)}»</h2>
       <p class="modal__text" id="acc-sum"></p>
       ${ro ? '' : `<form class="field__row" id="acc-add" style="margin-top:14px"><input class="input" name="n" autocomplete="off" spellcheck="false" placeholder="Añadir nicks: escribe uno o pega varios separados por comas"><button class="btn btn--primary" type="submit">${icon('plus')}Añadir</button></form>`}
       <input class="input" id="acc-q" placeholder="Buscar un nick…" spellcheck="false" style="margin-top:10px">
       <div class="acc-list" id="acc-list"></div>
-      <p class="field__hint" style="margin-top:12px">${ro ? 'Solo lectura: necesitas el permiso «Editar y publicar» para cambiar la lista.' : 'Los cambios quedan como borrador: para aplicarlos pulsa «Guardar solo textos y permisos», abajo en el editor.'} Los administradores de esta instancia la ven siempre.</p>
-      <div class="modal__actions"><button class="btn btn--primary" type="button" data-close>Listo</button></div></div>`,
+      <p class="field__hint" style="margin-top:12px">${ro ? 'Solo lectura: necesitas el permiso «Editar y publicar» para cambiar la lista.' : HINT[mode] || HINT.manual} Los administradores de esta instancia la ven siempre.</p>
+      <div class="modal__actions">${ro ? '' : '<span data-acc-state></span>'}<button class="btn btn--primary" type="button" data-close>Listo</button></div></div>`,
   });
   const box = m.content.querySelector('#acc-list');
+  const channelName = (cid) => (channels?.() || []).find((c) => c.id === cid)?.name;
+  const stampOf = () => {
+    const sel = new Set(getMeta().discord || []);
+    return JSON.stringify((channels?.() || []).filter((c) => sel.has(c.id)).map((c) => [c.id, c.changedAt ?? c.syncedAt ?? null, c.nicks ?? null]));
+  };
+  const loadNicks = async () => {
+    const ids = getMeta().discord || [];
+    if (!ids.length || (apiVersion || 0) < 11 || loading || closed) return;
+    loading = true;
+    const s = stampOf();
+    try {
+      dc = await call('admin:discordNicks', ids);
+      dcError = null;
+      stamp = s;
+    } catch (e) {
+      dcError = e.message;
+      if (!dc) dc = [];
+    } finally { loading = false; }
+    if (!closed) draw();
+  };
   const lower = (n) => String(n).toLowerCase();
   const btn = (attr, nick, label) => (ro ? '' : `<button class="btn btn--sm btn--ghost" type="button" ${attr}="${esc(nick)}">${label}</button>`);
   const row = (nick, sub, action) => `<div class="acc-row"><span class="acc-row__name"><b>${esc(nick)}</b>${sub ? `<small>${sub}</small>` : ''}</span>${action}</div>`;
@@ -1356,8 +1467,10 @@ function accessModal({ name, getMeta, update, ro, apiVersion, channelName }) {
       sections.push(group('discord', 'Desde Discord', dc ? fromDc.length : '…', rows, dcError ? esc(dcError) : !dc ? '<span class="spin"></span> Cargando…' : filter ? 'Ningún nick coincide.' : 'Nadie ha escrito su nick todavía.'));
     }
     if (deny.length || linked) sections.push(group('eyeOff', 'Retirados', deny.length, deny.filter(match).map((n) => row(n, 'No entra aunque escriba su nick en Discord', btn('data-undeny', n, 'Permitir de nuevo'))), filter ? 'Ningún nick coincide.' : 'Nadie retirado.'));
+    const y = box.scrollTop;
     box.innerHTML = sections.join('');
     hydrateIcons(box);
+    box.scrollTop = y;
   };
   box.addEventListener('click', (e) => {
     const mt = getMeta();
@@ -1386,10 +1499,8 @@ function accessModal({ name, getMeta, update, ro, apiVersion, channelName }) {
   });
   m.content.querySelector('#acc-q').addEventListener('input', debounce((e) => { filter = e.target.value.trim().toLowerCase(); draw(); }, 120));
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
-  const first = getMeta();
-  if ((first.discord || []).length && (apiVersion || 0) >= 11) {
-    call('admin:discordNicks', first.discord).then((r) => { dc = r; draw(); }).catch((e) => { dcError = e.message; dc = []; draw(); });
-  }
+  attach?.({ refresh: () => { if (dcError || (stamp !== null && stampOf() !== stamp)) loadNicks(); } });
+  loadNicks();
   draw();
 }
 
