@@ -484,7 +484,7 @@ function renderEditor(root, id, app, route = {}) {
       draft: d?.baseVersion ? `${icon('alert')}Sin guardar` : 'Se aplica al publicar',
     }[acc.s] || '';
     const tip = acc.s === 'error'
-      ? `${acc.error || 'No se pudo conectar con el servidor'}. Se vuelve a intentar sola; también puedes pulsar «Guardar solo textos y permisos».`
+      ? `${acc.error || 'No se pudo conectar con el servidor'}${acc.final ? '' : '. Se vuelve a intentar sola; también puedes pulsar «Guardar solo textos y permisos».'}`
       : acc.s === 'draft' && d?.baseVersion ? 'Pulsa «Guardar solo textos y permisos» para aplicarlo. Con el servidor 12 o más nuevo se guarda solo.' : '';
     const cls = acc.s === 'draft' && !d?.baseVersion ? 'later' : acc.s;
     document.querySelectorAll('[data-acc-state]').forEach((el) => {
@@ -502,15 +502,16 @@ function renderEditor(root, id, app, route = {}) {
       d = { ...d, dirtyMeta: r.dirtyMeta, metaChanges: r.metaChanges, apiVersion: r.apiVersion };
       next = !r.access?.live ? { s: 'draft' } : r.access.saved ? { s: 'saved' } : { s: 'error', error: r.access.error };
     } catch (e) {
-      next = { s: 'error', error: e.message };
+      next = { s: 'error', error: e.message, final: true };
       toastError(e);
+      freshPerms(app);
     }
     if (ver !== accVer || !root.isConnected) return;
     acc = next;
     paintAcc();
     paintBar();
     clearTimeout(accRetry);
-    if (acc.s === 'error') accRetry = setTimeout(() => { if (acc.s === 'error' && root.isConnected) saveAccess(); }, 8000);
+    if (acc.s === 'error' && !acc.final) accRetry = setTimeout(() => { if (acc.s === 'error' && !acc.final && root.isConnected) saveAccess(); }, 8000);
   }, 400);
   const saveAccess = () => { accVer++; acc = { s: 'saving' }; paintAcc(); pushAccess(); };
   offs.push(() => clearTimeout(accRetry));

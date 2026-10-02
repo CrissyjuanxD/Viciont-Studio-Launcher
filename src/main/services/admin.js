@@ -568,7 +568,7 @@ class Admin extends EventEmitter {
           const r = await this.call(`/v1/admin/instances/${id}/access`, { method: 'PUT', json: { allow: d.meta.allow, deny: d.meta.deny, discord: d.meta.discord }, timeout: 20000 });
           if (r?.instance?.version) { pub = r.instance; this.pub.set(id, pub); }
         } catch (e) {
-          if (e.code === 'ELOCKED' || e.code === 'EBADKEY' || e.code === 'ENOACCESS') throw e;
+          if (['ELOCKED', 'EBADKEY', 'ENOACCESS'].includes(e.code) || e.status === 403 || e.status === 404) throw e;
           error = e.message;
         }
       }
