@@ -30,7 +30,9 @@ const SYNC_API = 7;
 const STORAGE_API = 9;
 const DISCORD_API = 11;
 const ACCESS_API = 12;
+const PLAYERS_API = 13;
 const ACCESS_KEYS = ['allow', 'deny', 'discord'];
+const ACCESS_RULES = { allow: ['add', 'remove'], discord: ['add', 'remove'], deny: ['remove', 'add'] };
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
@@ -57,6 +59,10 @@ const isCslPath = (rel) => /^mods\/[^/]*customskinloader[^/]*\.jar$/i.test(rel);
 const topOf = (rel) => String(rel).split('/')[0];
 const NO_EDIT = 'No tienes el permiso «Editar y publicar»: puedes ver esta instancia, pero no cambiarla. Pídeselo a quien administra el panel web de Viciont Studios.';
 const NO_CREATE = 'No tienes el permiso «Crear instancias». Pídeselo a quien administra el panel web de Viciont Studios.';
+const NO_VIEW = 'No tienes el permiso «Ver jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
+const NO_ADD = 'No tienes el permiso «Añadir jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
+const NO_REMOVE = 'No tienes el permiso «Retirar o eliminar jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
+const accessKey = (k, x) => (k === 'discord' ? String(x) : String(x).toLowerCase());
 
 function err(message, code) { return Object.assign(new Error(message), { code }); }
 
@@ -337,6 +343,35 @@ class Admin extends EventEmitter {
     if (inst?.version ? !this.can('edit') : !this.can('create')) throw err(inst?.version ? NO_EDIT : NO_CREATE, 'ENOPERM');
   }
 
+  async accessMay() {
+    if ((await this.serverVersion().catch(() => this.apiVer || 0)) < PLAYERS_API) {
+      const e = this.can('edit');
+      return { view: true, add: e, remove: e };
+    }
+    const add = this.can('access_add');
+    const remove = this.can('access_remove');
+    return { view: add || remove || this.can('access_view'), add, remove };
+  }
+
+  async mustAccess(id, patch) {
+    if (!ID_RE.test(String(id || ''))) throw err('Identificador no válido', 'EBADID');
+    const { d, inst } = await this.metaDraft(id);
+    if (!inst?.version) {
+      if (!this.can('create')) throw err(NO_CREATE, 'ENOPERM');
+      return;
+    }
+    const may = await this.accessMay();
+    if (!may.view) throw err(NO_VIEW, 'ENOPERM');
+    for (const k of ACCESS_KEYS) {
+      if (!Array.isArray(patch?.[k])) continue;
+      const old = new Set((d.meta[k] || []).map((x) => accessKey(k, x)));
+      const next = new Set(patch[k].map((x) => accessKey(k, x)));
+      const [addPerm, removePerm] = ACCESS_RULES[k];
+      if (!may[addPerm] && [...next].some((x) => !old.has(x))) throw err(addPerm === 'add' ? NO_ADD : NO_REMOVE, 'ENOPERM');
+      if (!may[removePerm] && [...old].some((x) => !next.has(x))) throw err(removePerm === 'add' ? NO_ADD : NO_REMOVE, 'ENOPERM');
+    }
+  }
+
   grant(p) {
     if (typeof p !== 'string' || !path.isAbsolute(p)) return;
     this.grants.set(path.resolve(p).toLowerCase(), Date.now());
@@ -452,6 +487,7 @@ class Admin extends EventEmitter {
       dirtyMeta: this.metaDirty(d, inst),
       metaChanges: this.metaChanges(d, inst),
       apiVersion: await this.serverVersion().catch(() => this.apiVer || 0),
+      accessHidden: Boolean(inst?.accessHidden),
       legacy: legacy || Array.isArray(d.files),
       ...(ws ? { workspace: await this.wsStatus(id).catch((e) => ({ synced: false, error: e.message })) } : {}),
     };
@@ -574,6 +610,22 @@ class Admin extends EventEmitter {
       }
       await this.persistMeta(d, pub);
       return { ...(await this.view(id, d, pub, { ws: false })), access: { live, saved: live && !error, error } };
+    });
+  }
+
+  async forgetNick(id, nick) {
+    const name = String(nick || '').trim();
+    if (!/^[A-Za-z0-9_]{3,16}$/.test(name)) throw err('Nick no válido');
+    if ((await this.serverVersion().catch(() => this.apiVer || 0)) < PLAYERS_API) throw err('Para eliminar jugadores hay que actualizar el servidor de Viciont Studios (versión 13 o más nueva): pega el código nuevo en Cloudflare y pulsa Deploy.', 'EOLDSERVER');
+    if (!(await this.accessMay()).remove) throw err(NO_REMOVE, 'ENOPERM');
+    return this.withMeta(id, async () => {
+      const r = await this.call(`/v1/admin/instances/${id}/access/forget`, { method: 'POST', json: { nick: name }, timeout: 20000 });
+      if (r?.instance?.version) this.pub.set(id, r.instance);
+      const { d, inst } = await this.metaDraft(id);
+      const lower = name.toLowerCase();
+      d.meta = cleanMeta({ ...d.meta, allow: d.meta.allow.filter((x) => x.toLowerCase() !== lower), deny: (d.meta.deny || []).filter((x) => x.toLowerCase() !== lower) }, id);
+      await this.persistMeta(d, inst);
+      return { ...(await this.view(id, d, inst, { ws: false })), messages: Number(r?.messages) || 0 };
     });
   }
 
@@ -1268,7 +1320,7 @@ class Admin extends EventEmitter {
     const meta = cleanMeta(d.meta, id);
     if (!meta.mc) throw err('Elige la versión de Minecraft.');
     if (meta.loader.type !== 'vanilla' && !meta.loader.version) throw err('Elige la versión del cargador de mods.');
-    if (meta.visibility === 'private' && !meta.allow.length && !meta.discord.length) throw err('Una instancia privada necesita al menos un nick con permiso o el acceso con Discord.');
+    if (meta.visibility === 'private' && !meta.allow.length && !meta.discord.length && !inst?.accessHidden) throw err('Una instancia privada necesita al menos un nick con permiso o el acceso con Discord.');
     if ((inst?.version || 0) !== (ws.baseVersion || 0)) {
       throw err(`Hay una versión más nueva publicada (v${inst?.version}). Pulsa "Traer cambios" antes de publicar.`, 'EBEHIND');
     }

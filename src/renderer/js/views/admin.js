@@ -26,6 +26,9 @@ const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <=
 const can = (perm) => (state.admin?.perms || []).includes(perm);
 const NEED_CREATE = 'Necesitas el permiso «Crear instancias»';
 const NEED_EDIT = 'Necesitas el permiso «Editar y publicar»';
+const NEED_VIEW = 'Necesitas el permiso «Ver jugadores»';
+const NEED_ADD = 'Necesitas el permiso «Añadir jugadores»';
+const NEED_REMOVE = 'Necesitas el permiso «Retirar o eliminar jugadores»';
 const ASK = 'Pídeselo a quien administra el panel web de Viciont Studios.';
 let permsAt = 0;
 const permsStale = () => Date.now() - permsAt > 15000;
@@ -38,7 +41,7 @@ const denied = (need) => {
 };
 
 const RO_SEL = ['apply-version', 'modrinth', 'upload', 'upload-folder', 'content-more'].map((a) => `[data-act="${a}"]`)
-  .concat(['[data-l]', '[data-pick]', '[data-clear]', '[data-policy]', '[data-restore]', '[data-del]', '[data-incl]', '[data-excl]', '[data-v]', '#allow', '.media-pick']).join(', ');
+  .concat(['[data-l]', '[data-pick]', '[data-clear]', '[data-policy]', '[data-restore]', '[data-del]', '[data-incl]', '[data-excl]', '[data-v]', '.media-pick']).join(', ');
 
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
@@ -97,7 +100,7 @@ function renderList(root, app) {
             <div class="acard__meta">
               <span class="tag">v${esc(p.version)}</span>
               <span class="tag">${esc(p.mc)} · ${esc(loaderLabel(p.loader))}</span>
-              <span class="tag">${p.visibility === 'private' ? `${icon('lock')} privada (${(p.allow || []).length}${p.discord?.length ? ' + Discord' : ''})` : `${icon('globe')} pública`}</span>
+              <span class="tag">${p.visibility === 'private' ? `${icon('lock')} privada${p.accessHidden ? (p.discord?.length ? ' (Discord)' : '') : ` (${(p.allow || []).length}${p.discord?.length ? ' + Discord' : ''})`}` : `${icon('globe')} pública`}</span>
               ${l.synced ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
               ${l.behind ? '<span class="chip chip--hot">hay una versión más nueva</span>' : ''}
               ${pending ? `<span class="chip chip--hot">${l.changes ? `${l.changes} cambio(s)` : 'cambios'} sin publicar</span>` : ''}
@@ -448,17 +451,32 @@ function renderEditor(root, id, app, route = {}) {
   const ws = () => d?.workspace || { synced: false };
   const ro = () => Boolean(d) && !can(d.baseVersion ? 'edit' : 'create');
   const need = () => (d?.baseVersion ? NEED_EDIT : NEED_CREATE);
+  const accessMay = () => {
+    if (!d) return { view: false, add: false, remove: false };
+    if (!d.baseVersion) { const c = can('create'); return { view: true, add: c, remove: c }; }
+    if ((d.apiVersion || 0) < 13) { const e = can('edit'); return { view: true, add: e, remove: e }; }
+    const add = can('access_add');
+    const remove = can('access_remove');
+    return { view: add || remove || can('access_view'), add, remove };
+  };
   const lockIn = (box) => {
     if (!box || !ro()) return;
-    box.querySelectorAll('input, textarea, select').forEach((el) => { if (el.id !== 'ffilter') el.disabled = true; });
-    box.querySelectorAll('.switch').forEach((el) => el.classList.add('is-disabled'));
+    const mine = (el) => el.closest('[data-access]');
+    box.querySelectorAll('input, textarea, select').forEach((el) => { if (el.id !== 'ffilter' && !mine(el)) el.disabled = true; });
+    box.querySelectorAll('.switch').forEach((el) => { if (!mine(el)) el.classList.add('is-disabled'); });
     box.querySelectorAll('.field__label, .panel__title > span:first-child').forEach((el) => {
-      if (!el.querySelector('.ro-lock')) el.insertAdjacentHTML('beforeend', `<span class="ro-lock">${icon('lock')}</span>`);
+      if (!mine(el) && !el.querySelector('.ro-lock')) el.insertAdjacentHTML('beforeend', `<span class="ro-lock">${icon('lock')}</span>`);
     });
     box.querySelectorAll(RO_SEL).forEach((el) => {
+      if (mine(el)) return;
       el.classList.add('is-ro');
       if (el.dataset.tip) el.dataset.tipSub = need(); else el.dataset.tip = need();
     });
+  };
+  const lockAccess = (el, why) => {
+    el.classList.add('is-ro');
+    el.dataset.need = why;
+    el.dataset.tip = why;
   };
 
   let metaPatch = {};
@@ -549,6 +567,16 @@ function renderEditor(root, id, app, route = {}) {
     paintBar();
     if (tab === 'access') drawTab();
   };
+  const forgetNick = async (nick) => {
+    const r = await call('admin:forgetNick', id, nick);
+    const k = nick.toLowerCase();
+    d.meta = { ...d.meta, allow: d.meta.allow.filter((n) => n.toLowerCase() !== k), deny: (d.meta.deny || []).filter((n) => n.toLowerCase() !== k) };
+    d = { ...d, dirtyMeta: r.dirtyMeta, metaChanges: r.metaChanges };
+    paintBar();
+    if (tab === 'access') drawTab();
+    loadDiscord().catch(() => {});
+    return r;
+  };
 
   const setWs = (w) => { if (w) d.workspace = w; };
 
@@ -589,7 +617,7 @@ function renderEditor(root, id, app, route = {}) {
     const pending = ch.total > 0 || d.dirtyMeta;
     info.innerHTML = `${w.synced ? `<span><b>${files.length}</b> archivos</span><span><b>${bytes(files.reduce((a, f) => a + (f.size || 0), 0))}</b></span><span><b>${files.filter((f) => f.path.startsWith('mods/')).length}</b> mods</span>` : '<span>Sin sincronizar en este PC</span>'}
       ${pending ? `<button type="button" class="chip chip--hot" data-act="changes" data-tip="Ver qué cambió">${ch.total ? `${ch.total} cambio(s) de archivos` : ''}${ch.total && d.dirtyMeta ? ' + ' : ''}${d.dirtyMeta && d.baseVersion ? 'textos o permisos' : ''}${!d.baseVersion ? 'sin publicar' : ''}</button>` : `<span>${icon('check')} Todo publicado</span>`}
-      <span>${d.meta.visibility === 'private' ? `${icon('lock')} privada · ${d.meta.allow.length} nick(s)${d.meta.discord?.length ? ' + Discord' : ''}` : `${icon('globe')} pública`}</span>`;
+      <span>${d.meta.visibility === 'private' ? `${icon('lock')} privada${d.accessHidden ? (d.meta.discord?.length ? ' · Discord' : '') : ` · ${d.meta.allow.length} nick(s)${d.meta.discord?.length ? ' + Discord' : ''}`}` : `${icon('globe')} pública`}</span>`;
     const acts = root.querySelector('#ed-actions');
     const next = (d.baseVersion || 0) + 1;
     acts.innerHTML = ro()
@@ -613,9 +641,11 @@ function renderEditor(root, id, app, route = {}) {
     if (tab === 'content') tabContent(body);
     if (tab === 'access') tabAccess(body);
     if (ro()) {
+      const may = accessMay();
+      const players = d.baseVersion && (may.add || may.remove) ? ' Sí puedes gestionar los jugadores que pueden verla (en Permisos).' : '';
       body.insertAdjacentHTML('afterbegin', `<div class="banner-note banner-note--ro">${icon('lock')}<span><b>Solo lectura.</b> ${d.baseVersion
         ? 'No tienes el permiso «Editar y publicar»: puedes ver toda la instancia, pero no cambiarla ni publicar versiones.'
-        : 'No tienes el permiso «Crear instancias»: puedes ver esta instancia nueva, pero no cambiarla ni publicarla.'} ${ASK}</span></div>`);
+        : 'No tienes el permiso «Crear instancias»: puedes ver esta instancia nueva, pero no cambiarla ni publicarla.'}${players} ${ASK}</span></div>`);
       lockIn(body);
     }
     hydrateIcons(body);
@@ -880,6 +910,7 @@ function renderEditor(root, id, app, route = {}) {
 
   const tabAccess = (body) => {
     const mt = d.meta;
+    const may = accessMay();
     const protectable = PROTECT_LOADERS.includes(mt.loader?.type);
     const v5 = (d.apiVersion || 0) >= 5;
     body.innerHTML = `
@@ -888,15 +919,16 @@ function renderEditor(root, id, app, route = {}) {
         <div class="segmented" id="vis"><button type="button" data-v="public">${icon('globe')} Pública</button><button type="button" data-v="private">${icon('lock')} Privada</button></div>
         <p class="field__hint" style="margin-top:10px" id="vis-hint"></p>
       </div>
-      <div class="panel" id="allow-box">
+      <div class="panel" id="allow-box" data-access>
         <div class="panel__title"><span>Nicks con permiso</span><span class="field__row" style="gap:10px"><span data-acc-state></span><span class="muted mono" style="font-size:.8rem" id="allow-count"></span><button class="btn btn--sm btn--ghost" type="button" data-act="access-list" data-tip="Lista de todos los que pueden verla, también los de Discord">${icon('users')}Ver todos</button></span></div>
-        <div class="chips-input" id="allow"><input placeholder="${ro() ? (mt.allow.length ? '' : 'Ningún nick') : 'Escribe un nick y pulsa Enter (o pega varios separados por comas)'}"></div>
-        <p class="field__hint" id="allow-more" style="margin-top:8px" hidden></p>
+        ${may.view ? `<div class="chips-input" id="allow"><input placeholder="${may.add ? 'Escribe un nick y pulsa Enter (o pega varios separados por comas)' : `${mt.allow.length ? '' : 'Ningún nick. '}Para añadir nicks necesitas el permiso «Añadir jugadores»`}" ${may.add ? '' : 'disabled'}></div>
+        <p class="field__hint" id="allow-more" style="margin-top:8px" hidden></p>`
+          : `<div class="banner-note banner-note--ro">${icon('lock')}<span>${NEED_VIEW} para ver quién puede entrar a esta instancia. ${ASK}</span></div>`}
         <p class="field__hint" style="margin-top:10px">Vale para cuentas de Microsoft y no premium: el jugador debe entrar al launcher con ese nick. Los nicks no premium están protegidos con su código de recuperación, así nadie puede hacerse pasar por otro. Los administradores de esta instancia la ven siempre.</p>
       </div>
-      <div class="panel" id="dc-box">
+      <div class="panel" id="dc-box" data-access>
         <div class="panel__title"><span>Acceso con Discord</span></div>
-        <label class="switch"><input type="checkbox" id="dc-on"> Dar acceso a quien escriba su nick en un canal de Discord</label>
+        <label class="switch" id="dc-switch"><input type="checkbox" id="dc-on"> Dar acceso a quien escriba su nick en un canal de Discord</label>
         <p class="field__hint" style="margin-top:6px">Viciont Studios Bot lee el canal: quien escriba ahí su nick de Minecraft puede ver la instancia en unos segundos, sin que tengas que añadirlo a mano. Cada persona puede apuntar hasta 5 nicks. Si borra su mensaje, pierde ese acceso. Para quitar a alguien concreto, usa «Ver todos».</p>
         <div id="dc-list" style="margin-top:12px"></div>
       </div>
@@ -933,23 +965,30 @@ function renderEditor(root, id, app, route = {}) {
       body.querySelector('#dc-box').style.opacity = priv ? '1' : '0.5';
     };
     const allowBox = body.querySelector('#allow');
-    const input = allowBox.querySelector('input');
+    const input = allowBox?.querySelector('input');
     const CHIPS = 24;
+    if (!may.view) {
+      const all = body.querySelector('[data-act="access-list"]');
+      all.innerHTML = `${icon('lock')}Ver todos`;
+      lockAccess(all, NEED_VIEW);
+    }
     const drawAllow = () => {
+      const count = body.querySelector('#allow-count');
+      if (!allowBox) { count.textContent = d.meta.discord?.length ? 'con Discord' : ''; return; }
       allowBox.querySelectorAll('.chip').forEach((c) => c.remove());
       for (const n of d.meta.allow.slice(0, CHIPS)) {
         const c = document.createElement('span');
         c.className = 'chip';
         c.dataset.nick = n;
-        c.innerHTML = ro() ? esc(n) : `${esc(n)} ${icon('close')}`;
-        if (!ro()) c.title = 'Quitar';
+        c.innerHTML = may.remove ? `${esc(n)} ${icon('close')}` : esc(n);
+        if (may.remove) c.title = 'Quitar';
         allowBox.insertBefore(c, input);
       }
       const more = body.querySelector('#allow-more');
       const extra = d.meta.allow.length - CHIPS;
       more.hidden = extra <= 0;
       if (extra > 0) more.innerHTML = `Y ${extra} nick(s) más. <a href="#" data-act="access-list">Verlos todos</a>`;
-      body.querySelector('#allow-count').textContent = `${d.meta.allow.length} nick(s)${d.meta.discord?.length ? ' + Discord' : ''}`;
+      count.textContent = `${d.meta.allow.length} nick(s)${d.meta.discord?.length ? ' + Discord' : ''}`;
     };
     const setAllow = (list) => {
       const seen = new Set();
@@ -972,6 +1011,12 @@ function renderEditor(root, id, app, route = {}) {
     const drawDiscord = async () => {
       if (!dcList.isConnected) return;
       dcSwitch.checked = dcOn;
+      const linked = Boolean(d.meta.discord?.length);
+      const swNeed = linked ? (may.remove ? '' : NEED_REMOVE) : (may.add ? '' : NEED_ADD);
+      dcSwitch.disabled = Boolean(swNeed);
+      const sw = body.querySelector('#dc-switch');
+      sw.classList.toggle('is-disabled', Boolean(swNeed));
+      if (swNeed) sw.dataset.tip = swNeed; else delete sw.dataset.tip;
       if ((d.apiVersion || 0) < 11) {
         dcSwitch.disabled = true;
         dcList.innerHTML = `<p class="inst__warn">${icon('alert')}Para usarlo hay que actualizar el servidor de Viciont Studios (versión 11 o más nueva).</p>`;
@@ -996,8 +1041,9 @@ function renderEditor(root, id, app, route = {}) {
       } else if (!chans.length && !gone.length) {
         dcList.innerHTML = `<p class="field__hint">${dcInfo.error ? `${esc(dcInfo.error)} ` : ''}Todavía no hay ningún canal de nicks. Invita a <b>Viciont Studios Bot</b> a tu servidor de Discord y escribe <code>/nicks activar</code> en el canal donde la gente pone su nick.</p>`;
       } else {
-        dcList.innerHTML = `<div class="dc-list">${chans.map((c) => `<label class="check dc-ch"><input type="checkbox" data-dc="${esc(c.id)}" ${sel.has(c.id) ? 'checked' : ''}><span><b>#${esc(c.name || c.id)}</b><small>${esc(c.guild || 'Discord')} · ${Number(c.nicks) || 0} nick(s)${c.people != null ? ` de ${Number(c.people) || 0} persona(s)` : ''}${c.error ? ` · ${esc(c.error)}` : ''}</small></span></label>`).join('')}
-          ${gone.map((x) => `<label class="check dc-ch is-gone"><input type="checkbox" data-dc="${esc(x)}" checked><span><b>Canal ${esc(x)}</b><small>Viciont Studios Bot ya no lee este canal: desmárcalo</small></span></label>`).join('')}</div>
+        const lock = (on) => { const why = on ? (may.remove ? '' : NEED_REMOVE) : (may.add ? '' : NEED_ADD); return why ? `disabled data-tip="${why}"` : ''; };
+        dcList.innerHTML = `<div class="dc-list">${chans.map((c) => `<label class="check dc-ch"><input type="checkbox" data-dc="${esc(c.id)}" ${sel.has(c.id) ? 'checked' : ''} ${lock(sel.has(c.id))}><span><b>#${esc(c.name || c.id)}</b><small>${esc(c.guild || 'Discord')} · ${Number(c.nicks) || 0} nick(s)${c.people != null ? ` de ${Number(c.people) || 0} persona(s)` : ''}${c.error ? ` · ${esc(c.error)}` : ''}</small></span></label>`).join('')}
+          ${gone.map((x) => `<label class="check dc-ch is-gone"><input type="checkbox" data-dc="${esc(x)}" checked ${lock(true)}><span><b>Canal ${esc(x)}</b><small>Viciont Studios Bot ya no lee este canal: desmárcalo</small></span></label>`).join('')}</div>
           ${sel.size ? '' : '<p class="field__hint" style="margin-top:8px">Marca el canal de nicks que da acceso a esta instancia.</p>'}`;
       }
       lockIn(dcList);
@@ -1008,7 +1054,6 @@ function renderEditor(root, id, app, route = {}) {
       dcOn = dcSwitch.checked;
       if (!dcOn) { if (d.meta.discord?.length) setDiscord([]); drawDiscord(); return; }
       await drawDiscord();
-      if (!d.meta.discord?.length && dcInfo?.enabled && dcInfo.channels?.length === 1) { setDiscord([dcInfo.channels[0].id]); drawDiscord(); }
     });
     dcList.addEventListener('change', (e) => {
       if (!e.target.closest('[data-dc]')) return;
@@ -1022,23 +1067,27 @@ function renderEditor(root, id, app, route = {}) {
       paintBar();
     }));
     const addFromInput = () => {
+      if (!may.add) return;
       const parts = input.value.split(/[\s,;]+/).map((x) => x.trim()).filter(Boolean);
       const valid = parts.filter((p) => /^[A-Za-z0-9_]{3,16}$/.test(p));
       if (parts.length && !valid.length) toast('Los nicks solo pueden tener letras, números y _ (3-16).', { kind: 'error' });
       if (valid.length) setAllow([...d.meta.allow, ...valid]);
       input.value = '';
     };
-    input.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFromInput(); }
-      if (e.key === 'Backspace' && !input.value && d.meta.allow.length) setAllow(d.meta.allow.slice(0, -1));
-    });
-    input.addEventListener('paste', () => setTimeout(addFromInput, 0));
-    input.addEventListener('blur', addFromInput);
-    allowBox.addEventListener('click', (e) => {
-      const c = e.target.closest('.chip[data-nick]');
-      if (c) setAllow(d.meta.allow.filter((n) => n !== c.dataset.nick));
-      else input.focus();
-    });
+    if (allowBox) {
+      input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter' || e.key === ',') { e.preventDefault(); addFromInput(); }
+        if (e.key === 'Backspace' && !input.value && d.meta.allow.length && may.remove) setAllow(d.meta.allow.slice(0, -1));
+      });
+      input.addEventListener('paste', () => setTimeout(addFromInput, 0));
+      input.addEventListener('blur', addFromInput);
+      allowBox.addEventListener('click', (e) => {
+        const c = e.target.closest('.chip[data-nick]');
+        if (c && may.remove) setAllow(d.meta.allow.filter((n) => n !== c.dataset.nick));
+        else if (c) denied(NEED_REMOVE);
+        else input.focus();
+      });
+    }
     body.querySelector('#show-folder').addEventListener('change', (e) => {
       d.meta.showFolder = e.target.checked;
       saveMeta({ showFolder: e.target.checked });
@@ -1107,7 +1156,7 @@ function renderEditor(root, id, app, route = {}) {
     if (!l || !root.contains(l)) return;
     e.preventDefault();
     e.stopPropagation();
-    denied(need());
+    denied(l.dataset.need || need());
   }, true);
 
   root.addEventListener('click', async (e) => {
@@ -1160,10 +1209,13 @@ function renderEditor(root, id, app, route = {}) {
     if (act === 'changes') changesModal(id, d, refreshWs, ro());
     if (act === 'access-list') {
       e.preventDefault();
+      const may = accessMay();
+      if (!may.view) { denied(NEED_VIEW); return; }
       accessModal({
-        name: d.meta.name, getMeta: () => d.meta, update: updateAccess, ro: ro(), apiVersion: d.apiVersion,
+        name: d.meta.name, getMeta: () => d.meta, update: updateAccess, may, apiVersion: d.apiVersion,
         mode: !d.baseVersion ? 'draft' : (d.apiVersion || 0) >= 12 ? 'auto' : 'manual',
         channels: () => dcInfo?.channels || null,
+        forget: d.baseVersion && (d.apiVersion || 0) >= 13 && may.remove ? forgetNick : null,
         attach: (api) => {
           accessOpen = api;
           if (!api) return;
@@ -1399,7 +1451,8 @@ function okeysModal(id, d, file, onClose, ro = false) {
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
 }
 
-function accessModal({ name, getMeta, update, ro, apiVersion, mode, channels, attach }) {
+function accessModal({ name, getMeta, update, may, apiVersion, mode, channels, attach, forget }) {
+  const ro = !may.add && !may.remove;
   let filter = '';
   let dc = null;
   let dcError = null;
@@ -1417,10 +1470,10 @@ function accessModal({ name, getMeta, update, ro, apiVersion, mode, channels, at
     html: `<div class="modal__body">
       <h2 class="modal__title">Quién puede ver «${esc(name)}»</h2>
       <p class="modal__text" id="acc-sum"></p>
-      ${ro ? '' : `<form class="field__row" id="acc-add" style="margin-top:14px"><input class="input" name="n" autocomplete="off" spellcheck="false" placeholder="Añadir nicks: escribe uno o pega varios separados por comas"><button class="btn btn--primary" type="submit">${icon('plus')}Añadir</button></form>`}
+      ${may.add ? `<form class="field__row" id="acc-add" style="margin-top:14px"><input class="input" name="n" autocomplete="off" spellcheck="false" placeholder="Añadir nicks: escribe uno o pega varios separados por comas"><button class="btn btn--primary" type="submit">${icon('plus')}Añadir</button></form>` : ''}
       <input class="input" id="acc-q" placeholder="Buscar un nick…" spellcheck="false" style="margin-top:10px">
       <div class="acc-list" id="acc-list"></div>
-      <p class="field__hint" style="margin-top:12px">${ro ? 'Solo lectura: necesitas el permiso «Editar y publicar» para cambiar la lista.' : HINT[mode] || HINT.manual} Los administradores de esta instancia la ven siempre.</p>
+      <p class="field__hint" style="margin-top:12px">${ro ? 'Solo lectura: para cambiar la lista necesitas el permiso «Añadir jugadores» o «Retirar o eliminar jugadores».' : HINT[mode] || HINT.manual} Los administradores de esta instancia la ven siempre.</p>
       <div class="modal__actions">${ro ? '' : '<span data-acc-state></span>'}<button class="btn btn--primary" type="button" data-close>Listo</button></div></div>`,
   });
   const box = m.content.querySelector('#acc-list');
@@ -1445,8 +1498,8 @@ function accessModal({ name, getMeta, update, ro, apiVersion, mode, channels, at
     if (!closed) draw();
   };
   const lower = (n) => String(n).toLowerCase();
-  const btn = (attr, nick, label) => (ro ? '' : `<button class="btn btn--sm btn--ghost" type="button" ${attr}="${esc(nick)}">${label}</button>`);
-  const row = (nick, sub, action) => `<div class="acc-row"><span class="acc-row__name"><b>${esc(nick)}</b>${sub ? `<small>${sub}</small>` : ''}</span>${action}</div>`;
+  const btn = (attr, nick, label, allowed, kind = 'ghost') => (allowed ? `<button class="btn btn--sm btn--${kind}" type="button" ${attr}="${esc(nick)}">${label}</button>` : '');
+  const row = (nick, sub, action) => `<div class="acc-row"><span class="acc-row__name"><b>${esc(nick)}</b>${sub ? `<small>${sub}</small>` : ''}</span>${action ? `<span class="acc-row__acts">${action}</span>` : ''}</div>`;
   const group = (ic, title, count, rows, empty) => `<section class="acc-group"><div class="acc-group__title">${icon(ic)}${title} <span class="muted">${count}</span></div>${rows.length ? rows.join('') : `<p class="field__hint">${empty}</p>`}</section>`;
   const draw = () => {
     const mt = getMeta();
@@ -1462,22 +1515,39 @@ function accessModal({ name, getMeta, update, ro, apiVersion, mode, channels, at
     if (deny.length) parts.push(`${deny.length} retirado(s)`);
     m.content.querySelector('#acc-sum').textContent = `${mt.visibility === 'private' ? '' : 'La instancia es pública: ahora la ve todo el mundo; esta lista vale cuando sea privada. '}${parts.join(' · ')}.`;
     const several = (mt.discord || []).length > 1;
-    const sections = [group('user', 'Añadidos a mano', allow.length, allow.filter(match).map((n) => row(n, '', btn('data-rm', n, 'Quitar'))), filter ? 'Ningún nick coincide.' : 'Nadie añadido a mano.')];
+    const sections = [group('user', 'Añadidos a mano', allow.length, allow.filter(match).map((n) => row(n, '', btn('data-rm', n, 'Quitar', may.remove))), filter ? 'Ningún nick coincide.' : 'Nadie añadido a mano.')];
     if (linked) {
-      const rows = fromDc.filter((x) => match(x.nick)).map((x) => row(x.nick, [esc(x.user || 'Discord'), ...(several ? [`#${esc(channelName?.(x.channel) || x.channel)}`] : []), ...(manual.has(lower(x.nick)) ? ['también añadido a mano'] : [])].join(' · '), btn('data-deny', x.nick, 'Retirar')));
+      const rows = fromDc.filter((x) => match(x.nick)).map((x) => row(x.nick, [esc(x.user || 'Discord'), ...(several ? [`#${esc(channelName?.(x.channel) || x.channel)}`] : []), ...(manual.has(lower(x.nick)) ? ['también añadido a mano'] : [])].join(' · '), btn('data-deny', x.nick, 'Retirar', may.remove)));
       sections.push(group('discord', 'Desde Discord', dc ? fromDc.length : '…', rows, dcError ? esc(dcError) : !dc ? '<span class="spin"></span> Cargando…' : filter ? 'Ningún nick coincide.' : 'Nadie ha escrito su nick todavía.'));
     }
-    if (deny.length || linked) sections.push(group('eyeOff', 'Retirados', deny.length, deny.filter(match).map((n) => row(n, 'No entra aunque escriba su nick en Discord', btn('data-undeny', n, 'Permitir de nuevo'))), filter ? 'Ningún nick coincide.' : 'Nadie retirado.'));
+    if (deny.length || linked) sections.push(group('eyeOff', 'Retirados', deny.length, deny.filter(match).map((n) => row(n, 'No entra aunque escriba su nick en Discord', btn('data-undeny', n, 'Permitir de nuevo', may.add) + btn('data-forget', n, 'Eliminar', Boolean(forget), 'danger'))), filter ? 'Ningún nick coincide.' : 'Nadie retirado.'));
     const y = box.scrollTop;
     box.innerHTML = sections.join('');
     hydrateIcons(box);
     box.scrollTop = y;
   };
-  box.addEventListener('click', (e) => {
+  box.addEventListener('click', async (e) => {
     const mt = getMeta();
     const rm = e.target.closest('[data-rm]');
     const dn = e.target.closest('[data-deny]');
     const un = e.target.closest('[data-undeny]');
+    const fg = e.target.closest('[data-forget]');
+    if (fg && forget) {
+      const nick = fg.dataset.forget;
+      const ok = await confirm({
+        title: `¿Eliminar a ${nick}?`,
+        text: 'Sale de Retirados y no puede verla. Su nick de Discord deja de contar en todas las instancias que usan ese canal y pierde el ✅ (su mensaje no se borra). Si vuelve a escribir su nick en el canal, contará como uno nuevo.',
+        ok: 'Eliminar', danger: true, icon: 'trash',
+      });
+      if (!ok || closed) return;
+      try {
+        await busy(fg, () => forget(nick));
+        dc = (dc || []).filter((x) => lower(x.nick) !== lower(nick));
+        toast(`${nick} eliminado.`, { kind: 'success' });
+      } catch (er) { toastError(er); }
+      if (!closed) draw();
+      return;
+    }
     if (rm) update({ allow: (mt.allow || []).filter((n) => n !== rm.dataset.rm) });
     else if (dn) update({ deny: [...(mt.deny || []), dn.dataset.deny] });
     else if (un) update({ deny: (mt.deny || []).filter((n) => n !== un.dataset.undeny) });

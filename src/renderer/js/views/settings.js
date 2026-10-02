@@ -420,7 +420,10 @@ const PANES = {
   },
 
   admin(pane, app) {
-    const PERM_NAMES = { create: 'Crear instancias', edit: 'Editar y publicar', sync: 'Sincronizar con su carpeta', delete: 'Eliminar instancias', players: 'Nicks no premium', storage: 'Almacenamiento del servidor' };
+    const PERM_NAMES = {
+      create: 'Crear instancias', edit: 'Editar y publicar', sync: 'Sincronizar con su carpeta', delete: 'Eliminar instancias', players: 'Nicks no premium', storage: 'Almacenamiento del servidor',
+      access_view: 'Ver jugadores', access_add: 'Añadir jugadores', access_remove: 'Retirar o eliminar jugadores',
+    };
     const draw = async () => {
       pane.innerHTML = '<div class="settings__section"><p class="field__hint"><span class="spin"></span> Comprobando tu acceso…</p></div>';
       let st;
