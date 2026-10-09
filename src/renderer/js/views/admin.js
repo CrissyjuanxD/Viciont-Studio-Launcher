@@ -1929,7 +1929,8 @@ async function processMedia(file, kind) {
     return { bytes: new Uint8Array(await file.arrayBuffer()), type };
   }
   if (type === 'image/gif') {
-    if (file.size > 15 * 1024 * 1024) throw new Error('El GIF pesa más de 15 MB.');
+    const max = kind === 'background' ? 50 : 15;
+    if (file.size > max * 1024 * 1024) throw new Error(`El GIF pesa más de ${max} MB.`);
     return { bytes: new Uint8Array(await file.arrayBuffer()), type };
   }
   if (!/^image\/(png|jpeg|webp)$/.test(type)) throw new Error('Formato no admitido.');

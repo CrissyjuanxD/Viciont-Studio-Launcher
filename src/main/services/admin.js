@@ -635,7 +635,7 @@ class Admin extends EventEmitter {
     if (!ext) throw err('Formato no admitido. Usa PNG, JPG, WEBP, GIF, MP4 o WEBM.');
     if (kind !== 'background' && /^video/.test(type)) throw err(`El ${kind === 'icon' ? 'icono' : 'banner'} debe ser una imagen o un GIF.`);
     const buf = Buffer.from(bytes);
-    const max = /^video/.test(type) ? 80 : ext === 'gif' ? 15 : 8;
+    const max = /^video/.test(type) ? 80 : ext === 'gif' ? (kind === 'background' ? 50 : 15) : 8;
     if (buf.length > max * 1024 * 1024) throw err(`El archivo es demasiado grande (máximo ${max} MB).`);
     const name = `${crypto.createHash('sha256').update(buf).digest('hex')}.${ext}`;
     const file = path.join(this.dirs().media, name);
