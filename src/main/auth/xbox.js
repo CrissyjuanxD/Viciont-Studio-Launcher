@@ -113,6 +113,7 @@ function pkce() {
 }
 
 async function sisuAuthenticate(devToken, challenge, key) {
+  const state = crypto.randomBytes(32).toString('hex');
   const r = await signedPost('https://sisu.xboxlive.com/authenticate', {
     AppId: CLIENT_ID,
     DeviceToken: devToken,
@@ -120,7 +121,7 @@ async function sisuAuthenticate(devToken, challenge, key) {
     Query: {
       code_challenge: challenge,
       code_challenge_method: 'S256',
-      state: crypto.randomBytes(32).toString('hex'),
+      state,
       prompt: 'select_account',
     },
     RedirectUri: REDIRECT,
@@ -130,7 +131,7 @@ async function sisuAuthenticate(devToken, challenge, key) {
   }, key);
   const sessionId = r.headers.get('x-sessionid');
   if (r.status !== 200 || !r.data?.MsaOauthRedirect || !sessionId) throw xboxFailure('sisu', r);
-  return { sessionId, url: r.data.MsaOauthRedirect };
+  return { sessionId, url: r.data.MsaOauthRedirect, state };
 }
 
 async function msToken(form) {

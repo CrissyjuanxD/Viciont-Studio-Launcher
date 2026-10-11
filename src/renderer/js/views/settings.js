@@ -315,6 +315,7 @@ const PANES = {
       pane.innerHTML = `
         <div class="settings__section">
           <h3>Tus cuentas</h3>
+          ${state.info?.credentialsPersistent === false ? `<div class="banner-note">${icon('alert')}<span>Este equipo no tiene un almacén seguro disponible. Tus credenciales solo se conservarán mientras el launcher esté abierto. Guarda el código de recuperación de tus nicks antes de salir.</span></div>` : ''}
           <div style="display:grid;gap:10px">
             ${list.map((a) => `
               <div class="field__row" style="justify-content:space-between;padding:12px 14px;border:1px solid ${a.active ? 'rgba(236,72,153,.6)' : 'var(--line)'};border-radius:14px;background:${a.active ? 'var(--grad-soft)' : 'transparent'}">
@@ -357,7 +358,7 @@ const PANES = {
         const acc = list.find((a) => a.uuid === b.dataset.out);
         const ms = acc?.type === 'microsoft';
         const r = await confirm({
-          title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? ' Su código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick.' : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
+          title: '¿Cerrar sesión?', text: `Se quitará ${acc?.name} de este launcher.${acc?.type === 'offline' ? (state.info?.credentialsPersistent === false ? ' Guarda su código de recuperación: este equipo no puede conservarlo de forma segura al cerrar el launcher.' : ' Su código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick.') : ''}`, ok: 'Cerrar sesión', danger: true, icon: 'logout',
           extra: ms
             ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido)</label>'
             : '<label class="check"><input type="checkbox" name="forget"> Olvidar también este nick en este PC: se borra su código y el PC deja de reconocerlo (recomendado si el PC es compartido)</label>',
@@ -398,7 +399,7 @@ const PANES = {
       pane.querySelector('#rec-new')?.addEventListener('click', async (e) => {
         const ok = await confirm({
           title: '¿Generar un código nuevo?',
-          text: `Tendrás un código de recuperación nuevo para ${active.name}. El anterior dejará de funcionar en cualquier PC, y este PC te seguirá reconociendo.`,
+          text: `Tendrás un código de recuperación nuevo para ${active.name}. El anterior dejará de funcionar, se revocarán las sesiones anteriores y los otros PCs dejarán de estar vinculados. Este PC conservará el acceso.`,
           ok: 'Generar código', icon: 'refresh',
         });
         if (!ok) return;

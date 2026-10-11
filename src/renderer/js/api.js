@@ -43,9 +43,21 @@ export function instance(id) {
 }
 
 export function setInstances(list) {
-  state.instances = list.instances || [];
+  const before = new Map(state.instances.map((i) => [i.id, JSON.stringify(i)]));
+  const next = list.instances || [];
+  const metaChanged = state.instancesMeta.error !== (list.error || null)
+    || state.instancesMeta.configured !== Boolean(list.configured);
+  const changed = next.filter((i) => metaChanged || before.get(i.id) !== JSON.stringify(i));
+  const ids = new Set(next.map((i) => i.id));
+  const removed = state.instances.filter((i) => !ids.has(i.id));
+  const different = changed.length || state.instances.length !== next.length
+    || state.instances.some((i, n) => i.id !== next[n]?.id)
+    || metaChanged;
+  state.instances = next;
   state.instancesMeta = { error: list.error || null, configured: Boolean(list.configured), at: list.at };
-  emit('instances', state.instances);
+  if (different) emit('instances', state.instances);
+  for (const d of changed) emit(`instance:${d.id}`, d);
+  for (const d of removed) emit(`instance:${d.id}`, null);
 }
 
 export function upsertInstance(d) {

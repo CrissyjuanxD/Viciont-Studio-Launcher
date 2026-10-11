@@ -8,6 +8,7 @@ const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, native
 const paths = require('./core/paths');
 const log = require('./core/log');
 const { Settings, totalMB, DEFAULT_JVM, recommendedMax } = require('./core/settings');
+const { credentialsPersistent } = require('./core/secure');
 const { setUserAgent, getJson, cached } = require('./util/net');
 const { dirSize, rmrf, exists, readJson } = require('./util/fsx');
 const { Backend } = require('./services/backend');
@@ -327,7 +328,7 @@ function start() {
     const notice = updateNotice;
     updateNotice = false;
     return {
-      name: APP_NAME, version: VERSION, dev: isDev, platform: process.platform, totalMB, recommendedMax: recommendedMax(),
+      name: APP_NAME, version: VERSION, dev: isDev, platform: process.platform, totalMB, recommendedMax: recommendedMax(), credentialsPersistent: credentialsPersistent(),
       dataDir: dataRoot, configDir: paths.CONFIG_ROOT, backend: backend.configured(), apiBase: backend.base(),
       news: backend.news(), admin: admin.quickStatus(), update: updater.state, justUpdated: notice, defaultJvm: DEFAULT_JVM,
       discord: { available: Boolean(backend.discordClientId()) }, site: backend.siteUrl(),
@@ -815,9 +816,14 @@ function start() {
       Promise.resolve().then(() => run(ctx)).catch((e) => log.error('[test]', e))
         .finally(() => { if (!process.argv.includes('--keep')) { quitting = true; app.quit(); } });
     }
-    const t = setInterval(() => {
-      if (win && !win.isDestroyed() && win.isVisible() && !win.isMinimized()) instances.refresh().then((l) => send('instances', l)).catch(() => {});
-    }, 10 * 60 * 1000);
+    let lastRefresh = 0;
+    const refreshVisible = () => {
+      if (!win || win.isDestroyed() || !win.isVisible() || win.isMinimized() || !accounts.active() || Date.now() - lastRefresh < 2000) return;
+      lastRefresh = Date.now();
+      instances.refresh().then((l) => send('instances', l)).catch(() => {});
+    };
+    app.on('browser-window-focus', refreshVisible);
+    const t = setInterval(refreshVisible, 15000);
     t.unref?.();
   });
 

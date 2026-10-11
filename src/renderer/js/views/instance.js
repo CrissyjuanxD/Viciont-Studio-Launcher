@@ -131,7 +131,7 @@ export function render(root, route, app) {
           ${inst.workspace?.behind ? `<p class="inst__warn">${icon('alert')}Otro administrador publicó una versión más nueva. Tráela desde Administración antes de seguir cambiando cosas.</p>` : ''}
           ${inst.workspace && !inst.workspace.behind ? `<p class="inst__note">${icon('refresh')}Esta es tu carpeta de trabajo: lo que cambies aquí (mods, configs, options.txt…) es lo que se publica desde Administración.</p>` : ''}
           ${inst.interrupted ? `<p class="inst__warn">${icon('alert')}La descarga anterior no terminó. Pulsa el botón para continuar donde se quedó.</p>` : ''}
-          ${!inst.available && inst.installed ? `<p class="inst__warn">${icon('alert')}Esta instancia ya no está en el servidor (o no hay conexión). Puedes seguir jugando la versión instalada.</p>` : ''}
+          ${!inst.available && inst.installed ? `<p class="inst__warn">${icon('alert')}${state.instancesMeta.error ? 'No se pudo comprobar el acceso a esta instancia. Revisa tu conexión o vuelve a iniciar sesión.' : 'Esta cuenta no tiene acceso a la instancia, o Viciont Studios la ha retirado.'} Puedes seguir jugando la versión instalada.</p>` : ''}
           ${rec && assigned && rec > assigned ? `<p class="inst__warn">${icon('cpu')}Viciont Studios recomienda ${Math.round(rec / 1024 * 10) / 10} GB de RAM y tienes ${Math.round(assigned / 1024 * 10) / 10} GB asignados. Cámbialo en Opciones.</p>` : ''}
           ${inst.status === 'update' && inst.changelog ? `<div class="panel"><div class="panel__title">Novedades de la versión ${esc(inst.version)}</div><div class="rich">${richText(inst.changelog)}</div></div>` : ''}
         </div>
@@ -160,29 +160,17 @@ export function render(root, route, app) {
     paintProgress(root, inst, state.progress.get(id));
   };
 
-  const renderAction = () => {
-    const box = root.querySelector('#inst-action');
-    if (!box) return renderAll();
-    box.innerHTML = actionHtml(inst);
-    hydrateIcons(box);
-    paintProgress(root, inst, state.progress.get(id));
-  };
-
-  let lastStatus = inst.status;
+  let lastError = state.instancesMeta.error;
   const offInst = on(`instance:${id}`, (d) => {
+    if (!d) { app.go({ name: 'home' }); return; }
     const prev = inst;
     inst = d;
-    if (Boolean(prev.workspace) !== Boolean(d.workspace)) {
-      lastStatus = d.status;
+    const { progress: oldProgress, ...oldView } = prev;
+    const { progress: newProgress, ...newView } = d;
+    if (JSON.stringify(oldView) !== JSON.stringify(newView) || lastError !== state.instancesMeta.error) {
+      lastError = state.instancesMeta.error;
+      app.scene.show(inst);
       renderAll();
-      return;
-    }
-    if (d.status !== lastStatus) {
-      lastStatus = d.status;
-      if (prev.installedVersion !== d.installedVersion || prev.available !== d.available || prev.version !== d.version) renderAll();
-      else renderAction();
-      const chips = root.querySelector('.inst__top .inst__chips');
-      if (chips) { chips.innerHTML = topChips(inst); hydrateIcons(chips); }
     }
   });
   const offProg = on(`progress:${id}`, (p) => paintProgress(root, inst, p));

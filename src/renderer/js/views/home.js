@@ -1,7 +1,7 @@
 import { state, on, call } from '../api.js';
 import { icon } from '../icons.js';
-import { esc, instIcon, instThumb, loaderLabel, timeAgo, playTime } from '../util.js';
-import { typeLoop, scramble, glitchImg, bindTilt } from '../fx.js';
+import { esc, instIcon, instThumb, loaderLabel } from '../util.js';
+import { typeLoop, scramble } from '../fx.js';
 import { statusChip } from './instance.js';
 
 export function render(root, _route, app) {
@@ -11,11 +11,10 @@ export function render(root, _route, app) {
   root.innerHTML = `
     <section class="home">
       <div class="home__hero">
-        ${glitchImg('img/emblem.webp', 'home__emblem')}
         <div class="home__brand">
-          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span> <span class="glitch glitch--grad" data-text="STUDIOS">STUDIOS</span></h1>
+          <h1 class="home__title"><img class="home__logo" src="img/logo-full.webp" alt="Viciont Studios" draggable="false"></h1>
           <p class="home__tagline"><span id="home-typing"></span><span class="caret"></span></p>
-          <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Elige una instancia de la barra lateral o de la lista.</p>
+          <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Tu próxima aventura empieza aquí.</p>
         </div>
       </div>
       <div class="home__section">
@@ -35,7 +34,6 @@ export function render(root, _route, app) {
   let stopTyping = typeLoop(root.querySelector('#home-typing'), ['instancias oficiales de Viciont Studios', 'eventos, series y hardcores', 'descargas rápidas y seguras', 'skins para todos']);
   const nameEl = root.querySelector('#home-name');
   if (nameEl) scramble(nameEl, acc.name);
-  bindTilt(root);
 
   const renderList = () => {
     const grid = root.querySelector('#home-grid');
@@ -50,21 +48,19 @@ export function render(root, _route, app) {
         : `<div class="empty">${icon('cube')}<h3>Nada por aquí todavía</h3><p>Cuando Viciont Studios publique una instancia para tu cuenta, aparecerá aquí.</p></div>`;
     } else {
       grid.innerHTML = list.map((i) => `
-        <button class="icard" type="button" data-id="${esc(i.id)}" data-tilt>
-          <div class="icard__media">${instThumb(i)}<div class="icard__status">${statusChip(i)}</div></div>
+        <button class="icard" type="button" data-id="${esc(i.id)}" title="${esc(i.summary || i.name)}">
+          <div class="icard__media" aria-hidden="true">${i.media && Object.values(i.media).some(Boolean) ? instThumb(i) : ''}</div>
+          <div class="icard__icon">${instIcon(i)}</div>
           <div class="icard__body">
-            <div class="icard__icon">${instIcon(i)}</div>
             <div class="icard__name">${esc(i.name)}</div>
             <div class="icard__meta">
               <span class="tag">${esc(i.mc || '')}</span>
               <span class="tag">${esc(loaderLabel(i.loader))}</span>
               ${i.visibility === 'private' ? `<span class="tag">${icon('lock')} privada</span>` : ''}
-              ${i.test ? `<span class="tag tag--test">${icon('eye')} copia de prueba</span>` : ''}
+              ${i.test ? `<span class="tag tag--test">${icon('eye')} prueba</span>` : ''}
               ${i.workspace ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
-              ${i.installed && i.playTime ? `<span class="tag" data-tip="Tiempo jugado en total">${icon('clock')} ${esc(playTime(i.playTime))}</span>` : ''}
             </div>
-            ${i.summary ? `<p class="icard__summary">${esc(i.summary)}</p>` : ''}
-            ${i.installed && i.lastPlayed ? `<div class="icard__played">${icon('history')}<span>Jugado ${esc(timeAgo(i.lastPlayed))}</span></div>` : ''}
+            <div class="icard__status">${statusChip(i)}</div>
           </div>
         </button>`).join('');
     }

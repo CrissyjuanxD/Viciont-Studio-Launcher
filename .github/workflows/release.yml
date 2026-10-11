@@ -8,9 +8,30 @@ permissions:
   contents: write
 
 jobs:
+  verify:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-latest, macos-26]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+        env:
+          ELECTRON_SKIP_BINARY_DOWNLOAD: '1'
+      - name: Comprobar versión
+        run: node -e "if ('v' + require('./package.json').version !== process.env.GITHUB_REF_NAME) process.exit(1)"
+      - name: Comprobar regresiones
+        run: npm test
+
   release:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v5
       - name: Crear la release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -19,7 +40,11 @@ jobs:
           tag="$GITHUB_REF_NAME"
           v="${tag#v}"
           if ! gh release view "$tag" > /dev/null 2>&1; then
-            gh release create "$tag" --title "Viciont Studios Launcher $v" --notes "Descarga el launcher para tu sistema desde *Assets*: **.exe** para Windows, **.dmg** para macOS y **.AppImage**, **.deb** o **.rpm** para Linux." --latest
+            if [ -f "docs/releases/$v.md" ]; then
+              gh release create "$tag" --title "Viciont Studios Launcher $v" --notes-file "docs/releases/$v.md" --latest
+            else
+              gh release create "$tag" --title "Viciont Studios Launcher $v" --notes "Descarga el launcher para tu sistema desde Assets: .exe para Windows, .dmg para macOS y .AppImage, .deb o .rpm para Linux." --latest
+            fi
           fi
 
   windows:

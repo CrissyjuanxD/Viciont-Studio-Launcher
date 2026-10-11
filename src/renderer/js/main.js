@@ -464,7 +464,7 @@ async function boot() {
     const ms = acc.type === 'microsoft';
     const r = await confirm({
       title: '¿Cerrar sesión?',
-      text: `Saldrás de ${acc.name} en este launcher.${acc.type === 'offline' ? ' Tu código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick. Si vas a jugar en otro PC, anótalo antes (Ajustes → Cuenta).' : ''}`,
+      text: `Saldrás de ${acc.name} en este launcher.${acc.type === 'offline' ? (state.info?.credentialsPersistent === false ? ' Guarda tu código de recuperación en Ajustes → Cuenta: este equipo no puede conservarlo de forma segura al cerrar el launcher.' : ' Tu código de recuperación se queda guardado en este PC para que puedas volver a entrar con este nick. Si vas a jugar en otro PC, anótalo antes (Ajustes → Cuenta).') : ''}`,
       ok: 'Cerrar sesión', danger: true, icon: 'logout',
       extra: ms
         ? '<label class="check"><input type="checkbox" name="forget"> Olvidar también esta cuenta de Microsoft en este PC (recomendado si el PC es compartido: la próxima vez pedirá la contraseña)</label>'
@@ -482,6 +482,11 @@ async function boot() {
   bootFx.done();
   booted = true;
   paintStartUpdate();
+  if (state.info?.credentialsPersistent === false && state.accounts.active) {
+    toast('El almacén seguro no está disponible. Las credenciales se conservarán solo durante esta sesión. Guarda tu código de recuperación antes de salir.', {
+      timeout: 12000, actions: [{ label: 'Ver mi cuenta', onClick: () => app.openSettings('account') }],
+    });
+  }
   if (state.info?.justUpdated) setTimeout(() => toast(`Launcher actualizado a la versión ${state.info.version}.`, { kind: 'success', timeout: 6000 }), 1200);
 }
 

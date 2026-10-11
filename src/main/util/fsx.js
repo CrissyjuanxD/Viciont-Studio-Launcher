@@ -55,10 +55,10 @@ async function writeFileAtomic(p, data) {
   }
 }
 
-function writeFileAtomicSync(p, data) {
+function writeFileAtomicSync(p, data, { mode } = {}) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const tmp = `${p}.${process.pid}.${crypto.randomBytes(4).toString('hex')}.tmp`;
-  const fd = fs.openSync(tmp, 'w');
+  const fd = fs.openSync(tmp, 'w', mode);
   try {
     fs.writeFileSync(fd, data);
     fs.fsyncSync(fd);

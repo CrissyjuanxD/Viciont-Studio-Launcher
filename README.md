@@ -66,12 +66,12 @@ No necesitas tener Java instalado: el launcher descarga el Java oficial que nece
 
 **Para los jugadores**
 - **Iniciar sesión** con una cuenta de Microsoft o solo con un nick (no premium). Con Microsoft funciona igual que Modrinth App y el launcher oficial: la contraseña se escribe **solo en la página oficial de Microsoft** y el launcher nunca la ve. No deja usar el nick de una cuenta de Microsoft: lo comprueba en la misma base de datos de Mojang que usa NameMC.
-- Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC (cifrado), así que puedes cerrar sesión y volver a entrar sin escribirlo.
+- Cada nick no premium queda **reservado** con un código de recuperación, para que nadie se haga pasar por otro. El launcher lo recuerda en tu PC cifrado con el llavero del sistema, así que puedes cerrar sesión y volver a entrar sin escribirlo. Si no hay un llavero seguro disponible, avisa y lo conserva solo durante esa sesión: guarda tu código antes de salir.
 - **Tu PC queda vinculado a tu nick**: aunque desinstales el launcher borrándolo todo y lo vuelvas a instalar, en ese mismo PC entras con tu nick sin el código. El launcher guarda una llave aleatoria de ese PC fuera de su carpeta de datos, y el servidor solo guarda un hash que no sirve desde otro PC. Si has entrado así, en **Ajustes → Cuenta** puedes generar un código nuevo para jugar en otro PC, y al cerrar sesión puedes marcar que el PC olvide el nick (recomendado en PCs compartidos).
 - **Skins** para las dos cuentas, con visor 3D, biblioteca y "copiar skin de un nick", como en Modrinth:
   - Cuenta de Microsoft: la skin y la capa se cambian en tu cuenta de Minecraft y se ven en todas partes.
   - No premium: la skin se guarda en el servidor de Viciont Studios y la ven quienes juegan con este launcher, gracias a CustomSkinLoader, que se añade solo a las instancias con mods. Quien use otro launcher te verá con la skin por defecto.
-- **Inicio** con todas las instancias que puedes jugar: en cada una se ve cuándo jugaste por última vez y cuánto tiempo llevas jugado. Abajo siempre queda el pie con las redes de Viciont Studios, aunque haya muchas instancias.
+- **Inicio** con el logo centrado, fondo atenuado y tarjetas compactas de las instancias que puedes jugar. El tiempo jugado se consulta dentro de cada instancia. Abajo siempre queda el pie con las redes de Viciont Studios, aunque haya muchas instancias.
 - **Barra lateral** con las instancias que tienes permiso para ver, la casita para volver al inicio, las skins, los ajustes, tu cabeza de la skin (al pasar el cursor dice qué cuenta tienes) y el botón de cerrar sesión.
 - **Un solo botón** que cambia según el estado: **Descargar → Actualizar → Jugar → Jugando**. Mientras descarga se convierte en una tarjeta con la imagen de la instancia, el progreso, los MB/s y el tiempo que queda.
 - Cada instancia tiene su **fondo propio**: imagen, GIF o vídeo.
@@ -107,6 +107,7 @@ No necesitas tener Java instalado: el launcher descarga el Java oficial que nece
 **Si el juego se cierra con un error**, el launcher enseña el **crash report completo** y el registro del juego (y el error de Java si lo hubo), con botones para copiarlo todo, guardarlo o abrir la carpeta de informes.
 
 **Optimizado**
+- La lista se comprueba cada 15 segundos mientras el launcher está visible y al volver a la ventana; las peticiones simultáneas se agrupan y solo se redibuja cuando cambia su contenido. El servidor conserva la lista hasta 15 segundos, por lo que un cambio puede tardar hasta unos 30 segundos en aparecer.
 - Las descargas y las comprobaciones de archivos (SHA-1) van en un **hilo aparte**: la ventana sigue fluida aunque se descargue o compruebe una instancia muy pesada.
 - El fondo animado (espiral, figuras flotantes, partículas y glitch) se dibuja a media resolución y con límite de FPS. Se **detiene por completo** cuando la ventana está minimizada, tapada o en segundo plano.
 - Con la opción **"Cerrar la ventana"** al jugar, el launcher libera casi toda su memoria mientras juegas, se queda en la bandeja y vuelve a abrirse al cerrar el juego.
@@ -146,6 +147,7 @@ Las instancias, los permisos, los archivos privados, las skins no premium, los r
 ## Seguridad
 
 - **Tu contraseña de Microsoft** solo se escribe en la página oficial de Microsoft, en una ventana aparte que solo puede abrir páginas de Microsoft (como Modrinth App). El launcher nunca la ve ni la guarda. Al cerrar sesión puedes marcar que esa ventana olvide también la cuenta de Microsoft.
+- Si no hay un llavero seguro disponible (incluido `basic_text` en Linux), las credenciales se conservan solo en memoria. Los archivos antiguos en Base64 se migran al cifrado del sistema cuando está disponible.
 - Las sesiones se guardan **cifradas por el sistema** en tu PC (DPAPI en Windows, el llavero de macOS y el llavero del sistema en Linux, como GNOME Keyring o KWallet). Las cuentas de Microsoft se comprueban con Mojang sin enviar su token al servidor de Viciont Studios: como un servidor de Minecraft (`join`) y, si Mojang no le contesta al servidor, con el certificado de jugador y las texturas **firmados por Mojang** (el launcher firma un desafío con la clave del certificado).
 - La interfaz no tiene acceso a Node ni a tus archivos (Electron con `contextIsolation`, `sandbox` y CSP estricta). La versión instalada lleva los "fusibles" de seguridad de Electron activados: no se puede arrancar como Node, ni con depuradores, ni cargar código que no sea el suyo.
 - **Sin servidores falsos**: en la versión instalada el servidor de Viciont Studios sale siempre de la configuración oficial de este repositorio y no se puede cambiar a mano, así que nadie puede engañarte para conectarte a otro con mods maliciosos.
@@ -168,7 +170,7 @@ npm run dist:mac    # en un Mac: crea el .dmg universal (chip Apple e Intel)
 npm run dist:linux  # en Linux: crea la AppImage, el .deb y el .rpm
 ```
 
-Para publicar una versión nueva: sube el número de `version` en `package.json` y crea una etiqueta `vX.Y.Z`. GitHub Actions compila el launcher para Windows, macOS y Linux y lo publica en Releases, y los launchers instalados se actualizan solos (o avisan, en macOS y con los paquetes de Linux).
+Para publicar una versión nueva: actualiza `package.json` y `package-lock.json` con `npm version X.Y.Z --no-git-tag-version`, ejecuta `npm test`, añade las notas a `docs/releases/X.Y.Z.md` y sube el commit y la etiqueta `vX.Y.Z`. El workflow primero comprueba la versión y las regresiones en Windows, macOS y Linux; después crea la release con esas notas y compila/publica los mismos instaladores, enlaces fijos y metadatos de actualización habituales. Los launchers instalados se actualizan solos (o avisan, en macOS y con los paquetes de Linux). La 1.3.8 requiere desplegar también la API 14 del servidor para activar las correcciones de limpieza y seguridad del backend.
 
 Antes de publicar se puede lanzar el workflow **Probar en Windows, Mac y Linux** (a mano o subiendo una rama `prueba-…`): compila el launcher en cada sistema, lo abre y arranca Minecraft de verdad con una cuenta offline (vanilla, Fabric, Forge y versiones antiguas) sin tocar el servidor de Viciont Studios, y deja capturas y registros en *Artifacts*.
 

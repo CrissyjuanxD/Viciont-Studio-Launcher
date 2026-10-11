@@ -219,7 +219,7 @@ class Accounts extends EventEmitter {
           writeSecure(FILE, this.data);
           throw Object.assign(new Error('Este nick ya no está a tu nombre en este PC. Si es tuyo, escribe tu código de recuperación.'), { code: 'EBADCODE' });
         }
-        if (e.code === 'ENICKTAKEN' || e.code === 'EBADCODE') throw e;
+        if (['ENICKTAKEN', 'EBADCODE', 'EPREMIUM'].includes(e.code) || e.status || !existing) throw e;
         this.log.warn('Servidor no disponible, la cuenta se registrará más tarde:', e.message);
       }
     }
@@ -276,6 +276,9 @@ class Accounts extends EventEmitter {
       } else throw e;
     }
     acc.claimSecret = r.secret;
+    if (r.token) acc.backend = { token: r.token, exp: r.expiresAt, base: this.backend.base() };
+    else acc.backend = null;
+    this.meCache.delete(acc.uuid);
     acc.deviceAt ||= Date.now();
     this.rememberCode(acc, false);
     this.upsert(acc);
@@ -352,7 +355,7 @@ class Accounts extends EventEmitter {
   async session(acc = this.active(), { force = false } = {}) {
     if (!acc || !this.backend.configured()) return null;
     const base = this.backend.base();
-    if (acc.backend?.token && acc.backend.base === base && acc.backend.exp - Date.now() > 60 * 60 * 1000) return acc.backend.token;
+    if (!force && acc.backend?.token && acc.backend.base === base && acc.backend.exp - Date.now() > 60 * 60 * 1000) return acc.backend.token;
     const key = `${acc.uuid}@${base}`;
     if (this.sessionFlights.has(key)) return this.sessionFlights.get(key);
     const fail = this.sessionFails.get(key);

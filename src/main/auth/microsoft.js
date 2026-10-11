@@ -38,7 +38,7 @@ function cancelLogin() {
   if (current && !current.isDestroyed()) current.close();
 }
 
-function openLoginWindow(url) {
+function openLoginWindow(url, expectedState) {
   if (current && !current.isDestroyed()) current.destroy();
   return new Promise((resolve, reject) => {
     let done = false;
@@ -63,8 +63,15 @@ function openLoginWindow(url) {
       if (err) reject(err); else resolve(code);
     };
     const check = (u) => {
-      if (!u || !u.startsWith(xbox.REDIRECT)) return false;
-      const q = new URL(u).searchParams;
+      let target;
+      try { target = new URL(u); } catch { return false; }
+      const redirect = new URL(xbox.REDIRECT);
+      if (target.origin !== redirect.origin || target.pathname !== redirect.pathname) return false;
+      const q = target.searchParams;
+      if (!expectedState || q.get('state') !== expectedState) {
+        finish(authError('La respuesta de Microsoft no corresponde a este inicio de sesión. Vuelve a intentarlo.', 'ESTATE'));
+        return true;
+      }
       const code = q.get('code');
       const error = q.get('error');
       if (code) finish(null, code);
@@ -212,9 +219,11 @@ async function toMinecraft(msAccessToken, sessionId, store) {
 
 
 async function classicLogin() {
-  const p = new URLSearchParams({ client_id: xbox.CLIENT_ID, response_type: 'code', redirect_uri: xbox.REDIRECT, scope: xbox.SCOPE, prompt: 'select_account' });
-  const code = await openLoginWindow(`https://login.live.com/oauth20_authorize.srf?${p}`);
-  const ms = await xbox.msToken({ code, grant_type: 'authorization_code' });
+  const { verifier, challenge } = xbox.pkce();
+  const state = crypto.randomBytes(32).toString('hex');
+  const p = new URLSearchParams({ client_id: xbox.CLIENT_ID, response_type: 'code', redirect_uri: xbox.REDIRECT, scope: xbox.SCOPE, prompt: 'select_account', state, code_challenge: challenge, code_challenge_method: 'S256' });
+  const code = await openLoginWindow(`https://login.live.com/oauth20_authorize.srf?${p}`, state);
+  const ms = await xbox.oauthToken(code, verifier);
   const { mc, xuid } = await classicXbox(ms.access_token, 't');
   return accountFromProfile(await getProfile(mc.accessToken), ms.refresh_token, mc, 'classic', xuid);
 }
@@ -224,13 +233,13 @@ async function login(store) {
   try {
     const dev = await ensureDevice(store);
     const { verifier, challenge } = xbox.pkce();
-    const { sessionId, url } = await xbox.sisuAuthenticate(dev.token, challenge, dev.key);
-    flow = { verifier, sessionId, url };
+    const { sessionId, url, state } = await xbox.sisuAuthenticate(dev.token, challenge, dev.key);
+    flow = { verifier, sessionId, url, state };
   } catch (e) {
     if (e.code === 'ECANCEL') throw e;
     return classicLogin();
   }
-  const code = await openLoginWindow(flow.url);
+  const code = await openLoginWindow(flow.url, flow.state);
   const ms = await xbox.oauthToken(code, flow.verifier);
   const r = await toMinecraft(ms.access_token, flow.sessionId, store);
   const profile = await getProfile(r.mc.accessToken);

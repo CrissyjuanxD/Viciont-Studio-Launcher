@@ -19,6 +19,7 @@ export function render(root, { onDone, canCancel = false, onCancel } = {}) {
           <p class="login__sub">Viciont Studios Launcher</p>
         </div>
         <div id="login-step"></div>
+        ${state.info?.credentialsPersistent === false ? '<p class="login__foot">El almacén seguro de este equipo no está disponible. Tu sesión se conservará solo mientras el launcher esté abierto.</p>' : ''}
         <p class="login__foot">Creado por <b>CrissyjuanxD</b> · Viciont Studios</p>
       </div>`;
     hydrateIcons(root);

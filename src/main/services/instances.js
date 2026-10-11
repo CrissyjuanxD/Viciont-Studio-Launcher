@@ -63,6 +63,8 @@ class Instances extends EventEmitter {
     this.remote = new Map();
     this.remoteError = null;
     this.remoteAt = 0;
+    this.remoteKey = null;
+    this.refreshFlight = null;
     this.tasks = new Map();
     this.running = new Map();
     this.waiting = new Map();
@@ -102,25 +104,56 @@ class Instances extends EventEmitter {
 
   async loadCache() {
     const c = await readJson(this.cacheFile, null);
-    if (c?.list) for (const s of c.list) this.remote.set(s.id, s);
+    if (c?.key === this.accountKey() && c?.list) {
+      this.remoteKey = c.key;
+      for (const s of c.list) this.remote.set(s.id, s);
+    }
   }
 
-  async refresh() {
+  accountKey() { return `${this.backend.base()}|${this.accounts.active()?.uuid || ''}`; }
+
+  refresh() {
+    const key = this.accountKey();
+    if (this.refreshFlight?.key === key) return this.refreshFlight.promise;
+    if (this.remoteKey !== key) {
+      this.remote.clear();
+      this.remoteAt = 0;
+      this.remoteKey = key;
+    }
+    const flight = { key, promise: null };
+    flight.promise = this.refreshFor(key).finally(() => {
+      if (this.refreshFlight === flight) this.refreshFlight = null;
+    });
+    this.refreshFlight = flight;
+    return flight.promise;
+  }
+
+  async refreshFor(key) {
     if (!this.backend.configured()) {
       this.remoteError = 'ENOBACKEND';
       return this.list();
     }
     try {
-      const token = await this.accounts.session().catch((e) => {
-        this.log.warn('Sin sesión en el servidor:', e.message);
-        return null;
-      });
-      const r = await this.backend.call('/v1/instances', { token, timeout: 15000 });
+      const account = this.accounts.active();
+      let r;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const token = await this.accounts.session(account);
+        try {
+          r = await this.backend.call('/v1/instances', { token, timeout: 15000 });
+          break;
+        } catch (e) {
+          if (attempt === 0 && e.status === 401 && account) this.accounts.invalidateSession(account);
+          else throw e;
+        }
+      }
+      // Una respuesta de la cuenta anterior nunca reemplaza la lista de la actual.
+      if (key !== this.accountKey()) return this.list();
       this.remote = new Map((r.instances || []).filter((s) => ID_RE.test(s.id) && !isTestId(s.id)).map((s) => [s.id, s]));
       this.remoteError = null;
       this.remoteAt = Date.now();
-      await writeJsonAtomic(this.cacheFile, { at: this.remoteAt, list: [...this.remote.values()] });
+      await writeJsonAtomic(this.cacheFile, { key, at: this.remoteAt, list: [...this.remote.values()] });
     } catch (e) {
+      if (key !== this.accountKey()) return this.list();
       this.remoteError = e.code === 'ENETWORK' || e.code === 'ETIMEDOUT' ? 'EOFFLINE' : (e.code || 'EERROR');
       this.log.warn('No se pudo actualizar la lista de instancias:', e.message);
     }
