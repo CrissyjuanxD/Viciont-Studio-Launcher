@@ -15,9 +15,9 @@
 .bg-brand {
   position: fixed; inset: 0; z-index: 0; pointer-events: none;
   display: grid; place-items: center; padding: var(--titlebar-h) 0 0 var(--rail-w);
-  background: rgba(0, 0, 0, 0.28);
+  background: rgba(0, 0, 0, 0.72);
 }
-.bg-brand img { width: min(56vw, 640px); max-height: 28vh; object-fit: contain; filter: drop-shadow(0 8px 24px rgba(0, 0, 0, 0.65)); }
+.bg-brand img { width: min(56vw, 640px); max-height: 28vh; object-fit: contain; opacity: 0.24; }
 
 .scene { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 .scene__layer { position: absolute; inset: 0; opacity: 0; transition: opacity 0.7s ease; }
@@ -226,7 +226,7 @@
 
 /* Inicio: textos originales y espacio central para la marca del fondo. */
 .home { position: relative; isolation: isolate; min-height: 100%; display: flex; flex-direction: column; padding: 0; }
-.home__hero { position: relative; display: flex; align-items: flex-start; flex: 1; min-height: 290px; gap: 22px; padding: 38px 44px 14px; }
+.home__hero { position: relative; display: flex; align-items: flex-start; flex: 1; min-height: clamp(200px, calc(100vh - 400px), 290px); gap: 22px; padding: 38px 44px 14px; }
 .home__emblem { width: 78px; flex: none; }
 .home__brand { display: grid; gap: 8px; min-width: 0; }
 .home__title { font: 400 3rem/0.9 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; white-space: nowrap; }
@@ -239,23 +239,22 @@
 .section-head .title-md { display: flex; align-items: center; gap: 12px; }
 .section-head .title-md::before { content: ''; width: 26px; height: 2px; background: var(--grad); box-shadow: var(--glow-pink); }
 
-.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 10px; }
+.grid-cards { display: grid; grid-template-columns: repeat(auto-fill, minmax(190px, 1fr)); gap: 10px; }
 .icard {
-  position: relative; isolation: isolate; display: flex; align-items: center; gap: 12px; min-height: 100px; text-align: left; padding: 14px;
+  position: relative; display: grid; grid-template-rows: auto 1fr; min-width: 0; text-align: left; padding: 0;
   border-radius: 13px; overflow: hidden; border: 1px solid var(--line); background: rgba(12, 4, 22, 0.72);
   color: inherit; transition: border-color 0.2s, background 0.2s;
 }
 .icard:hover { border-color: rgba(236, 72, 153, 0.65); background: rgba(30, 10, 45, 0.85); }
-.icard__media { position: absolute; inset: 0; z-index: -1; pointer-events: none; }
+.icard__media { position: relative; aspect-ratio: 16 / 9; overflow: hidden; background: #14072a; }
 .icard__media img { width: 100%; height: 100%; object-fit: cover; }
-.icard__media::after { content: ''; position: absolute; inset: 0; background: linear-gradient(90deg, rgba(7, 3, 13, 0.82), rgba(7, 3, 13, 0.55) 50%, rgba(7, 3, 13, 0.1)); }
-.icard__body { min-width: 0; display: flex; flex-direction: column; gap: 7px; text-shadow: 0 2px 6px #000; }
-.icard__icon { width: 48px; height: 48px; flex: none; border-radius: 11px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.55); background: #14072a; }
+.icard__body { position: relative; min-width: 0; padding: 10px 12px 12px; display: flex; flex-direction: column; gap: 6px; }
+.icard__icon { position: absolute; left: 12px; top: -22px; width: 34px; height: 34px; border-radius: 9px; overflow: hidden; border: 1px solid rgba(255, 255, 255, 0.55); background: #14072a; }
 .icard__icon img, .icard__icon .cover-mini { width: 100%; height: 100%; object-fit: cover; }
-.icard__name { font: 400 1.35rem/1 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.icard__name { font: 400 1.2rem/1 var(--font-display); letter-spacing: 0.03em; text-transform: uppercase; margin-top: 6px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .icard__meta { display: flex; flex-wrap: wrap; gap: 4px; }
 .icard__meta .tag { font-size: 0.62rem; padding: 2px 5px; }
-.icard__status { line-height: 1; }
+.icard__status { position: absolute; top: 6px; right: 6px; line-height: 1; }
 .icard__status .chip { font-size: 0.62rem; }
 
 .cover-mini { position: relative; display: grid; place-items: center; overflow: hidden; width: 100%; height: 100%; background: radial-gradient(120% 90% at 15% 0%, rgba(168, 85, 247, 0.7), transparent 55%), radial-gradient(90% 80% at 100% 100%, rgba(236, 72, 153, 0.6), transparent 60%), #0b0316; }

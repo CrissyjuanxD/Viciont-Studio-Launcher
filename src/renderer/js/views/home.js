@@ -50,9 +50,9 @@ export function render(root, _route, app) {
     } else {
       grid.innerHTML = list.map((i) => `
         <button class="icard" type="button" data-id="${esc(i.id)}" title="${esc(i.summary || i.name)}">
-          <div class="icard__media" aria-hidden="true">${i.media && Object.values(i.media).some(Boolean) ? instThumb(i) : ''}</div>
-          <div class="icard__icon">${instIcon(i)}</div>
+          <div class="icard__media">${instThumb(i)}<div class="icard__status">${statusChip(i)}</div></div>
           <div class="icard__body">
+            <div class="icard__icon">${instIcon(i)}</div>
             <div class="icard__name">${esc(i.name)}</div>
             <div class="icard__meta">
               <span class="tag">${esc(i.mc || '')}</span>
@@ -61,7 +61,6 @@ export function render(root, _route, app) {
               ${i.test ? `<span class="tag tag--test">${icon('eye')} prueba</span>` : ''}
               ${i.workspace ? `<span class="tag">${icon('refresh')} sincronizada</span>` : ''}
             </div>
-            <div class="icard__status">${statusChip(i)}</div>
           </div>
         </button>`).join('');
     }
