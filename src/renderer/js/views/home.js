@@ -1,7 +1,7 @@
 import { state, on, call } from '../api.js';
 import { icon } from '../icons.js';
 import { esc, instIcon, instThumb, loaderLabel } from '../util.js';
-import { typeLoop, scramble } from '../fx.js';
+import { typeLoop, scramble, glitchImg } from '../fx.js';
 import { statusChip } from './instance.js';
 
 export function render(root, _route, app) {
@@ -11,10 +11,11 @@ export function render(root, _route, app) {
   root.innerHTML = `
     <section class="home">
       <div class="home__hero">
+        ${glitchImg('img/emblem.webp', 'home__emblem')}
         <div class="home__brand">
-          <h1 class="home__title"><img class="home__logo" src="img/logo-full.webp" alt="Viciont Studios" draggable="false"></h1>
+          <h1 class="home__title"><span class="glitch" data-text="VICIONT">VICIONT</span> <span class="glitch glitch--grad" data-text="STUDIOS">STUDIOS</span></h1>
           <p class="home__tagline"><span id="home-typing"></span><span class="caret"></span></p>
-          <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Tu próxima aventura empieza aquí.</p>
+          <p class="home__welcome">Bienvenido${acc ? `, <b id="home-name">${esc(acc.name)}</b>` : ''}. Elige una instancia de la barra lateral o de la lista.</p>
         </div>
       </div>
       <div class="home__section">
