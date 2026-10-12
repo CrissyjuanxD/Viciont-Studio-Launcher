@@ -17,7 +17,7 @@
   display: grid; place-items: center; padding: var(--titlebar-h) 0 0 var(--rail-w);
   background: rgba(0, 0, 0, 0.72);
 }
-.bg-brand img { width: min(56vw, 640px); max-height: 28vh; object-fit: contain; opacity: 0.24; }
+.bg-brand img { width: min(56vw, 640px); max-height: 28vh; object-fit: contain; opacity: 0.3; }
 
 .scene { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
 .scene__layer { position: absolute; inset: 0; opacity: 0; transition: opacity 0.7s ease; }
