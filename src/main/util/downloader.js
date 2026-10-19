@@ -11,8 +11,9 @@ const { HttpError, sleep, abortError, userAgent } = require('./net');
 const offload = require('./offload');
 
 const RESUME_MIN = 8 * 1024 * 1024;
-const IDLE_TIMEOUT = 30000;
+const IDLE_TIMEOUT = 20000;
 const ATTEMPTS = 5;
+const MAX_TRIES = 40;
 
 async function pool(items, limit, fn, signal) {
   let next = 0;
@@ -75,6 +76,8 @@ async function attempt(url, item, ctx) {
     idle = setTimeout(() => { idleFired = true; ctrl.abort(); }, IDLE_TIMEOUT);
   };
   let out = null;
+  let got = 0;
+  let streamed = false;
   try {
     arm();
     const headers = { 'User-Agent': userAgent(), ...(item.headers || {}) };
@@ -99,11 +102,13 @@ async function attempt(url, item, ctx) {
     let received = start;
     for await (const chunk of res.body) {
       arm();
+      got += chunk.length;
       received += chunk.length;
       if (hash) hash.update(chunk);
       count(chunk.length);
       if (!out.write(chunk)) await Promise.race([once(out, 'drain'), outError]);
     }
+    streamed = true;
     await new Promise((resolve, reject) => { out.end((err) => (err ? reject(err) : resolve())); });
     out = null;
     if (item.size != null && received !== item.size) {
@@ -124,8 +129,9 @@ async function attempt(url, item, ctx) {
       if (!(signal?.aborted && item.size >= RESUME_MIN)) await fsp.rm(part, { force: true }).catch(() => {});
     }
     if (signal?.aborted) throw abortError(signal);
-    if (idleFired) throw new Error('La descarga se quedó sin respuesta');
-    throw e;
+    const err = idleFired ? new Error('La conexión se quedó sin respuesta varias veces. Revisa tu internet y vuelve a pulsar el botón: seguirá donde se quedó.') : e;
+    if (!streamed && got > 0 && item.size >= RESUME_MIN && !(e instanceof HttpError)) err.progressed = true;
+    throw err;
   } finally {
     clearTimeout(idle);
     signal?.removeEventListener('abort', onAbort);
@@ -136,7 +142,8 @@ async function downloadOne(item, ctx) {
   const urls = (item.urls || [item.url]).filter(Boolean);
   if (!urls.length) throw new Error(`Sin enlace de descarga para ${path.basename(item.dest)}`);
   let lastErr;
-  for (let i = 0; i < ATTEMPTS; i++) {
+  let fails = 0;
+  for (let i = 0; i < MAX_TRIES && fails < ATTEMPTS; i++) {
     const url = urls[i % urls.length];
     try {
       await attempt(url, item, ctx);
@@ -146,7 +153,8 @@ async function downloadOne(item, ctx) {
       lastErr = e;
       const fatal = e instanceof HttpError && [400, 401, 403, 404, 410].includes(e.status);
       if (fatal && i + 1 >= urls.length) break;
-      if (!fatal) await sleep(Math.min(8000, 450 * 2 ** i) + Math.random() * 300, ctx.signal);
+      fails = e.progressed ? 1 : fails + 1;
+      if (!fatal) await sleep(Math.min(8000, 450 * 2 ** (fails - 1)) + Math.random() * 300, ctx.signal);
     }
   }
   const name = item.label || path.basename(item.dest);

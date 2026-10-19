@@ -221,3 +221,16 @@ test('Sisu devuelve el mismo state aleatorio que envía a Microsoft', async (t) 
   assert.equal(flow.state, sent.Query.state);
   assert.match(flow.state, /^[a-f0-9]{64}$/);
 });
+
+test('una descarga en curso no muestra el aviso de descarga sin terminar', async (t) => {
+  const f = instanceFixture(t);
+  const id = 'demo';
+  fs.mkdirSync(path.dirname(f.instances.journalFile(id)), { recursive: true });
+  fs.writeFileSync(f.instances.journalFile(id), '{}');
+  const remote = { id, name: 'Demo', version: 1 };
+  assert.equal((await f.instances.describe(id, remote)).interrupted, true);
+  f.instances.tasks.set(id, { kind: 'install' });
+  const d = await f.instances.describe(id, remote);
+  assert.equal(d.interrupted, false);
+  assert.equal(d.status, 'installing');
+});

@@ -194,7 +194,7 @@ class Instances extends EventEmitter {
       available: Boolean(remote),
       installed: Boolean(st?.installedVersion) || Boolean(ws),
       installedVersion: ws ? (ws.baseVersion || null) : (st?.installedVersion || null),
-      interrupted: Boolean(journal) && !ws,
+      interrupted: Boolean(journal) && !ws && !task,
       status,
       lastPlayed: st?.lastPlayed || null,
       playTime: st?.playTime || 0,
