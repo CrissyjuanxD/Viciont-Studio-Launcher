@@ -600,7 +600,10 @@ function start() {
     if (!ok.length) throw new Error(`Arrastra los archivos desde ${({ darwin: 'el Finder', linux: 'tu gestor de archivos' })[process.platform] || 'el Explorador de Windows'}.`);
     return admin.addLocal(id, ok, targetDir);
   }));
-  on('admin:addModrinth', needEdit((id, ref) => admin.addModrinth(id, ref)));
+  on('admin:addModrinth', needEdit((id, ref) => admin.addModrinth(id, { projectId: ref?.projectId, versionId: ref?.versionId })));
+  on('admin:modUpdates', needAdmin((id, opts) => admin.modUpdates(id, { fresh: opts?.fresh === true })));
+  on('admin:modVersions', needAdmin((id, rel) => admin.modVersions(id, String(rel || ''))));
+  on('admin:setModVersion', needEdit((id, rel, versionId) => admin.setModVersion(id, String(rel || ''), String(versionId || ''))));
   on('admin:setPolicy', needEdit((id, p, policy) => admin.setPolicy(id, p, policy)));
   on('admin:mergePick', needEdit((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
   on('admin:removeFiles', needEdit((id, list) => admin.removeFiles(id, list)));

@@ -37,6 +37,12 @@ const BATCH_FILE_MAX = 4 * 1024 * 1024;
 const BATCH_BYTES = 16 * 1024 * 1024;
 const BATCH_COUNT = 300;
 const DIFF_MAX = 2 * 1024 * 1024;
+const CAND_TTL = 60 * 1000;
+const UPDATE_TTL = 15 * 60 * 1000;
+const UPDATE_DIRS = { mods: 'mod', resourcepacks: 'resourcepack', shaderpacks: 'shader', datapacks: 'datapack' };
+const TYPE_LOADERS = { resourcepack: ['minecraft'], shader: ['iris', 'optifine', 'canvas', 'vanilla'], datapack: ['datapack'] };
+const TIERS = { release: ['release'], beta: ['release', 'beta'], alpha: null };
+const brief = (v) => ({ id: v.id, number: v.number, type: v.type, date: v.date });
 const BINARY_EXT = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
 const TYPE_DIRS = { mod: 'mods', resourcepack: 'resourcepacks', shader: 'shaderpacks', datapack: 'datapacks' };
 const MERGE_FILES = new Set(['options.txt', 'optionsof.txt', 'optionsshaders.txt']);
@@ -489,7 +495,7 @@ class Admin extends EventEmitter {
       apiVersion: await this.serverVersion().catch(() => this.apiVer || 0),
       accessHidden: Boolean(inst?.accessHidden),
       legacy: legacy || Array.isArray(d.files),
-      ...(ws ? { workspace: await this.wsStatus(id).catch((e) => ({ synced: false, error: e.message })) } : {}),
+      ...(ws ? { workspace: await (ws === true ? this.wsStatus(id) : ws).catch((e) => ({ synced: false, error: e.message })) } : {}),
     };
   }
 
@@ -512,15 +518,17 @@ class Admin extends EventEmitter {
       }
     } catch {}
     const pubIds = new Set(out.published.map((p) => p.id));
-    for (const p of out.published) {
+    await pool(out.published, 4, async (p) => {
       const d = drafts.get(p.id);
       const ws = await this.quickWs(p.id);
       const dirtyMeta = d ? Array.isArray(d.files) || this.metaDirty({ id: p.id, meta: d.meta, media: d.media }, p) : false;
       p.local = { synced: ws.synced, changes: ws.changes, behind: ws.synced && p.version > ws.baseVersion, dirtyMeta };
-    }
-    for (const [id, d] of drafts) {
-      if (pubIds.has(id)) continue;
-      const ws = await this.quickWs(id);
+    });
+    const fresh = [...drafts].filter(([id]) => !pubIds.has(id));
+    const local = new Map();
+    await pool(fresh, 4, async ([id]) => { local.set(id, await this.quickWs(id)); });
+    for (const [id, d] of fresh) {
+      const ws = local.get(id);
       out.drafts.push({ id, name: d.meta?.name, updatedAt: d.updatedAt, isNew: true, local: { synced: ws.synced, changes: ws.changes } });
     }
     return out;
@@ -549,6 +557,7 @@ class Admin extends EventEmitter {
   async open(id) {
     if (!ID_RE.test(id)) throw err('Identificador no válido', 'EBADID');
     const local = await this.readDraft(id);
+    let wsP = this.wsStatus(id).catch((e) => ({ synced: false, error: e.message }));
     let pub = null;
     try { pub = await this.fetchPublished(id); } catch (e) { if (!local) throw e; }
     const inst = pub?.instance || null;
@@ -560,8 +569,12 @@ class Admin extends EventEmitter {
       delete d.files;
       await this.persistMeta(d, inst);
     }
-    if (pub?.sync?.revokedAt) await this.applySyncs([pub.sync]).catch(() => []);
-    const v = await this.view(id, d, inst);
+    if (pub?.sync?.revokedAt) {
+      await wsP;
+      await this.applySyncs([pub.sync]).catch(() => []);
+      wsP = this.wsStatus(id).catch((e) => ({ synced: false, error: e.message }));
+    }
+    const v = await this.view(id, d, inst, { ws: wsP.then((w) => this.withRemote(id, w)) });
     const publishedFiles = v.workspace?.synced ? null : (pub?.manifest?.files || []).map((f) => ({
       path: f.path, size: f.size || 0, policy: f.policy || 'always', source: f.source === 'modrinth' ? 'modrinth' : 'local',
       title: f.title || null, icon: f.icon || null, versionName: f.versionName || null,
@@ -692,27 +705,39 @@ class Admin extends EventEmitter {
     const rels = [];
     let entries = [];
     try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch {}
+    const walks = [];
     for (const e of entries) {
       const lower = e.name.toLowerCase();
       if (SKIP_TOP.has(lower) || /\.(log|tmp)$/i.test(lower)) continue;
       if (!include.has(lower)) { candidates.push({ name: e.name, dir: e.isDirectory() }); continue; }
       if (e.isDirectory()) {
-        for (const rel of await listFiles(path.join(dir, e.name), { skip: (r) => /(^|\/)\.git$/i.test(r) })) rels.push(`${e.name}/${rel}`);
+        walks.push(listFiles(path.join(dir, e.name), { skip: (r) => /(^|\/)\.git$/i.test(r) }).then((list) => { for (const rel of list) rels.push(`${e.name}/${rel}`); }));
       } else if (e.isFile()) rels.push(e.name);
     }
+    await Promise.all(walks);
+    rels.sort();
     const hash = ws.hash || {};
-    const next = {};
-    await pool(rels, 8, async (rel) => {
+    const found = new Array(rels.length);
+    const todo = [];
+    await pool(rels, 32, async (rel, i) => {
       if (IGNORE_FILE_RE.test(rel) || owned.has(rel.toLowerCase()) || isCslPath(rel) || !normalizeRel(rel)) return;
       const abs = path.join(dir, ...rel.split('/'));
       const s = await statOrNull(abs);
       if (!s) return;
       const c = hash[rel];
-      const sha1 = c && c.size === s.size && Math.abs(c.mtime - s.mtimeMs) < 2 ? c.sha1 : await hashFile(abs).catch(() => null);
-      if (!sha1) return;
-      next[rel] = { size: s.size, mtime: s.mtimeMs, sha1 };
-      files.set(rel, { path: rel, sha1, size: s.size, abs });
+      if (c && c.size === s.size && Math.abs(c.mtime - s.mtimeMs) < 2) found[i] = { path: rel, sha1: c.sha1, size: s.size, mtime: s.mtimeMs, abs };
+      else todo.push({ i, rel, abs, s });
     });
+    await pool(todo, 8, async ({ i, rel, abs, s }) => {
+      const sha1 = await hashFile(abs).catch(() => null);
+      if (sha1) found[i] = { path: rel, sha1, size: s.size, mtime: s.mtimeMs, abs };
+    });
+    const next = {};
+    for (const f of found) {
+      if (!f) continue;
+      next[f.path] = { size: f.size, mtime: f.mtime, sha1: f.sha1 };
+      files.set(f.path, { path: f.path, sha1: f.sha1, size: f.size, abs: f.abs });
+    }
     ws.hash = next;
     return { files, candidates };
   }
@@ -756,13 +781,41 @@ class Admin extends EventEmitter {
     try {
       const st = await this.instances.readState(id);
       if (!st?.workspace) return { synced: false, changes: 0 };
+      const before = JSON.stringify(st.workspace);
       const scan = await this.scanWs(id, st);
       const diff = await this.diffWs(id, st.workspace, scan);
-      await this.saveWs(id, st.workspace);
+      if (JSON.stringify(st.workspace) !== before) await this.saveWs(id, st.workspace);
       return { synced: true, baseVersion: st.workspace.baseVersion || 0, changes: diff.added.size + diff.modified.size + diff.removed.length };
     } catch {
       return { synced: false, changes: 0 };
     }
+  }
+
+  async candidateSizes(id, dir, included) {
+    this.candCache ||= new Map();
+    let entries = [];
+    try { entries = await fsp.readdir(dir, { withFileTypes: true }); } catch {}
+    const now = Date.now();
+    const out = new Map();
+    await Promise.all(entries.map(async (e) => {
+      const lower = e.name.toLowerCase();
+      if (SKIP_TOP.has(lower) || /\.(log|tmp)$/i.test(lower) || included.has(lower)) return;
+      const key = `${id}/${e.name}`;
+      const hit = this.candCache.get(key);
+      if (hit && now - hit.at < CAND_TTL) { out.set(e.name, hit); return; }
+      const p = path.join(dir, e.name);
+      let size = 0;
+      let count = 1;
+      if (e.isDirectory()) {
+        const list = await listFiles(p);
+        count = list.length;
+        await pool(list.slice(0, 3000), 32, async (f) => { size += (await statOrNull(path.join(p, ...f.split('/'))))?.size || 0; });
+      } else size = (await statOrNull(p))?.size || 0;
+      const v = { at: now, size, count };
+      this.candCache.set(key, v);
+      out.set(e.name, v);
+    }));
+    return out;
   }
 
   async wsStatus(id) {
@@ -770,51 +823,52 @@ class Admin extends EventEmitter {
     if (!st?.workspace) return { synced: false, installed: Boolean(st?.installedVersion), installedVersion: st?.installedVersion || 0 };
     const ws = st.workspace;
     const dir = this.instances.gameDir(id);
-    const scan = await this.scanWs(id, st);
+    const before = JSON.stringify(ws);
+    const included = new Set((ws.include || []).map((x) => x.toLowerCase()));
+    const [scan, sizes] = await Promise.all([this.scanWs(id, st), this.candidateSizes(id, dir, included)]);
     const diff = await this.diffWs(id, ws, scan);
-    await this.saveWs(id, ws);
-    const remote = this.pub.get(id) || this.instances.remote.get(id) || null;
+    if (JSON.stringify(ws) !== before) await this.saveWs(id, ws);
     const infoOf = (rel, sha1) => {
       const b = ws.base?.[rel];
       const k = ws.known?.[rel];
       return (b && b.sha1 === sha1 && b) || (k && k.sha1 === sha1 && k) || null;
     };
+    const gone = new Map();
+    for (const rel of diff.removed) if (ws.base[rel]?.project) gone.set(ws.base[rel].project, rel);
+    const replaced = new Map();
     const files = [...scan.files.values()].map((f) => {
       const m = infoOf(f.path, f.sha1);
       const b = ws.base?.[f.path];
       const state = diff.added.has(f.path) ? 'added' : diff.modified.has(f.path) ? 'modified' : 'same';
+      const prev = state === 'added' && m?.project ? gone.get(m.project) : null;
+      if (prev) replaced.set(prev, { path: f.path, versionName: m.versionName || null });
       return {
         path: f.path, size: f.size,
         state,
         policy: effPolicy(ws, f.path),
         source: m?.url ? 'modrinth' : 'local',
         project: m?.project || null, title: m?.title || null, icon: m?.icon || null, versionName: m?.versionName || null,
+        ...(prev ? { replaces: { path: prev, versionName: ws.base[prev].versionName || null } } : {}),
         ...(state === 'modified' && b ? {
           oldSize: b.size || 0, oldPolicy: b.policy || 'always', policyOnly: b.sha1 === f.sha1,
           oldTitle: b.title || null, oldVersionName: b.versionName || null,
         } : {}),
       };
     });
-    const removed = diff.removed.map((rel) => ({ path: rel, size: ws.base[rel].size || 0, title: ws.base[rel].title || null, icon: ws.base[rel].icon || null }));
+    const removed = diff.removed.map((rel) => ({
+      path: rel, size: ws.base[rel].size || 0, title: ws.base[rel].title || null, icon: ws.base[rel].icon || null,
+      ...(replaced.has(rel) ? { replacedBy: replaced.get(rel) } : {}),
+    }));
     const candidates = [];
     for (const c of scan.candidates) {
-      let size = 0;
-      let count = 1;
-      const p = path.join(dir, c.name);
-      if (c.dir) {
-        const list = await listFiles(p);
-        count = list.length;
-        if (!count) continue;
-        for (const f of list.slice(0, 3000)) size += (await statOrNull(path.join(p, ...f.split('/'))))?.size || 0;
-      } else size = (await statOrNull(p))?.size || 0;
-      candidates.push({ ...c, size, count });
+      const s = sizes.get(c.name) || { size: 0, count: c.dir ? 0 : 1 };
+      if (c.dir && !s.count) continue;
+      candidates.push({ ...c, size: s.size, count: s.count });
     }
-    return {
+    return this.withRemote(id, {
       synced: true,
       dir,
       baseVersion: ws.baseVersion || 0,
-      remoteVersion: remote?.version || 0,
-      behind: Boolean(remote?.version && remote.version > (ws.baseVersion || 0)),
       files,
       removed,
       changes: { added: diff.added.size, modified: diff.modified.size, removed: diff.removed.length, total: diff.added.size + diff.modified.size + diff.removed.length },
@@ -822,7 +876,13 @@ class Admin extends EventEmitter {
       mergeKept: diff.mergeKept,
       include: ws.include,
       candidates,
-    };
+    });
+  }
+
+  withRemote(id, w) {
+    if (!w?.synced) return w;
+    const remote = this.pub.get(id) || this.instances.remote.get(id) || null;
+    return { ...w, remoteVersion: remote?.version || 0, behind: Boolean(remote?.version && remote.version > (w.baseVersion || 0)) };
   }
 
   async initEmptyWs(id, meta) {
@@ -963,18 +1023,28 @@ class Admin extends EventEmitter {
     return { added, workspace: await this.wsStatus(id) };
   }
 
-  async addModrinth(id, { projectId, versionId }) {
+  async addModrinth(id, { projectId, versionId, replace = null }) {
     const { st, dir } = await this.mustWs(id);
     const ws = st.workspace;
     const { d } = await this.metaDraft(id);
     const scan = await this.scanWs(id, st);
     const present = new Map();
+    const unknown = [];
     for (const [rel, f] of scan.files) {
       const m = [ws.known?.[rel], ws.base?.[rel]].find((x) => x?.project && x.sha1 === f.sha1);
       if (m) present.set(m.project, rel);
+      else if (UPDATE_DIRS[topOf(rel).toLowerCase()] && /\.(jar|zip)$/i.test(rel)) unknown.push([rel, f.sha1]);
     }
+    if (unknown.length) {
+      const found = await this.identify(unknown.map(([, h]) => h)).catch(() => new Map());
+      for (const [rel, h] of unknown) if (found.get(h) && !present.has(found.get(h).projectId)) present.set(found.get(h).projectId, rel);
+    }
+    const target = replace ? normalizeRel(replace) : null;
+    if (replace && !scan.files.has(target)) throw err('Ese archivo ya no está en tu carpeta. Pulsa «Comprobar».', 'ENOENT');
+    if (target) present.set(projectId, target);
     const added = [];
     const items = [];
+    const drop = [];
     const add = async (pid, vid, depth) => {
       const proj = await modrinth.project(pid);
       const type = proj.project_type;
@@ -985,21 +1055,26 @@ class Admin extends EventEmitter {
         const list = await modrinth.versions(proj.id, { mc: d.meta.mc, loader: d.meta.loader.type, type });
         v = list.find((x) => x.file && x.type === 'release') || list.find((x) => x.file);
       }
+      if (v && v.projectId !== proj.id) throw err('Esa versión es de otro proyecto de Modrinth.', 'EBADVERSION');
       if (!v?.file) {
         const what = type === 'mod' ? `Minecraft ${d.meta.mc} con ${LOADERS[d.meta.loader.type]?.name || d.meta.loader.type}` : `Minecraft ${d.meta.mc}`;
         throw err(`"${proj.title}" no tiene una versión para ${what}.`, 'ENOVERSION');
       }
-      const rel = `${TYPE_DIRS[type]}/${v.file.filename}`;
       const old = present.get(proj.id);
-      if (old && old !== rel) await this.trash(dir, old);
+      const folder = old && path.posix.dirname(old) !== '.' ? path.posix.dirname(old) : TYPE_DIRS[type];
+      const rel = `${folder}/${v.file.filename}`;
+      if (old && old !== rel) {
+        drop.push(old);
+        if (ws.policies?.[old]) { ws.policies[rel] = ws.policies[old]; delete ws.policies[old]; }
+      }
       present.set(proj.id, rel);
       ws.known[rel] = {
         sha1: v.file.sha1, size: v.file.size, source: 'modrinth', url: v.file.url, project: proj.id, versionId: v.id,
         title: proj.title, icon: proj.icon_url || null, versionName: v.number,
       };
-      items.push({ url: v.file.url, dest: safeJoin(dir, rel), sha1: v.file.sha1, size: v.file.size, label: v.file.filename });
-      this.includeTop(ws, TYPE_DIRS[type]);
-      added.push({ title: proj.title, path: rel });
+      items.push({ url: v.file.url, dest: safeJoin(dir, rel), sha1: v.file.sha1, size: v.file.size, label: v.file.filename, force: old === rel });
+      this.includeTop(ws, topOf(rel));
+      added.push({ title: proj.title, path: rel, versionName: v.number });
       if (type === 'mod' && depth < 3) {
         for (const dep of v.dependencies) {
           if (dep.type !== 'required' || !dep.projectId || present.has(dep.projectId)) continue;
@@ -1011,8 +1086,107 @@ class Admin extends EventEmitter {
     const key = `ws:${id}`;
     const progress = this.startProgress(key, 'Descargando de Modrinth…');
     try { await downloadAll(items, { concurrency: 4, progress }); } finally { this.stopProgress(key); }
+    for (const rel of drop) await this.trash(dir, rel);
     await this.saveWs(id, ws);
     return { added, workspace: await this.wsStatus(id) };
+  }
+
+  async identify(sha1s, fresh = false) {
+    this.mrHashes ||= new Map();
+    const now = Date.now();
+    const need = [...new Set(sha1s)].filter((h) => { const c = this.mrHashes.get(h); return fresh || !c || now - c.at > UPDATE_TTL; });
+    if (need.length) {
+      const found = await modrinth.versionsByHashes(need);
+      for (const h of need) this.mrHashes.set(h, { at: now, v: found[h] || null });
+    }
+    return new Map(sha1s.map((h) => [h, this.mrHashes.get(h)?.v || null]));
+  }
+
+  async projectInfo(ids) {
+    this.mrProjects ||= new Map();
+    const need = ids.filter((p) => !this.mrProjects.has(p));
+    for (let i = 0; i < need.length; i += 100) {
+      for (const p of await modrinth.projects(need.slice(i, i + 100))) this.mrProjects.set(p.id, { title: p.title, icon: p.icon_url || null });
+    }
+    return this.mrProjects;
+  }
+
+  async modUpdates(id, { fresh = false } = {}) {
+    const st = await this.instances.readState(id);
+    const ws = st?.workspace;
+    if (!ws) return { files: {}, at: Date.now() };
+    const { d } = await this.metaDraft(id);
+    const mc = d.meta.mc;
+    const list = [];
+    for (const [rel, h] of Object.entries(ws.hash || {})) {
+      const type = UPDATE_DIRS[topOf(rel).toLowerCase()];
+      if (!type || !h?.sha1 || !/\.(jar|zip)$/i.test(rel)) continue;
+      const loaders = type === 'mod' ? modrinth.LOADER_TAGS[d.meta.loader?.type] : TYPE_LOADERS[type];
+      if (loaders) list.push({ rel, sha1: h.sha1, loaders });
+    }
+    const cur = await this.identify(list.map((x) => x.sha1), fresh);
+    this.mrLatest ||= new Map();
+    const now = Date.now();
+    const keyOf = (loaders, tier, sha1) => `${mc}|${loaders.join(',')}|${tier}|${sha1}`;
+    const groups = new Map();
+    for (const x of list) {
+      x.current = cur.get(x.sha1);
+      if (!x.current) continue;
+      x.tier = x.current.type === 'alpha' || x.current.type === 'beta' ? x.current.type : 'release';
+      x.key = keyOf(x.loaders, x.tier, x.sha1);
+      const c = this.mrLatest.get(x.key);
+      if (!fresh && c && now - c.at < UPDATE_TTL) continue;
+      const g = `${x.loaders.join(',')}|${x.tier}`;
+      if (!groups.has(g)) groups.set(g, { loaders: x.loaders, tier: x.tier, hashes: new Set() });
+      groups.get(g).hashes.add(x.sha1);
+    }
+    for (const g of groups.values()) {
+      const r = await modrinth.latestByHashes([...g.hashes], { loaders: g.loaders, mc, types: TIERS[g.tier] });
+      for (const h of g.hashes) this.mrLatest.set(keyOf(g.loaders, g.tier, h), { at: now, v: r[h] || null });
+    }
+    const files = {};
+    const untitled = new Set();
+    for (const x of list) {
+      if (!x.current) continue;
+      const latest = this.mrLatest.get(x.key)?.v || null;
+      const newer = latest && latest.id !== x.current.id && latest.projectId === x.current.projectId && Date.parse(latest.date) > Date.parse(x.current.date);
+      const k = [ws.known?.[x.rel], ws.base?.[x.rel]].find((m) => m?.sha1 === x.sha1 && m.title) || null;
+      files[x.rel] = { project: x.current.projectId, title: k?.title || null, icon: k?.icon || null, current: brief(x.current), ...(newer ? { latest: brief(latest) } : {}) };
+      if (!k) untitled.add(x.current.projectId);
+    }
+    if (untitled.size) {
+      const info = await this.projectInfo([...untitled]).catch(() => new Map());
+      for (const f of Object.values(files)) if (!f.title && info.has(f.project)) Object.assign(f, info.get(f.project));
+    }
+    return { files, at: now };
+  }
+
+  async modVersions(id, rel) {
+    const st = await this.instances.readState(id);
+    const h = st?.workspace?.hash?.[rel];
+    if (!h) throw err('Ese archivo ya no está en tu carpeta. Pulsa «Comprobar».', 'ENOENT');
+    const ws = st.workspace;
+    const { d } = await this.metaDraft(id);
+    const k = [ws.known?.[rel], ws.base?.[rel]].find((m) => m?.sha1 === h.sha1 && m.project) || null;
+    const cur = (await this.identify([h.sha1])).get(h.sha1);
+    const pid = cur?.projectId || k?.project;
+    if (!pid) throw err('Este archivo no está en Modrinth, así que no tiene historial de versiones.', 'ENOMODRINTH');
+    const proj = await modrinth.project(pid);
+    const type = UPDATE_DIRS[topOf(rel).toLowerCase()] || proj.project_type;
+    const list = await modrinth.versions(proj.id, { mc: d.meta.mc, loader: d.meta.loader.type, type, changelog: true });
+    return {
+      project: { id: proj.id, slug: proj.slug, title: proj.title, icon: proj.icon_url || null },
+      current: cur ? brief(cur) : k?.versionId ? { id: k.versionId, number: k.versionName || null } : null,
+      versions: list.filter((v) => v.file).slice(0, 200).map((v) => ({
+        ...brief(v), name: v.name, changelog: v.changelog, size: v.file.size,
+        deps: v.dependencies.filter((x) => x.type === 'required' && x.projectId).map((x) => x.projectId),
+      })),
+    };
+  }
+
+  async setModVersion(id, rel, versionId) {
+    const v = await modrinth.version(versionId);
+    return this.addModrinth(id, { projectId: v.projectId, versionId: v.id, replace: rel });
   }
 
   async removeFiles(id, paths) {

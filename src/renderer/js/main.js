@@ -21,42 +21,65 @@ const scene = (() => {
   const root = $('scene');
   let currentKey = null;
   let video = null;
+  let wanted = null;
+  let retry = 0;
+  const fails = new Map();
   const pauseVideo = (v) => { if (!video) return; if (v) video.pause(); else video.play().catch(() => {}); };
   onIdleChange((idle) => pauseVideo(idle));
-  return {
+  const api = {
     show(inst) {
+      wanted = inst;
       const bg = inst?.media?.background;
       const url = mediaUrl(bg);
       const key = url || null;
       if (key === currentKey) return;
       currentKey = key;
+      clearTimeout(retry);
       const old = [...root.children];
       old.forEach((el) => { el.classList.remove('on'); setTimeout(() => el.remove(), 700); });
       video = null;
-      if (!url) { app.bg.setPaused(false); return; }
+      app.bg.setPaused(false);
+      if (!url) return;
       const layer = document.createElement('div');
       layer.className = 'scene__layer';
+      const ready = () => {
+        if (currentKey !== key) return;
+        fails.delete(key);
+        layer.classList.add('on');
+        setTimeout(() => { if (currentKey === key && layer.isConnected) app.bg.setPaused(true); }, 750);
+      };
+      const failed = () => {
+        layer.remove();
+        if (currentKey !== key) return;
+        currentKey = null;
+        video = null;
+        app.bg.setPaused(false);
+        const n = (fails.get(key) || 0) + 1;
+        fails.set(key, n);
+        if (n <= 3) retry = setTimeout(() => { if (wanted === inst && !currentKey) api.show(inst); }, 2500 * n);
+      };
       if (isVideo(inst.media.backgroundType, bg)) {
         video = document.createElement('video');
         Object.assign(video, { src: url, muted: true, loop: true, autoplay: !isIdle(), playsInline: true, preload: 'auto' });
         video.setAttribute('muted', '');
         layer.appendChild(video);
-        video.addEventListener('loadeddata', () => layer.classList.add('on'), { once: true });
-        video.addEventListener('error', () => { layer.remove(); app.bg.setPaused(false); }, { once: true });
+        video.addEventListener('loadeddata', ready, { once: true });
+        video.addEventListener('error', failed, { once: true });
       } else {
         const img = new Image();
         img.decoding = 'async';
         img.src = url;
-        img.onload = () => layer.classList.add('on');
-        img.onerror = () => { layer.remove(); app.bg.setPaused(false); };
+        img.onload = ready;
+        img.onerror = failed;
         layer.appendChild(img);
       }
       root.appendChild(layer);
       layer.classList.add('is-glitching');
       setTimeout(() => layer.classList.remove('is-glitching'), 520);
-      setTimeout(() => { if (currentKey === key) app.bg.setPaused(true); }, 800);
     },
     clear() {
+      wanted = null;
+      clearTimeout(retry);
       if (!currentKey) { app.bg.setPaused(false); return; }
       currentKey = null;
       video = null;
@@ -65,6 +88,7 @@ const scene = (() => {
     },
     pauseAll(v) { pauseVideo(v); },
   };
+  return api;
 })();
 
 let studioPromise = null;

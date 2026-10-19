@@ -38,21 +38,22 @@ async function projects(ids) {
   return api(`/projects?ids=${encodeURIComponent(JSON.stringify(ids))}`);
 }
 
-async function versions(idOrSlug, { mc, loader, type = 'mod' } = {}) {
+async function versions(idOrSlug, { mc, loader, type = 'mod', changelog = false } = {}) {
   const q = new URLSearchParams();
   if (mc) q.set('game_versions', JSON.stringify([mc]));
   if (type === 'mod' && loader && LOADER_TAGS[loader]) q.set('loaders', JSON.stringify(LOADER_TAGS[loader]));
   const list = await api(`/project/${encodeURIComponent(idOrSlug)}/version?${q}`);
-  return (list || []).map(simplifyVersion);
+  return (list || []).map((v) => simplifyVersion(v, { changelog }));
 }
 
-function simplifyVersion(v) {
+function simplifyVersion(v, { changelog = false } = {}) {
   const file = (v.files || []).find((f) => f.primary) || v.files?.[0];
   return {
     id: v.id, projectId: v.project_id, name: v.name, number: v.version_number, type: v.version_type,
     loaders: v.loaders, gameVersions: v.game_versions, date: v.date_published,
     dependencies: (v.dependencies || []).map((d) => ({ projectId: d.project_id, versionId: d.version_id, type: d.dependency_type })),
     file: file ? { url: file.url, filename: file.filename, sha1: file.hashes?.sha1, sha512: file.hashes?.sha512, size: file.size } : null,
+    ...(changelog ? { changelog: String(v.changelog || '').slice(0, 20000) } : {}),
   };
 }
 
@@ -76,8 +77,18 @@ async function versionsByHashes(sha1s) {
   return out;
 }
 
+async function latestByHashes(sha1s, { loaders, mc, types = null }) {
+  const out = {};
+  for (let i = 0; i < sha1s.length; i += 400) {
+    const json = { hashes: sha1s.slice(i, i + 400), algorithm: 'sha1', loaders, game_versions: [mc], ...(types ? { version_types: types } : {}) };
+    const r = await api('/version_files/update', { method: 'POST', json });
+    for (const [hash, v] of Object.entries(r || {})) out[hash] = simplifyVersion(v);
+  }
+  return out;
+}
+
 async function gameVersions() {
   return cached('mr-game-versions', 60 * 60 * 1000, () => api('/tag/game_version'));
 }
 
-module.exports = { search, project, projects, versions, version, versionsByHashes, gameVersions };
+module.exports = { search, project, projects, versions, version, versionsByHashes, latestByHashes, gameVersions, LOADER_TAGS };

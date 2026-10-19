@@ -1,6 +1,6 @@
 import { call, on, pathFor, state } from '../api.js';
 import { icon, hydrateIcons } from '../icons.js';
-import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce, fileManager } from '../util.js';
+import { esc, bytes, speed, duration, coverMini, mediaUrl, isVideo, loaderLabel, LOADER_NAMES, timeAgo, debounce, fileManager, richText } from '../util.js';
 import { modal, toast, toastError, confirm, menu, busy, anyModalOpen } from '../ui.js';
 import { diffLines, prettyIfJson } from '../linediff.js';
 
@@ -21,6 +21,12 @@ const PROTECT_LOADERS = ['fabric', 'quilt'];
 const BIN_RE = /\.(jar|zip|rar|7z|gz|png|jpe?g|gif|webp|bmp|ico|ogg|mp3|wav|mp4|webm|mov|avi|dat|dat_old|nbt|mca|mcr|class|exe|dll|so|ttf|otf|woff2?|pdf|bin|db|sqlite)$/i;
 const DIFF_MAX = 2 * 1024 * 1024;
 const fileIcon = (p) => (FOLDERS.find(([dir]) => dir && p.startsWith(`${dir}/`)) || FOLDERS[FOLDERS.length - 1])[2];
+const FOLDED = new Map();
+const CHUNK = 120;
+const FOLD_MIN = 300;
+const UPD_RE = /^(mods|resourcepacks|shaderpacks|datapacks)\/.+\.(jar|zip)$/i;
+const byPath = new Intl.Collator();
+const CHANGES_MAX = 400;
 const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <= DIFF_MAX && (f.oldSize || 0) <= DIFF_MAX;
 
 const can = (perm) => (state.admin?.perms || []).includes(perm);
@@ -447,7 +453,13 @@ function renderEditor(root, id, app, route = {}) {
   let filter = '';
   let only = '';
   let syncing = false;
-  const offs = [];
+  let upd = { files: {}, at: 0, busy: false, error: null };
+  const folded = FOLDED.get(id) || new Map();
+  FOLDED.set(id, folded);
+  const shown = new Map();
+  let fileGroups = new Map();
+  let moreObs = null;
+  const offs = [() => moreObs?.disconnect()];
   const ws = () => d?.workspace || { synced: false };
   const ro = () => Boolean(d) && !can(d.baseVersion ? 'edit' : 'create');
   const need = () => (d?.baseVersion ? NEED_EDIT : NEED_CREATE);
@@ -773,7 +785,7 @@ function renderEditor(root, id, app, route = {}) {
         </div>` : ''}`;
       if (body.querySelector('#flist')) {
         drawFiles(body);
-        body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
+        body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); shown.clear(); drawFiles(body); }, 150));
       }
       return;
     }
@@ -793,7 +805,7 @@ function renderEditor(root, id, app, route = {}) {
         </div>
         <div class="files__summary">${ch.total
           ? `${icon('alert')}<span><b>${ch.total}</b> cambio(s) sin publicar:</span>${ch.added ? `<button type="button" class="state state--added ${only === 'added' ? 'is-on' : ''}" data-only="added" data-tip="Ver solo estos">${ch.added} nuevo(s)</button>` : ''}${ch.modified ? `<button type="button" class="state state--modified ${only === 'modified' ? 'is-on' : ''}" data-only="modified" data-tip="Ver solo estos">${ch.modified} modificado(s)</button>` : ''}${ch.removed ? `<button type="button" class="state state--removed ${only === 'removed' ? 'is-on' : ''}" data-only="removed" data-tip="Ver solo estos">${ch.removed} se quitará(n)</button>` : ''}${only ? `<button type="button" class="chip chip--add" data-only="">${icon('close')}Mostrar todo</button>` : ''}<button class="btn btn--sm" type="button" data-act="changes">${icon('eye')}Ver cambios</button>`
-          : `${icon('check')}<span>Tu carpeta está igual que la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}.</span>`}</div>
+          : `${icon('check')}<span>Tu carpeta está igual que la versión ${d.baseVersion ? `publicada (v${d.baseVersion})` : 'guardada'}.</span>`}<span class="files__upd" id="fupd"></span></div>
         <div id="flist"></div>
       </div>
       <div class="panel" style="margin-top:14px">
@@ -804,7 +816,9 @@ function renderEditor(root, id, app, route = {}) {
       <p class="field__hint">${ro() ? '' : 'Arrastra archivos aquí para añadirlos. '}<b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que confirmes al publicar y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
     drawFiles(body);
     drawIncl(body);
-    body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); drawFiles(body); }, 150));
+    paintUpd();
+    checkUpdates();
+    body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); shown.clear(); drawFiles(body); }, 150));
     const zone = body.querySelector('#files');
     zone.addEventListener('dragover', (e) => { e.preventDefault(); if (!ro()) zone.classList.add('drop-hint'); });
     zone.addEventListener('dragleave', () => zone.classList.remove('drop-hint'));
@@ -848,14 +862,84 @@ function renderEditor(root, id, app, route = {}) {
     } catch (er) { toastError(er); } finally { t(); }
   };
 
+  const stateBadge = (f) => (f.replaces ? '<span class="state state--modified">Actualizado</span>'
+    : f.state === 'added' ? '<span class="state state--added">Nuevo</span>' : f.state === 'modified' ? '<span class="state state--modified">Modificado</span>' : '');
+
+  const fileRow = (f, ic, w, pubList) => {
+    const u = pubList ? null : upd.files[f.path];
+    const name = f.title || u?.title || f.path.split('/').pop();
+    const pic = f.icon || u?.icon;
+    const ver = f.versionName || u?.current?.number;
+    const src = f.source === 'modrinth' ? '<span class="src src--modrinth">Modrinth</span>' : '<span class="src src--upload">Propio</span>';
+    const keys = w.merge?.[f.path];
+    const kept = w.mergeKept?.[f.path];
+    const info = `<b>${esc(name)}</b><small>${esc(f.path)}${ver ? ` · ${esc(ver)}` : ''}${f.replaces?.versionName ? ` · antes ${esc(f.replaces.versionName)}` : ''}${keys ? ` · <a href="#" data-keys="${esc(f.path)}">${keys.length} ajuste(s) cambiado(s)</a>` : ''}${kept ? ` · <a href="#" data-keys="${esc(f.path)}">${kept.length} solo en tu PC</a>` : ''}</small>`;
+    return `<div class="frow ${f.state !== 'same' ? `frow--${f.state}` : ''}">
+      <div class="frow__icon">${pic ? `<img src="${esc(pic)}" alt="" loading="lazy">` : icon(ic)}</div>
+      ${!pubList && (f.project || u?.project) ? `<div class="frow__name frow__name--link" data-mod="${esc(f.path)}" data-tip="Ver su historial de versiones">${info}</div>` : `<div class="frow__name">${info}</div>`}
+      <span class="frow__badges">${u?.latest ? `<button class="upd-chip" type="button" data-upd="${esc(f.path)}" data-tip="Nueva versión: ${esc(u.latest.number)}" data-tip-sub="Pulsa para ver qué trae. No se actualiza sola">${icon('download')}Actualización</button>` : ''}${stateBadge(f)}${src}</span>
+      <span class="frow__size">${bytes(f.size || 0)}</span>
+      <span class="field__row" style="gap:2px">
+        ${f.state !== 'same' && canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Ver su contenido' : 'Ver qué cambió'}">${icon('eye')}</button>` : ''}
+        <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${esc(POLICY[f.policy]?.label || '')}">${icon(POLICY[f.policy]?.icon || 'refresh')}</button>
+        ${f.state !== 'same' && d.baseVersion ? `<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Quitar (no estaba publicado)' : 'Deshacer: dejarlo como está publicado'}">${icon('history')}</button>` : ''}
+        ${pubList ? '' : `<button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>`}
+      </span>
+    </div>`;
+  };
+
+  const foldedOf = (key, n) => (folded.has(key) ? folded.get(key) : !filter && !only && n > FOLD_MIN && key !== 'mods');
+  const moreHtml = (key, rest) => (rest > 0 ? `<button class="files__more" type="button" data-more="${key}">Mostrar ${Math.min(CHUNK, rest)} más · quedan ${rest}</button>` : '');
+  const groupHtml = (g) => {
+    const closed = foldedOf(g.key, g.items.length);
+    const limit = Math.min(g.items.length, shown.get(g.key) || CHUNK);
+    return `<div class="files__group${closed ? ' is-folded' : ''}" data-group="${g.key}">
+      <button class="files__ghead" type="button" data-fold="${g.key}" aria-expanded="${closed ? 'false' : 'true'}">${icon(g.ic)}${esc(g.label)} <span class="muted">${g.items.length} · ${bytes(g.size)}</span>${icon('arrowRight', 'files__chev')}</button>
+      ${closed ? '' : g.items.slice(0, limit).map((f) => fileRow(f, g.ic, g.w, g.pubList)).join('') + moreHtml(g.key, g.items.length - limit)}
+    </div>`;
+  };
+  const watchMore = (box) => {
+    moreObs?.disconnect();
+    moreObs = null;
+    const btns = box.querySelectorAll('[data-more]');
+    if (!btns.length || typeof IntersectionObserver !== 'function') return;
+    moreObs = new IntersectionObserver((entries) => {
+      for (const e of entries) {
+        if (!e.isIntersecting) continue;
+        moreObs?.unobserve(e.target);
+        showMore(e.target.dataset.more);
+      }
+    }, { rootMargin: '600px 0px' });
+    btns.forEach((b) => moreObs.observe(b));
+  };
+  const showMore = (key) => {
+    const g = fileGroups.get(key);
+    const btn = root.querySelector(`#flist [data-more="${key}"]`);
+    if (!g || !btn) return;
+    const from = Math.min(g.items.length, shown.get(key) || CHUNK);
+    const to = Math.min(g.items.length, from + CHUNK);
+    const tpl = document.createElement('template');
+    tpl.innerHTML = g.items.slice(from, to).map((f) => fileRow(f, g.ic, g.w, g.pubList)).join('') + moreHtml(key, g.items.length - to);
+    const box = btn.parentElement;
+    btn.replaceWith(tpl.content);
+    shown.set(key, to);
+    lockIn(box);
+    hydrateIcons(box);
+    const next = box.querySelector('[data-more]');
+    if (next) moreObs?.observe(next);
+  };
+
   const drawFiles = (body) => {
     const list = body.querySelector('#flist');
     if (!list) return;
+    moreObs?.disconnect();
     const pubList = !ws().synced;
     const w = pubList ? { files: (d.publishedFiles || []).map((f) => ({ ...f, state: 'same' })), removed: [] } : ws();
     const all = w.files || [];
-    const match = (f) => !filter || f.path.toLowerCase().includes(filter) || (f.title || '').toLowerCase().includes(filter);
-    const files = only === 'removed' ? [] : all.filter((f) => match(f) && (!only || f.state === only));
+    const titleOf = (f) => f.title || (pubList ? '' : upd.files[f.path]?.title) || '';
+    const match = (f) => !filter || f.path.toLowerCase().includes(filter) || titleOf(f).toLowerCase().includes(filter);
+    const pick = (f) => !only || (only === 'updates' ? Boolean(!pubList && upd.files[f.path]?.latest) : f.state === only);
+    const files = only === 'removed' ? [] : all.filter((f) => match(f) && pick(f));
     const removed = !only || only === 'removed' ? (w.removed || []).filter(match) : [];
     if (!all.length && !(w.removed || []).length) {
       list.innerHTML = `<div class="empty" style="margin:14px;border-radius:12px">${icon('package')}<h3>Carpeta vacía</h3><p>${ro() ? 'Todavía no hay archivos en esta carpeta.' : 'Busca mods en Modrinth, añade tus archivos, importa una instancia o abre la carpeta y pon ahí lo que quieras.'}</p></div>`;
@@ -867,38 +951,20 @@ function renderEditor(root, id, app, route = {}) {
       hydrateIcons(list);
       return;
     }
-    const groups = FOLDERS.map(([dir, label, ic]) => {
-      const items = files.filter((f) => (dir ? f.path.startsWith(`${dir}/`) : !FOLDERS.some(([x]) => x && f.path.startsWith(`${x}/`))));
-      return { dir, label, ic, items };
-    }).filter((g) => g.items.length);
-    const stateBadge = (s) => (s === 'added' ? '<span class="state state--added">Nuevo</span>' : s === 'modified' ? '<span class="state state--modified">Modificado</span>' : '');
-    list.innerHTML = groups.map((g) => `
+    const byDir = new Map(FOLDERS.map(([dir]) => [dir, []]));
+    for (const f of files.sort((a, b) => byPath.compare(a.path, b.path))) {
+      byDir.get((FOLDERS.find(([dir]) => dir && f.path.startsWith(`${dir}/`)) || FOLDERS[FOLDERS.length - 1])[0]).push(f);
+    }
+    fileGroups = new Map(FOLDERS.filter(([dir]) => byDir.get(dir).length).map(([dir, label, ic]) => {
+      const items = byDir.get(dir);
+      return [dir || 'other', { key: dir || 'other', label, ic, items, size: items.reduce((a, f) => a + (f.size || 0), 0), w, pubList }];
+    }));
+    list.innerHTML = [...fileGroups.values()].map(groupHtml).join('') + (removed.length ? `
       <div class="files__group">
-        <div class="files__ghead">${icon(g.ic)}${esc(g.label)} <span class="muted">${g.items.length} · ${bytes(g.items.reduce((a, f) => a + (f.size || 0), 0))}</span></div>
-        ${g.items.sort((a, b) => a.path.localeCompare(b.path)).map((f) => {
-          const name = f.title || f.path.split('/').pop();
-          const src = f.source === 'modrinth' ? '<span class="src src--modrinth">Modrinth</span>' : '<span class="src src--upload">Propio</span>';
-          const keys = w.merge?.[f.path];
-          const kept = w.mergeKept?.[f.path];
-          return `<div class="frow ${f.state !== 'same' ? `frow--${f.state}` : ''}">
-            <div class="frow__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon(g.ic)}</div>
-            <div class="frow__name"><b>${esc(name)}</b><small>${esc(f.path)}${f.versionName ? ` · ${esc(f.versionName)}` : ''}${keys ? ` · <a href="#" data-keys="${esc(f.path)}">${keys.length} ajuste(s) cambiado(s)</a>` : ''}${kept ? ` · <a href="#" data-keys="${esc(f.path)}">${kept.length} solo en tu PC</a>` : ''}</small></div>
-            <span class="frow__badges">${stateBadge(f.state)}${src}</span>
-            <span class="frow__size">${bytes(f.size || 0)}</span>
-            <span class="field__row" style="gap:2px">
-              ${f.state !== 'same' && canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Ver su contenido' : 'Ver qué cambió'}">${icon('eye')}</button>` : ''}
-              <button class="icon-btn" type="button" data-policy="${esc(f.path)}" data-tip="${esc(POLICY[f.policy]?.label || '')}">${icon(POLICY[f.policy]?.icon || 'refresh')}</button>
-              ${f.state !== 'same' && d.baseVersion ? `<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="${f.state === 'added' ? 'Quitar (no estaba publicado)' : 'Deshacer: dejarlo como está publicado'}">${icon('history')}</button>` : ''}
-              ${pubList ? '' : `<button class="icon-btn is-danger" type="button" data-del="${esc(f.path)}" data-tip="Quitar (va a la Papelera)">${icon('trash')}</button>`}
-            </span>
-          </div>`;
-        }).join('')}
-      </div>`).join('') + (removed.length ? `
-      <div class="files__group">
-        <div class="files__ghead">${icon('trash')}Se quitarán al publicar <span class="muted">${removed.length}</span></div>
+        <div class="files__ghead files__ghead--static">${icon('trash')}Se quitarán al publicar <span class="muted">${removed.length}</span></div>
         ${removed.map((f) => `<div class="frow frow--removed">
           <div class="frow__icon">${f.icon ? `<img src="${esc(f.icon)}" alt="" loading="lazy">` : icon('file')}</div>
-          <div class="frow__name"><b>${esc(f.title || f.path.split('/').pop())}</b><small>${esc(f.path)}</small></div>
+          <div class="frow__name"><b>${esc(f.title || f.path.split('/').pop())}</b><small>${esc(f.path)}${f.replacedBy ? ` · se cambia por la ${esc(f.replacedBy.versionName || 'versión nueva')}` : ''}</small></div>
           <span class="frow__badges"><span class="state state--removed">Se quitará</span></span>
           <span class="frow__size">${bytes(f.size || 0)}</span>
           <span class="field__row" style="gap:2px">${canDiff(f) ? `<button class="icon-btn" type="button" data-fdiff="${esc(f.path)}" data-tip="Ver lo que se quita">${icon('eye')}</button>` : ''}<button class="icon-btn" type="button" data-restore="${esc(f.path)}" data-tip="Recuperar">${icon('history')}</button></span>
@@ -906,6 +972,41 @@ function renderEditor(root, id, app, route = {}) {
       </div>` : '');
     lockIn(list);
     hydrateIcons(list);
+    watchMore(list);
+  };
+
+  const paintUpd = () => {
+    const el = root.querySelector('#fupd');
+    if (!el) return;
+    const n = Object.values(upd.files).filter((x) => x.latest).length;
+    el.innerHTML = upd.busy ? '<span class="spin"></span>Buscando actualizaciones…'
+      : upd.error ? `${icon('alert')}<span data-tip="${esc(upd.error)}">No se pudo buscar actualizaciones</span>`
+        : !upd.at ? ''
+          : n ? `<button type="button" class="state state--update ${only === 'updates' ? 'is-on' : ''}" data-only="updates" data-tip="${only === 'updates' ? 'Mostrar todo' : 'Ver solo estos'}">${n} con actualización</button>`
+            : `${icon('check')}<span>Sin actualizaciones en Modrinth</span>`;
+    hydrateIcons(el);
+  };
+
+  let updSig = '';
+  const checkUpdates = async (fresh = false) => {
+    if (!d || !ws().synced || upd.busy) return;
+    const sig = (ws().files || []).filter((f) => UPD_RE.test(f.path)).map((f) => `${f.path}:${f.size}`).join('|');
+    if (!fresh && sig === updSig) return;
+    updSig = sig;
+    upd = { ...upd, busy: true };
+    paintUpd();
+    try {
+      const r = await call('admin:modUpdates', id, { fresh });
+      upd = { files: r.files || {}, at: r.at || Date.now(), busy: false, error: null };
+    } catch (e) {
+      upd = { ...upd, busy: false, error: e.message };
+      updSig = '';
+    }
+    if (!root.isConnected || !d) return;
+    if (only === 'updates' && !Object.values(upd.files).some((x) => x.latest)) only = '';
+    paintUpd();
+    const body = root.querySelector('#ed-body');
+    if (tab === 'content' && body?.querySelector('#flist')) drawFiles(body);
   };
 
   const tabAccess = (body) => {
@@ -1165,7 +1266,23 @@ function renderEditor(root, id, app, route = {}) {
     const keysLink = e.target.closest('[data-keys]');
     if (keysLink) { e.preventDefault(); okeysModal(id, d, keysLink.dataset.keys, refreshWs, ro()); return; }
     const onlyBtn = e.target.closest('[data-only]');
-    if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; drawTab(); return; }
+    if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; shown.clear(); drawTab(); return; }
+    const fold = e.target.closest('[data-fold]');
+    if (fold) {
+      const g = fileGroups.get(fold.dataset.fold);
+      folded.set(fold.dataset.fold, !foldedOf(fold.dataset.fold, g?.items.length || 0));
+      drawFiles(root.querySelector('#ed-body'));
+      return;
+    }
+    const more = e.target.closest('[data-more]');
+    if (more) { showMore(more.dataset.more); return; }
+    const modBtn = e.target.closest('[data-mod], [data-upd]');
+    if (modBtn) {
+      const rel = modBtn.dataset.mod || modBtn.dataset.upd;
+      const f = (ws().files || []).find((x) => x.path === rel);
+      if (f) versionsModal(id, d, f, upd.files[rel] || null, { ro: ro(), need: need(), onChange: (w) => { setWs(w); drawTab(); paintBar(); } });
+      return;
+    }
     const fd = e.target.closest('[data-fdiff]');
     if (fd) {
       const w = ws();
@@ -1245,6 +1362,7 @@ function renderEditor(root, id, app, route = {}) {
     }
     if (act === 'rescan') {
       try { setWs(await busy(b, () => call('admin:workspace', id))); drawTab(); paintBar(); } catch (er) { toastError(er); }
+      checkUpdates(true);
     }
     if (act === 'open-ws') call('admin:openFolder', id).catch(toastError);
     if (act === 'play-ws') {
@@ -1591,6 +1709,8 @@ function changesHtml(d, { compact = false } = {}) {
       else if (f.oldVersionName && f.versionName && f.oldVersionName !== f.versionName) detail = `versión ${f.oldVersionName} → ${f.versionName}`;
       else if (keys) detail = `${keys.length} ajuste(s) cambiado(s): elige arriba cuáles se suben`;
     }
+    if (f.replaces) detail = `actualización: ${f.replaces.versionName || 'versión anterior'} → ${f.versionName || 'versión nueva'}`;
+    if (f.replacedBy) detail = `se cambia por la ${f.replacedBy.versionName || 'versión nueva'}`;
     const size = f.state === 'modified' && f.oldSize != null && f.oldSize !== f.size ? `<b>${bytes(f.oldSize)}</b> → ${bytes(f.size)}` : bytes(f.size || 0);
     const action = keys
       ? `<button class="btn btn--sm btn--ghost" type="button" data-chg-keys="${esc(f.path)}">${icon('layers')}Ajustes</button>`
@@ -1601,7 +1721,7 @@ function changesHtml(d, { compact = false } = {}) {
         <span class="chg__size">${size}</span>${action}
       </div></div>`;
   };
-  const group = (title, ic, cls, list) => (list.length ? `<div class="changes__group"><div class="changes__title">${icon(ic)}${title} <span class="state state--${cls}">${list.length}</span></div>${[...list].sort((a, b) => a.path.localeCompare(b.path)).map(row).join('')}</div>` : '');
+  const group = (title, ic, cls, list) => (list.length ? `<div class="changes__group"><div class="changes__title">${icon(ic)}${title} <span class="state state--${cls}">${list.length}</span></div>${[...list].sort((a, b) => byPath.compare(a.path, b.path)).slice(0, CHANGES_MAX).map(row).join('')}${list.length > CHANGES_MAX ? `<p class="field__hint" style="padding:8px 12px">Y ${list.length - CHANGES_MAX} más.</p>` : ''}</div>` : '');
   const metaHtml = meta.length ? `<div class="changes__group"><div class="changes__title">${icon('edit')}Textos, imágenes y permisos <span class="state state--modified">${meta.length}</span></div>
     <div class="chg"><dl class="meta-chg">${meta.map((c) => `<dt>${esc(c.label)}</dt><dd>${c.added || c.removed
       ? [c.added?.length ? `+ ${c.added.map(esc).join(', ')}` : '', c.removed?.length ? `<s>− ${c.removed.map(esc).join(', ')}</s>` : ''].filter(Boolean).join(' · ') || `${esc(c.from)} → ${esc(c.to)}`
@@ -1689,6 +1809,113 @@ function diffModal(id, f) {
   m.content.querySelector('[data-close]').addEventListener('click', () => m.close());
   const pane = m.content.querySelector('.chg__diff');
   call('admin:fileDiff', id, f.path).then((r) => { pane.innerHTML = diffHtml(r); }).catch((e) => { pane.innerHTML = `<div class="chg__note">${esc(e.message)}</div>`; }).finally(() => hydrateIcons(pane));
+}
+
+const VTYPE = { beta: 'Beta', alpha: 'Alpha' };
+const TIER_OK = { release: ['release'], beta: ['release', 'beta'], alpha: ['release', 'beta', 'alpha'] };
+const mdText = (s) => String(s || '')
+  .replace(/<!--[\s\S]*?-->/g, '')
+  .replace(/<[^>]+>/g, '')
+  .replace(/!\[[^\]]*\]\([^)]*\)/g, '')
+  .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+  .replace(/^#{1,6}\s*(.+?)\s*#*$/gm, '**$1**')
+  .replace(/^(\s*)[-*+]\s+/gm, '$1• ')
+  .replace(/`{1,3}([^`]*)`{1,3}/g, '$1')
+  .replace(/__(.+?)__/g, '**$1**')
+  .replace(/\n{3,}/g, '\n\n')
+  .trim();
+const changelogHtml = (s) => { const t = mdText(s); return t ? richText(t) : '<p class="muted">Sin notas de esta versión.</p>'; };
+
+function versionsModal(id, d, f, info, { ro, need, onChange }) {
+  const pic = f.icon || info?.icon;
+  const loader = d.meta.loader?.type && d.meta.loader.type !== 'vanilla' && f.path.startsWith('mods/') ? ` con ${LOADER_NAMES[d.meta.loader.type] || d.meta.loader.type}` : '';
+  const m = modal({
+    size: 'lg',
+    html: `<div class="modal__body vh">
+      <div class="vh__head"><div class="vh__icon">${pic ? `<img src="${esc(pic)}" alt="">` : icon(fileIcon(f.path))}</div>
+        <div style="min-width:0"><h2 class="modal__title" id="vh-title">${esc(f.title || info?.title || f.path.split('/').pop())}</h2><p class="modal__text" id="vh-sub">Versiones para Minecraft ${esc(d.meta.mc)}${esc(loader)}</p></div></div>
+      <div id="vh-body"><div class="vh__loading"><span class="spin"></span>Buscando sus versiones en Modrinth…</div></div>
+    </div>`,
+  });
+  const box = m.content.querySelector('#vh-body');
+  let data = null;
+  const typeChip = (v) => (VTYPE[v.type] ? `<span class="state state--modified">${VTYPE[v.type]}</span>` : '');
+  const when = (v) => {
+    const t = Date.parse(v.date);
+    return Number.isFinite(t) ? `<span class="vh__when" data-tip="${esc(new Date(t).toLocaleString('es-ES'))}">${esc(timeAgo(t))}</span>` : '';
+  };
+  const useBtn = (v, label, primary = false) => `<button class="btn btn--sm${primary ? ' btn--primary' : ''}${ro ? ' is-ro' : ''}" type="button" data-use="${esc(v.id)}"${ro ? ` data-tip="${esc(need)}"` : ''}>${icon(ro ? 'lock' : 'download')}${esc(label)}</button>`;
+  const draw = () => {
+    const list = data.versions;
+    const cur = data.current;
+    const at = cur ? list.findIndex((v) => v.id === cur.id) : -1;
+    const curTime = at >= 0 ? Date.parse(list[at].date) : Date.parse(cur?.date || '');
+    const isNewer = (v) => (at >= 0 ? list.indexOf(v) < at : Number.isFinite(curTime) && Date.parse(v.date) > curTime);
+    const ok = TIER_OK[cur?.type] || TIER_OK.release;
+    const target = (info?.latest && list.find((v) => v.id === info.latest.id)) || list.find((v) => isNewer(v) && ok.includes(v.type)) || null;
+    const since = target ? list.filter((v) => isNewer(v) && Date.parse(v.date) <= Date.parse(target.date)) : [];
+    let top = '';
+    if (target) {
+      top = `<div class="vh__update">
+        <div class="vh__uhead">${icon('download')}<div><b>Actualización disponible: ${esc(target.number)}</b><small>Tienes la ${esc(cur?.number || 'versión anterior')}. ${since.length > 1 ? `Desde la tuya han salido ${since.length} versiones: abajo tienes lo que trae cada una.` : 'Abajo tienes lo que trae.'}</small></div>${useBtn(target, 'Actualizar', true)}</div>
+        <p class="field__hint">No se actualiza sola: tu carpeta solo cambia si pulsas «Actualizar». Después, publica una versión para que les llegue a los jugadores.</p>
+        <div class="vh__logs">${since.map((v) => `<div class="vh__log"><div class="vh__lhead"><b>${esc(v.number)}</b>${typeChip(v)}${when(v)}</div><div class="rich vh__cl">${changelogHtml(v.changelog)}</div></div>`).join('')}</div>
+      </div>`;
+    } else if (cur && at === 0) {
+      top = `<div class="banner-note banner-note--ok">${icon('check')}<span>Tienes la versión más nueva para Minecraft ${esc(d.meta.mc)}${esc(loader)}.</span></div>`;
+    } else if (cur && at < 0) {
+      top = `<div class="banner-note">${icon('info')}<span>Tienes la ${esc(cur.number || 'versión')}${cur.number ? '' : ' actual'}, que en Modrinth no aparece como compatible con Minecraft ${esc(d.meta.mc)}${esc(loader)}.</span></div>`;
+    }
+    const rows = list.map((v, i) => {
+      const mine = Boolean(cur && v.id === cur.id);
+      const newer = !mine && isNewer(v);
+      return `<details class="vh__item${mine ? ' is-current' : ''}" data-i="${i}">
+        <summary><span class="vh__num"><b>${esc(v.number)}</b>${mine ? '<span class="state state--added">La tuya</span>' : newer ? '<span class="state state--update">Más nueva</span>' : ''}${typeChip(v)}</span>${when(v)}${mine ? '' : useBtn(v, newer ? 'Usar esta' : 'Volver a esta')}</summary>
+        <div class="rich vh__cl"></div>
+      </details>`;
+    }).join('');
+    box.innerHTML = `${top}<div class="vh__list"><div class="vh__ltitle">Historial de versiones <span class="muted">${list.length}</span></div>${rows || '<p class="field__hint" style="padding:12px 14px">No tiene versiones para esta versión de Minecraft.</p>'}</div>`;
+    hydrateIcons(box);
+  };
+  box.addEventListener('toggle', (e) => {
+    const el = e.target.closest?.('.vh__item');
+    const cl = el?.querySelector('.vh__cl');
+    if (!el?.open || !cl || cl.dataset.done) return;
+    cl.dataset.done = '1';
+    cl.innerHTML = changelogHtml(data.versions[Number(el.dataset.i)]?.changelog);
+  }, true);
+  box.addEventListener('click', async (e) => {
+    const b = e.target.closest('[data-use]');
+    if (!b) return;
+    e.preventDefault();
+    if (ro) { denied(need); return; }
+    const v = data.versions.find((x) => x.id === b.dataset.use);
+    m.setLocked(true);
+    try {
+      const r = await busy(b, () => call('admin:setModVersion', id, f.path, b.dataset.use), 'Descargando…');
+      onChange(r.workspace);
+      const extra = (r.added || []).slice(1).map((x) => x.title);
+      toast(`${data.project.title}: ahora tienes la ${v?.number || 'versión elegida'}${extra.length ? `. También se añadió ${extra.join(', ')}, que la necesita` : ''}. Publica una versión para que les llegue a los jugadores.`, { kind: 'success', timeout: 9000 });
+      m.setLocked(false);
+      m.close();
+    } catch (er) {
+      m.setLocked(false);
+      toastError(er);
+    }
+  });
+  call('admin:modVersions', id, f.path).then((r) => {
+    data = r;
+    if (!m.el.isConnected) return;
+    m.content.querySelector('#vh-title').textContent = r.project.title;
+    if (r.project.slug) {
+      m.content.querySelector('#vh-sub').insertAdjacentHTML('beforeend', ` · <a href="https://modrinth.com/project/${encodeURIComponent(r.project.slug)}" target="_blank" rel="noopener noreferrer">Ver en Modrinth</a>`);
+    }
+    if (!pic && r.project.icon) m.content.querySelector('.vh__icon').innerHTML = `<img src="${esc(r.project.icon)}" alt="">`;
+    draw();
+  }).catch((e) => {
+    box.innerHTML = `<div class="form-error">${icon('alert')}<span>${esc(e.message)}</span></div>`;
+    hydrateIcons(box);
+  });
 }
 
 function askFolder(def = 'mods') {

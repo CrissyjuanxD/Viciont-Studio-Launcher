@@ -234,3 +234,123 @@ test('una descarga en curso no muestra el aviso de descarga sin terminar', async
   assert.equal(d.interrupted, false);
   assert.equal(d.status, 'installing');
 });
+
+const sha1 = (s) => crypto.createHash('sha1').update(s).digest('hex');
+
+function adminFixture(t, modrinth, files) {
+  const dir = temp(t);
+  const game = path.join(dir, 'game');
+  const stateFile = path.join(game, '.vsl', 'state.json');
+  for (const [rel, body] of Object.entries(files)) {
+    fs.mkdirSync(path.dirname(path.join(game, rel)), { recursive: true });
+    fs.writeFileSync(path.join(game, rel), body);
+  }
+  const f = { game, trashed: [], downloads: [], writes: 0, bodies: {}, failNext: false };
+  const fsx = require(path.join(root, 'src/main/util/fsx.js'));
+  const real = load('src/main/util/downloader.js', { './fsx': { ...fsx, hashFile: fsx.hashFileLocal } });
+  const { Admin } = load('src/main/services/admin.js', {
+    electron: { shell: { trashItem: async (p) => { f.trashed.push(path.relative(game, p).split(path.sep).join('/')); fs.rmSync(p); } } },
+    '../core/secure': { readSecure: () => null, writeSecure() {} },
+    '../core/paths': { configFile: (n) => path.join(dir, n) },
+    './modrinthApp': {},
+    './modrinth': modrinth,
+    '../util/fsx': { ...fsx, hashFile: fsx.hashFileLocal },
+    '../util/downloader': {
+      pool: real.pool,
+      downloadAll: async (items) => {
+        if (f.failNext) { f.failNext = false; throw new Error('sin conexión'); }
+        for (const it of items) { f.downloads.push(it); fs.writeFileSync(it.dest, f.bodies[it.url]); }
+      },
+    },
+  });
+  const instances = {
+    gameDir: () => game,
+    baseCopy: (id, rel) => path.join(game, '.vsl', 'base', ...rel.split('/')),
+    readState: async () => JSON.parse(fs.readFileSync(stateFile, 'utf8')),
+    writeState: async (id, st) => { f.writes++; fs.writeFileSync(stateFile, JSON.stringify(st)); },
+    remote: new Map(),
+  };
+  f.setWorkspace = (ws) => {
+    fs.mkdirSync(path.dirname(stateFile), { recursive: true });
+    fs.writeFileSync(stateFile, JSON.stringify({ workspace: { baseVersion: 1, base: {}, include: ['mods', 'config'], policies: {}, known: {}, localKeys: {}, hash: {}, ...ws } }));
+  };
+  f.admin = new Admin({ getDirs: () => ({ admin: dir }), backend: {}, accounts: { active: () => null }, instances, log });
+  f.admin.metaDraft = async () => ({ d: { meta: { mc: '1.20.1', loader: { type: 'fabric' } } } });
+  return f;
+}
+
+test('las actualizaciones de mods se detectan solo con la misma versión de Minecraft y sin descargar nada', async (t) => {
+  const calls = { current: 0, latest: [] };
+  const v = (id, project, number, date, type = 'release') => ({ id, projectId: project, number, type, date, dependencies: [] });
+  const modrinth = {
+    LOADER_TAGS: { fabric: ['fabric'] },
+    versionsByHashes: async (hashes) => {
+      calls.current++;
+      const known = { [sha1('sodium-old')]: v('S1', 'sodium', '0.5.8', '2024-02-01T00:00:00Z'), [sha1('iris-new')]: v('I9', 'iris', '1.8.0', '2025-05-01T00:00:00Z'), [sha1('beta-mod')]: v('B1', 'bm', '2.0-beta', '2025-01-01T00:00:00Z', 'beta') };
+      return Object.fromEntries(hashes.filter((h) => known[h]).map((h) => [h, known[h]]));
+    },
+    latestByHashes: async (hashes, opts) => {
+      calls.latest.push(opts);
+      const latest = { [sha1('sodium-old')]: v('S2', 'sodium', '0.5.13', '2025-03-03T00:00:00Z'), [sha1('iris-new')]: v('I8', 'iris', '1.7.0', '2025-01-01T00:00:00Z'), [sha1('beta-mod')]: v('B2', 'bm', '2.1-beta', '2025-02-01T00:00:00Z', 'beta') };
+      return Object.fromEntries(hashes.filter((h) => latest[h]).map((h) => [h, latest[h]]));
+    },
+    projects: async (ids) => ids.map((id) => ({ id, title: id.toUpperCase(), icon_url: null })),
+  };
+  const f = adminFixture(t, modrinth, { 'mods/sodium.jar': 'sodium-old', 'mods/iris.jar': 'iris-new', 'mods/beta.jar': 'beta-mod', 'mods/propio.jar': 'local', 'config/a.json': '{}' });
+  f.setWorkspace({});
+  await f.admin.wsStatus('demo');
+  const r = await f.admin.modUpdates('demo');
+  assert.equal(r.files['mods/sodium.jar'].latest.number, '0.5.13');
+  assert.equal(r.files['mods/sodium.jar'].title, 'SODIUM');
+  assert.equal(r.files['mods/iris.jar'].latest, undefined);
+  assert.equal(r.files['mods/beta.jar'].latest.number, '2.1-beta');
+  assert.equal(r.files['mods/propio.jar'], undefined);
+  assert.deepEqual(calls.latest.map((o) => [o.loaders, o.mc, o.types]).sort(), [[['fabric'], '1.20.1', ['release']], [['fabric'], '1.20.1', ['release', 'beta']]].sort());
+  await f.admin.modUpdates('demo');
+  assert.equal(calls.current, 1);
+  assert.equal(calls.latest.length, 2);
+  assert.equal(f.downloads.length, 0);
+  assert.deepEqual(f.trashed, []);
+});
+
+test('cambiar la versión de un mod solo quita el archivo anterior cuando la nueva ya está descargada', async (t) => {
+  const file = (name, body) => ({ url: `https://cdn.test/${name}`, filename: name, sha1: sha1(body), size: body.length });
+  const versions = { S2: { id: 'S2', projectId: 'sodium', number: '0.5.13', type: 'release', date: '2025-03-03T00:00:00Z', dependencies: [], file: file('sodium-2.jar', 'sodium-new') } };
+  const modrinth = {
+    LOADER_TAGS: { fabric: ['fabric'] },
+    version: async (id) => versions[id],
+    project: async (id) => ({ id, project_type: 'mod', title: 'Sodium', icon_url: null }),
+    versionsByHashes: async () => ({}),
+  };
+  const f = adminFixture(t, modrinth, { 'mods/sodium-1.jar': 'sodium-old' });
+  f.bodies['https://cdn.test/sodium-2.jar'] = 'sodium-new';
+  f.setWorkspace({
+    base: { 'mods/sodium-1.jar': { path: 'mods/sodium-1.jar', sha1: sha1('sodium-old'), size: 10, source: 'modrinth', url: 'https://cdn.test/sodium-1.jar', project: 'sodium', versionName: '0.5.8', policy: 'once' } },
+    policies: { 'mods/sodium-1.jar': 'once' },
+  });
+  f.failNext = true;
+  await assert.rejects(f.admin.setModVersion('demo', 'mods/sodium-1.jar', 'S2'), /sin conexión/);
+  assert.ok(fs.existsSync(path.join(f.game, 'mods', 'sodium-1.jar')));
+  assert.deepEqual(f.trashed, []);
+  const r = await f.admin.setModVersion('demo', 'mods/sodium-1.jar', 'S2');
+  assert.deepEqual(f.trashed, ['mods/sodium-1.jar']);
+  const added = r.workspace.files.find((x) => x.path === 'mods/sodium-2.jar');
+  assert.equal(added.state, 'added');
+  assert.equal(added.source, 'modrinth');
+  assert.equal(added.policy, 'once');
+  assert.deepEqual(added.replaces, { path: 'mods/sodium-1.jar', versionName: '0.5.8' });
+  assert.deepEqual(r.workspace.removed[0].replacedBy, { path: 'mods/sodium-2.jar', versionName: '0.5.13' });
+});
+
+test('revisar una carpeta sin cambios no vuelve a escribir el estado de la instancia', async (t) => {
+  const files = {};
+  for (let i = 0; i < 40; i++) files[`config/m${i % 7}/f${i}.json`] = `{"v":${i}}`;
+  const f = adminFixture(t, {}, { ...files, 'mods/a.jar': 'a', 'saves/mundo/level.dat': 'x' });
+  f.setWorkspace({});
+  const first = await f.admin.wsStatus('demo');
+  const writes = f.writes;
+  const again = await f.admin.wsStatus('demo');
+  assert.equal(f.writes, writes);
+  assert.deepEqual(again.files, first.files);
+  assert.deepEqual(again.candidates.map((c) => [c.name, c.count]), [['saves', 1]]);
+});

@@ -137,13 +137,14 @@ async function listFiles(dir, { skip } = {}) {
   const walk = async (d, rel) => {
     let entries;
     try { entries = await fsp.readdir(d, { withFileTypes: true }); } catch { return; }
+    const subs = [];
     for (const e of entries) {
       const r = rel ? `${rel}/${e.name}` : e.name;
       if (skip && skip(r, e)) continue;
-      const p = path.join(d, e.name);
-      if (e.isDirectory()) await walk(p, r);
+      if (e.isDirectory()) subs.push(walk(path.join(d, e.name), r));
       else if (e.isFile()) out.push(r);
     }
+    await Promise.all(subs);
   };
   await walk(dir, '');
   return out;
