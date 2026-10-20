@@ -237,13 +237,18 @@ function start() {
     else if (d.cancelled) track('instance.paused', { instance: baseId(d.id), message: `Pausó la descarga de ${name}` });
     else track('instance.error', { level: 'error', instance: baseId(d.id), message: `Error al descargar ${name}: ${d.error}`, data: { kind: d.kind } });
   });
+  const starting = new Map();
   instances.on('game-start', (d) => {
     send('game', { ...d, state: 'running' });
     presence.playing = { id: d.id, since: Date.now() };
     updatePresence();
-    const uuid = telemetry.gameStarted(d.id);
+    const uuid = telemetry.gameStarted(d.id, { instance: baseId(d.id) });
     const r = instances.remote.get(baseId(d.id));
-    track('game.start', { uuid, instance: baseId(d.id), message: `Empezó a jugar ${instName(d.id)}`, data: { mc: r?.mc || null, loader: r?.loader?.type || null } });
+    const info = { mc: r?.mc || null, loader: r?.loader?.type || null };
+    starting.set(d.id, (r?.rp?.path ? instances.packIdOf(d.id, r.rp.path).catch(() => null) : Promise.resolve(null)).then((rp) => {
+      if (rp) telemetry.gameData(d.id, { rp });
+      track('game.start', { uuid, instance: baseId(d.id), message: `Empezó a jugar ${instName(d.id)}`, data: rp ? { ...info, rp } : info });
+    }));
     const mode = settings.get().onLaunch;
     if (!win) return;
     if (mode === 'minimize') setTimeout(() => win?.minimize(), 1200);
@@ -263,18 +268,22 @@ function start() {
     const uuid = telemetry.gameStopped(d.id);
     if (presence.playing?.id === d.id) { presence.playing = null; updatePresence(); }
     const mins = Math.round((d.duration || 0) / 60000);
-    if (d.crashed) {
-      const head = `Viciont Studios Launcher ${VERSION} · ${instName(d.id)} · código ${d.code} · ${mins} min · ${new Date().toISOString()}`;
-      try {
-        telemetry.trackCrash({
-          uuid, level: 'error', instance: baseId(d.id),
-          message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min${d.crash?.report ? ' (con crash report)' : ''}`,
-          data: { code: d.code, minutes: mins, crashReport: d.crash?.report?.name || null, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) },
-        }, d.crash ? crashText(d.crash, head) : '');
-      } catch {}
-    } else {
-      track('game.exit', { uuid, instance: baseId(d.id), message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
-    }
+    const started = starting.get(d.id) || Promise.resolve();
+    starting.delete(d.id);
+    started.then(() => {
+      if (d.crashed) {
+        const head = `Viciont Studios Launcher ${VERSION} · ${instName(d.id)} · código ${d.code} · ${mins} min · ${new Date().toISOString()}`;
+        try {
+          telemetry.trackCrash({
+            uuid, level: 'error', instance: baseId(d.id),
+            message: `El juego se cerró con error (código ${d.code}) en ${instName(d.id)} tras ${mins} min${d.crash?.report ? ' (con crash report)' : ''}`,
+            data: { code: d.code, minutes: mins, crashReport: d.crash?.report?.name || null, log: (d.log || []).slice(-30).map((l) => String(l).slice(0, 300)) },
+          }, d.crash ? crashText(d.crash, head) : '');
+        } catch {}
+      } else {
+        track('game.exit', { uuid, instance: baseId(d.id), message: `Dejó de jugar ${instName(d.id)} (${mins} min)`, data: { minutes: mins } });
+      }
+    });
     const s = settings.get();
     if (instances.anyRunning()) { send('game', { ...d, state: 'exit' }); return; }
     if (!win) {
@@ -604,6 +613,7 @@ function start() {
   on('admin:modUpdates', needAdmin((id, opts) => admin.modUpdates(id, { fresh: opts?.fresh === true })));
   on('admin:modVersions', needAdmin((id, rel) => admin.modVersions(id, String(rel || ''))));
   on('admin:setModVersion', needEdit((id, rel, versionId) => admin.setModVersion(id, String(rel || ''), String(versionId || ''))));
+  on('admin:rpKey', needEdit((id, action) => admin.rpKey(id, ['create', 'delete'].includes(action) ? action : 'get')));
   on('admin:setPolicy', needEdit((id, p, policy) => admin.setPolicy(id, p, policy)));
   on('admin:mergePick', needEdit((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
   on('admin:removeFiles', needEdit((id, list) => admin.removeFiles(id, list)));

@@ -354,3 +354,57 @@ test('revisar una carpeta sin cambios no vuelve a escribir el estado de la insta
   assert.deepEqual(again.files, first.files);
   assert.deepEqual(again.candidates.map((c) => [c.name, c.count]), [['saves', 1]]);
 });
+
+test('el pack del servidor hecho con una carpeta da un .zip válido y siempre igual, sin zips ni archivos del sistema', async (t) => {
+  const { packId, packFiles, writeZip } = require(path.join(root, 'src/main/util/rpack.js'));
+  const { openZip } = require(path.join(root, 'src/main/util/zip.js'));
+  const dir = temp(t);
+  const files = { 'pack.mcmeta': '{"pack":{}}', 'assets/minecraft/textures/a.png': crypto.randomBytes(2000), 'assets/ñandú/b.json': 'x'.repeat(5000), 'Viejo.zip': 'zip', 'desktop.ini': 'x' };
+  const list = Object.entries(files).map(([rel, body]) => {
+    const abs = path.join(dir, ...rel.split('/'));
+    fs.mkdirSync(path.dirname(abs), { recursive: true });
+    fs.writeFileSync(abs, body);
+    return { path: `resourcepacks/Pack/${rel}`, sha1: sha1(body), abs };
+  });
+  list.push({ path: 'resourcepacks/Otro.zip', sha1: 'b'.repeat(40) }, { path: 'mods/a.jar', sha1: 'c'.repeat(40) });
+  const picked = packFiles('resourcepacks/Pack', list);
+  assert.deepEqual(picked.map((f) => f.rel), ['assets/minecraft/textures/a.png', 'assets/ñandú/b.json', 'pack.mcmeta']);
+  const id = packId('resourcepacks/Pack', list);
+  assert.equal(packId('resourcepacks/Pack', [...list].reverse()), id);
+  assert.notEqual(packId('resourcepacks/Pack', list.map((f) => (f.path.endsWith('b.json') ? { ...f, sha1: 'd'.repeat(40) } : f))), id);
+  assert.equal(packId('resourcepacks/Otro.zip', list), 'b'.repeat(40));
+  assert.equal(packId('resourcepacks/Nada', list), null);
+  assert.equal(packId('mods/a.jar', list), null);
+  const out = (n) => path.join(temp(t), `${n}.zip`);
+  const a = out('a');
+  const b = out('b');
+  await writeZip(picked, a);
+  await writeZip(picked, b);
+  assert.equal(sha1(fs.readFileSync(a)), sha1(fs.readFileSync(b)));
+  const z = await openZip(a);
+  try {
+    assert.deepEqual(z.names(), picked.map((f) => f.rel));
+    for (const f of picked) assert.ok((await z.read(f.rel)).equals(Buffer.from(files[f.rel])));
+  } finally { z.close(); }
+});
+
+test('al publicar, el pack del servidor solo se vuelve a crear si cambió algo de la carpeta', async (t) => {
+  const f = adminFixture(t, {}, { 'resourcepacks/Pack/pack.mcmeta': '{}', 'resourcepacks/Pack/a.png': 'png', 'resourcepacks/Listo.zip': 'zip' });
+  const list = ['pack.mcmeta', 'a.png'].map((n) => ({ path: `resourcepacks/Pack/${n}`, sha1: sha1(n === 'a.png' ? 'png' : '{}'), size: 3, source: 'upload', abs: path.join(f.game, 'resourcepacks', 'Pack', n) }));
+  list.push({ path: 'resourcepacks/Listo.zip', sha1: sha1('zip'), size: 3, source: 'modrinth', url: 'https://cdn.modrinth.com/data/x/Listo.zip' });
+  const tmp = temp(t);
+  const first = await f.admin.buildPack('resourcepacks/Pack', list, null, tmp);
+  assert.equal(first.rp.path, 'resourcepacks/Pack');
+  assert.ok(first.upload && fs.existsSync(first.upload.file));
+  assert.equal(first.rp.sha1, first.upload.sha);
+  const same = await f.admin.buildPack('resourcepacks/Pack', list, { rp: first.rp }, tmp);
+  assert.equal(same.upload, null);
+  assert.deepEqual(same.rp, first.rp);
+  fs.writeFileSync(path.join(f.game, 'resourcepacks', 'Pack', 'a.png'), 'png2');
+  const changed = await f.admin.buildPack('resourcepacks/Pack', list.map((x) => (x.path.endsWith('a.png') ? { ...x, sha1: sha1('png2') } : x)), { rp: first.rp }, tmp);
+  assert.ok(changed.upload);
+  assert.notEqual(changed.rp.id, first.rp.id);
+  const zip = await f.admin.buildPack('resourcepacks/Listo.zip', list, null, tmp);
+  assert.deepEqual(zip, { rp: { path: 'resourcepacks/Listo.zip', id: sha1('zip'), sha1: sha1('zip'), size: 3, url: 'https://cdn.modrinth.com/data/x/Listo.zip' }, upload: null });
+  await assert.rejects(f.admin.buildPack('resourcepacks/Falta', list, null, tmp), /está vacía o ya no existe/);
+});

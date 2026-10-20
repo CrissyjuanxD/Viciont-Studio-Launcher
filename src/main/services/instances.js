@@ -15,6 +15,7 @@ const { planGame } = require('../game/install');
 const { launchGame } = require('../game/launch');
 const { collectCrash } = require('../game/crash');
 const csl = require('./csl');
+const { packId } = require('../util/rpack');
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,47}(~test)?$/;
 const TEST = '~test';
@@ -93,6 +94,12 @@ class Instances extends EventEmitter {
 
   async readState(id) { return readJson(this.stateFile(id)); }
   async writeState(id, st) { await writeJsonAtomic(this.stateFile(id), st); }
+
+  async packIdOf(id, rel) {
+    const st = await this.readState(id);
+    const rec = st?.workspace ? st.workspace.hash : st?.files;
+    return packId(rel, Object.entries(rec || {}).map(([p, r]) => ({ path: p, sha1: r?.sha1 })));
+  }
 
   protectKinds(summary, loader, test = false) {
     const list = Array.isArray(summary?.protect) ? summary.protect : [];

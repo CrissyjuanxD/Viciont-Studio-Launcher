@@ -27,6 +27,8 @@ const FOLD_MIN = 300;
 const UPD_RE = /^(mods|resourcepacks|shaderpacks|datapacks)\/.+\.(jar|zip)$/i;
 const byPath = new Intl.Collator();
 const CHANGES_MAX = 400;
+const RP_API = 15;
+const RP_RELEASES = 'https://github.com/CrissyjuanxD/ViciontRP/releases/latest';
 const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <= DIFF_MAX && (f.oldSize || 0) <= DIFF_MAX;
 
 const can = (perm) => (state.admin?.perms || []).includes(perm);
@@ -47,7 +49,7 @@ const denied = (need) => {
 };
 
 const RO_SEL = ['apply-version', 'modrinth', 'upload', 'upload-folder', 'content-more'].map((a) => `[data-act="${a}"]`)
-  .concat(['[data-l]', '[data-pick]', '[data-clear]', '[data-policy]', '[data-restore]', '[data-del]', '[data-incl]', '[data-excl]', '[data-v]', '.media-pick']).join(', ');
+  .concat(['[data-rpkey]', '[data-l]', '[data-pick]', '[data-clear]', '[data-policy]', '[data-restore]', '[data-del]', '[data-incl]', '[data-excl]', '[data-v]', '.media-pick']).join(', ');
 
 const slugify = (s) => String(s || '').toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '')
   .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48);
@@ -813,9 +815,11 @@ function renderEditor(root, id, app, route = {}) {
         <div class="chips-list" id="incl"></div>
         ${w.candidates?.length ? `<p class="field__hint" style="margin-top:12px">Estas carpetas están en tu PC pero <b>no</b> se publican (por ejemplo mundos o mapas de minimapas). Añádelas solo si quieres repartirlas:</p><div class="chips-list" id="cand" style="margin-top:8px"></div>` : ''}
       </div>
+      <div class="panel" id="rp-box" style="margin-top:14px"></div>
       <p class="field__hint">${ro() ? '' : 'Arrastra archivos aquí para añadirlos. '}<b>Reemplazar</b> = se sobrescribe en cada actualización. <b>Solo la 1.ª vez</b> = el jugador puede cambiarlo. <b>Fusionar</b> (options.txt) = el jugador solo recibe los ajustes que confirmes al publicar y conserva los suyos (teclas, volumen…). Los mods de Modrinth se descargan desde su CDN: no ocupan espacio en tu servidor.</p>`;
     drawFiles(body);
     drawIncl(body);
+    drawRp(body);
     paintUpd();
     checkUpdates();
     body.querySelector('#ffilter').addEventListener('input', debounce((e) => { filter = e.target.value.toLowerCase(); shown.clear(); drawFiles(body); }, 150));
@@ -832,6 +836,74 @@ function renderEditor(root, id, app, route = {}) {
       if (target == null) return;
       await addPaths(paths, target);
     });
+  };
+
+  let rpKeyInfo;
+  let rpKeyBusy = false;
+  const packChoices = () => {
+    const out = new Map();
+    for (const f of ws().files || []) {
+      const m = /^resourcepacks\/([^/]+)(\/.+)?$/.exec(f.path);
+      if (!m || (!m[2] && !/\.zip$/i.test(m[1]))) continue;
+      const key = `resourcepacks/${m[1]}`;
+      const c = out.get(key) || { path: key, name: m[1], folder: Boolean(m[2]), files: 0, size: 0 };
+      c.files++;
+      c.size += f.size || 0;
+      out.set(key, c);
+    }
+    return [...out.values()].sort((a, b) => byPath.compare(a.name, b.name));
+  };
+  const paintRpKey = (box) => {
+    const el = box?.querySelector('#rp-key');
+    if (!el) return;
+    if (rpKeyInfo === undefined) {
+      el.innerHTML = '<span class="spin"></span><span>Comprobando la clave del plugin…</span>';
+      if (!rpKeyBusy) {
+        rpKeyBusy = true;
+        call('admin:rpKey', id, 'get').then((r) => { rpKeyInfo = r.key || null; }).catch((e) => { rpKeyInfo = { error: e.message }; })
+          .finally(() => { rpKeyBusy = false; paintRpKey(root.querySelector('#rp-box')); });
+      }
+      return;
+    }
+    const k = rpKeyInfo;
+    el.innerHTML = k?.error ? `${icon('alert')}<span>${esc(k.error)}</span>`
+      : `${icon('key')}<span>${k ? `Clave del plugin creada ${esc(timeAgo(k.createdAt))}${k.createdBy ? ` por ${esc(k.createdBy)}` : ''} · ${k.lastUsed ? `el plugin la usó ${esc(timeAgo(k.lastUsed))}` : 'el plugin todavía no la ha usado'}` : 'Todavía no hay clave para el plugin.'}</span>
+        <span class="field__row" style="margin-left:auto;gap:6px">${k ? `<button class="btn btn--sm btn--ghost" type="button" data-rpkey="delete">${icon('trash')}Quitar</button>` : ''}<button class="btn btn--sm${k ? '' : ' btn--primary'}" type="button" data-rpkey="create">${icon('key')}${k ? 'Crear otra' : 'Crear clave'}</button></span>`;
+    lockIn(el);
+    hydrateIcons(el);
+  };
+  const drawRp = (body) => {
+    const box = body.querySelector('#rp-box');
+    if (!box) return;
+    const api = (d.apiVersion || 0) >= RP_API;
+    const chosen = d.meta.serverPack || '';
+    const choices = packChoices();
+    if (chosen && !choices.some((c) => c.path === chosen)) choices.unshift({ path: chosen, name: chosen.split('/').pop(), missing: true });
+    const pub = d.serverPackInfo;
+    const folder = Boolean(chosen) && !/\.zip$/i.test(chosen);
+    const state = !api ? `<p class="inst__warn">${icon('alert')}Para usarlo, primero actualiza el servidor: pega el código nuevo en Cloudflare y pulsa Deploy.</p>`
+      : !chosen ? '<p class="field__hint">Sin pack: el plugin no le pedirá nada a nadie.</p>'
+        : pub?.path === chosen ? `<p class="rp-state">${icon('check')}<span>En el servidor: <b>${esc(chosen.split('/').pop())}</b> · ${bytes(pub.size || 0)}${folder ? ' (.zip creado de la carpeta)' : ''}. Cuando publiques cambios en el pack, el plugin recibe el nuevo solo.</span></p>`
+          : `<p class="rp-state is-pending">${icon('clock')}<span>Se enviará al servidor al publicar la versión ${(d.baseVersion || 0) + 1}${d.baseVersion ? ' o con «Guardar solo textos y permisos»' : ''}${folder ? ', creando su .zip' : ''}.</span></p>`;
+    box.innerHTML = `
+      <div class="panel__title"><span>Pack del servidor de Minecraft</span><span class="tag">ViciontRP</span></div>
+      <p class="field__hint">Si la instancia es para entrar a un servidor, el plugin <a href="${RP_RELEASES}" target="_blank" rel="noopener noreferrer">ViciontRP</a> le da este pack a quien entre sin el launcher. A quien juega desde el launcher con la instancia al día no le pide nada. Si el pack es una carpeta, al publicar se crea su .zip.</p>
+      <label class="field" style="margin-top:12px"><span class="field__label">Pack</span>
+        <select class="input select" id="rp-pick" ${api ? '' : 'disabled'}>
+          <option value="">Ninguno</option>
+          ${choices.map((c) => `<option value="${esc(c.path)}" ${c.path === chosen ? 'selected' : ''}>${esc(c.name)}${c.missing ? ' (ya no está en tu carpeta)' : c.folder ? ` · carpeta, ${c.files} archivos, ${bytes(c.size)}` : ` · ${bytes(c.size)}`}</option>`).join('')}
+        </select></label>
+      ${state}
+      ${api && d.baseVersion ? '<div class="rp-key" id="rp-key"></div>' : ''}`;
+    box.querySelector('#rp-pick').addEventListener('change', (e) => {
+      d.meta.serverPack = e.target.value;
+      saveMeta({ serverPack: e.target.value });
+      drawRp(body);
+      paintBar();
+    });
+    paintRpKey(box);
+    lockIn(box);
+    hydrateIcons(box);
   };
 
   const drawIncl = (body) => {
@@ -1267,6 +1339,26 @@ function renderEditor(root, id, app, route = {}) {
     if (keysLink) { e.preventDefault(); okeysModal(id, d, keysLink.dataset.keys, refreshWs, ro()); return; }
     const onlyBtn = e.target.closest('[data-only]');
     if (onlyBtn) { only = onlyBtn.dataset.only === only ? '' : onlyBtn.dataset.only; shown.clear(); drawTab(); return; }
+    const rk = e.target.closest('[data-rpkey]');
+    if (rk) {
+      if (rk.dataset.rpkey === 'delete') {
+        const ok = await confirm({ title: '¿Quitar la clave del plugin?', text: 'El plugin ViciontRP de tu servidor dejará de recibir el pack hasta que crees otra clave y la pongas en su config.', ok: 'Quitar', danger: true, icon: 'trash' });
+        if (!ok) return;
+        try { await busy(rk, () => call('admin:rpKey', id, 'delete')); rpKeyInfo = null; paintRpKey(root.querySelector('#rp-box')); } catch (er) { toastError(er); }
+        return;
+      }
+      if (rpKeyInfo && !rpKeyInfo.error) {
+        const ok = await confirm({ title: '¿Crear otra clave?', text: 'La clave actual dejará de funcionar: tendrás que poner la nueva en la config del plugin.', ok: 'Crear otra', icon: 'key' });
+        if (!ok) return;
+      }
+      try {
+        const r = await busy(rk, () => call('admin:rpKey', id, 'create'));
+        rpKeyInfo = r.info;
+        paintRpKey(root.querySelector('#rp-box'));
+        rpKeyModal(r.key);
+      } catch (er) { toastError(er); }
+      return;
+    }
     const fold = e.target.closest('[data-fold]');
     if (fold) {
       const g = fileGroups.get(fold.dataset.fold);
@@ -1915,6 +2007,22 @@ function versionsModal(id, d, f, info, { ro, need, onChange }) {
   }).catch((e) => {
     box.innerHTML = `<div class="form-error">${icon('alert')}<span>${esc(e.message)}</span></div>`;
     hydrateIcons(box);
+  });
+}
+
+function rpKeyModal(key) {
+  const conf = `key: "${key}"`;
+  const m = modal({
+    html: `<div class="modal__body"><h2 class="modal__title">Clave del plugin</h2>
+      <p class="modal__text">Pon esta línea en <code>plugins/ViciontRP/config.yml</code> de tu servidor y escribe <code>/viciontrp reload</code>. <b>Solo se muestra ahora:</b> si la pierdes, crea otra.</p>
+      <pre class="rp-conf">${esc(conf)}</pre>
+      <div class="field__row" style="justify-content:flex-end;margin-top:16px">
+        <a class="btn btn--ghost" href="${RP_RELEASES}" target="_blank" rel="noopener noreferrer">${icon('download')}Descargar ViciontRP</a>
+        <button class="btn btn--primary" type="button" data-copy>${icon('copy')}Copiar</button>
+      </div></div>`,
+  });
+  m.content.querySelector('[data-copy]').addEventListener('click', async () => {
+    try { await call('app:copy', conf); toast('Línea copiada.', { kind: 'success' }); } catch (e) { toastError(e); }
   });
 }
 

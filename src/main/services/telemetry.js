@@ -110,20 +110,25 @@ class Telemetry {
     }
   }
 
-  gameStarted(id) {
+  gameStarted(id, { instance = id, data = null } = {}) {
     const uuid = this.accounts.active()?.uuid || null;
-    this.playing.set(id, uuid);
+    this.playing.set(id, { uuid, instance, data });
     return uuid;
   }
 
+  gameData(id, data) {
+    const e = this.playing.get(id);
+    if (e) e.data = data;
+  }
+
   gameStopped(id) {
-    const uuid = this.playing.get(id) ?? null;
+    const uuid = this.playing.get(id)?.uuid ?? null;
     this.playing.delete(id);
     return uuid;
   }
 
   heartbeat() {
-    for (const [id, uuid] of this.playing) this.track('game.heartbeat', { instance: id, uuid });
+    for (const { uuid, instance, data } of this.playing.values()) this.track('game.heartbeat', { instance, uuid, ...(data ? { data } : {}) });
   }
 
   saveSoon() {
