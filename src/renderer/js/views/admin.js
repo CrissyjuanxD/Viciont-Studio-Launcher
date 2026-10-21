@@ -892,7 +892,7 @@ function renderEditor(root, id, app, route = {}) {
     const later = 'Quien juega desde el launcher verá los packs nuevos al actualizar la instancia.';
     el.className = `rp-state${r.ok ? '' : ' is-pending'}`;
     el.innerHTML = r.ok
-      ? `${icon('check')}<span>Quien juega desde el launcher recibe los packs nuevos <b>sin salir del servidor</b>: el launcher le pone el mod ViciontRP solo.</span>`
+      ? `${icon('check')}<span>Quien juega desde el launcher recibe los packs nuevos <b>sin salir del servidor</b>: el launcher le pone el mod ViciontRP por su cuenta.</span>`
       : `${icon('alert')}<span>La actualización dentro del juego (mod ViciontRP) <b>no es compatible</b> con ${r.reason === 'loader' ? `${esc(LOADER_NAMES[loader] || loader)}: solo funciona con Fabric o Quilt` : `Minecraft ${esc(mc || '?')}: funciona de la ${esc(r.min)} a la ${esc(r.max)}`}. ${later}</span>`;
     hydrateIcons(el);
   };
@@ -930,8 +930,7 @@ function renderEditor(root, id, app, route = {}) {
       ${api && d.baseVersion ? '<div class="rp-key" id="rp-key"></div>' : ''}`;
     box.querySelectorAll('[data-rppack]').forEach((el) => el.addEventListener('change', () => {
       const p = el.dataset.rppack;
-      const next = el.checked ? [...chosen.filter((x) => x !== p), p] : chosen.filter((x) => x !== p);
-      const order = choices.map((c) => c.path).filter((x) => next.includes(x));
+      const order = el.checked ? [...chosen.filter((x) => x !== p), p] : chosen.filter((x) => x !== p);
       d.meta.serverPacks = order;
       d.meta.serverPack = order[0] || '';
       saveMeta({ serverPacks: order, serverPack: order[0] || '' });
