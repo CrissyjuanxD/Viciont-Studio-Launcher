@@ -2,6 +2,7 @@
 
 const path = require('node:path');
 const os = require('node:os');
+const crypto = require('node:crypto');
 const fs = require('node:fs');
 const fsp = fs.promises;
 const { app, BrowserWindow, protocol, ipcMain, shell, dialog, Tray, Menu, nativeImage, session, clipboard } = require('electron');
@@ -19,6 +20,8 @@ const { Media } = require('./services/media');
 const { Admin } = require('./services/admin');
 const { Updater } = require('./services/updater');
 const { Telemetry } = require('./services/telemetry');
+const { Bridge } = require('./services/bridge');
+const vrpmod = require('./services/vrpmod');
 const { DiscordPresence } = require('./services/discord');
 const modrinth = require('./services/modrinth');
 const { getVersionManifest } = require('./game/versions');
@@ -70,7 +73,15 @@ function start() {
   const updater = new Updater({ log, settings });
   updater.canAutoCheck = () => !instances.anyRunning() && !instances.busy();
   const telemetry = new Telemetry({ accounts, backend, log, version: VERSION });
+  const bridge = new Bridge({ instances, accounts, backend, log, version: VERSION });
   const track = (type, info) => { try { telemetry.track(type, info); } catch {} };
+  const packKey = async (id, r) => {
+    const paths = (Array.isArray(r?.rps) ? r.rps : r?.rp ? [r.rp] : []).map((x) => x.path);
+    if (!paths.length) return null;
+    const ids = await Promise.all(paths.map((p) => instances.packIdOf(id, p).catch(() => null)));
+    if (ids.some((x) => !x)) return null;
+    return ids.length === 1 ? ids[0] : crypto.createHash('sha1').update(ids.join('\n')).digest('hex');
+  };
   const instName = (id) => `${instances.remote.get(baseId(id))?.name || baseId(id)}${isTestId(id) ? ' (copia de prueba)' : ''}`;
 
   const discord = new DiscordPresence({ log, version: VERSION });
@@ -245,7 +256,7 @@ function start() {
     const uuid = telemetry.gameStarted(d.id, { instance: baseId(d.id) });
     const r = instances.remote.get(baseId(d.id));
     const info = { mc: r?.mc || null, loader: r?.loader?.type || null };
-    starting.set(d.id, (r?.rp?.path ? instances.packIdOf(d.id, r.rp.path).catch(() => null) : Promise.resolve(null)).then((rp) => {
+    starting.set(d.id, packKey(d.id, r).then((rp) => {
       if (rp) telemetry.gameData(d.id, { rp });
       track('game.start', { uuid, instance: baseId(d.id), message: `Empezó a jugar ${instName(d.id)}`, data: rp ? { ...info, rp } : info });
     }));
@@ -263,6 +274,16 @@ function start() {
         }
       }, 1500);
     }
+  });
+  bridge.on('applied', (d) => {
+    const r = instances.remote.get(baseId(d.id));
+    packKey(d.id, r).then((rp) => {
+      if (rp) telemetry.gameData(d.id, { rp });
+      const uuid = telemetry.playing.get(d.id)?.uuid;
+      track('instance.hot_update', { uuid, instance: baseId(d.id), message: `Recibió los packs nuevos de ${instName(d.id)} sin salir del juego${d.onlyPacks ? ` (versión ${d.version})` : ''}`, data: { version: d.version, onlyPacks: d.onlyPacks } });
+      if (rp) track('game.heartbeat', { uuid, instance: baseId(d.id), data: { rp } });
+      telemetry.flushSoon();
+    });
   });
   instances.on('game-exit', (d) => {
     const uuid = telemetry.gameStopped(d.id);
@@ -567,7 +588,7 @@ function start() {
   on('instances:cancel', (id) => { instances.cancel(id); return true; });
   on('instances:play', async (id) => {
     try {
-      return await instances.play(id, { version: VERSION });
+      return await instances.play(id, { version: VERSION, bridge: (gid) => bridge.open(gid), closed: (gid) => bridge.close(gid) });
     } catch (e) {
       if (e?.name !== 'AbortError') track('game.launch_error', { level: 'error', instance: baseId(id), message: `No se pudo iniciar ${instName(id)}: ${e.message}` });
       throw e;
@@ -622,6 +643,7 @@ function start() {
   on('admin:modVersions', needAdmin((id, rel) => admin.modVersions(id, String(rel || ''))));
   on('admin:setModVersion', needEdit((id, rel, versionId) => admin.setModVersion(id, String(rel || ''), String(versionId || ''))));
   on('admin:rpKey', needEdit((id, action) => admin.rpKey(id, ['create', 'delete'].includes(action) ? action : 'get')));
+  on('admin:rpMod', (mc, loader) => vrpmod.support(String(mc || '').slice(0, 40), String(loader || '').slice(0, 20)));
   on('admin:setPolicy', needEdit((id, p, policy) => admin.setPolicy(id, p, policy)));
   on('admin:mergePick', needEdit((id, p, keys, value) => admin.mergePick(id, p, keys, Boolean(value))));
   on('admin:removeFiles', needEdit((id, list) => admin.removeFiles(id, list)));

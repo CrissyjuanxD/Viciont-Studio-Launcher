@@ -183,14 +183,14 @@ async function launchGame(plan, opts) {
   const fake = !require('electron').app.isPackaged && process.env.VSL_TEST_FAKEGAME;
   if (fake) {
     const child = spawn(process.execPath, [fake, opts.gameDir, ...(opts.extraJvm || [])], {
-      cwd: opts.gameDir, env: { ...process.env, ELECTRON_RUN_AS_NODE: '1' }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
+      cwd: opts.gameDir, env: { ...process.env, ...(opts.env || {}), ELECTRON_RUN_AS_NODE: '1' }, detached: true, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'],
     });
     return new GameProcess(child, logFile);
   }
   const cmd = buildCommand(plan, opts);
   const args = await argFileIfNeeded(cmd, opts.gameDir);
   const child = spawn(cmd.java, args, {
-    cwd: opts.gameDir, env: javaEnv(), detached: true, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
+    cwd: opts.gameDir, env: { ...javaEnv(), ...(opts.env || {}) }, detached: true, windowsHide: false, stdio: ['ignore', 'pipe', 'pipe'],
   });
   const game = new GameProcess(child, logFile);
   await new Promise((resolve, reject) => {

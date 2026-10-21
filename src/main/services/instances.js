@@ -15,6 +15,7 @@ const { planGame } = require('../game/install');
 const { launchGame } = require('../game/launch');
 const { collectCrash } = require('../game/crash');
 const csl = require('./csl');
+const vrpmod = require('./vrpmod');
 const { packId } = require('../util/rpack');
 
 const ID_RE = /^[a-z0-9][a-z0-9-]{1,47}(~test)?$/;
@@ -31,6 +32,25 @@ function locOf(rel, kinds) {
   const top = topOf(rel);
   if (rel.includes('/') && STAGED.includes(top) && kinds.includes(top)) return 'h';
   return 'g';
+}
+
+const isPackRel = (rel) => topOf(rel) === 'resourcepacks' && String(rel).includes('/');
+const packName = (rel) => String(rel).split('/')[1];
+
+function assetsHash(files) {
+  const list = files.filter((f) => String(f.path).toLowerCase().startsWith('resourcepacks/')).map((f) => `${f.path}\t${String(f.sha1).toLowerCase()}`).sort();
+  return list.length ? crypto.createHash('sha1').update(list.join('\n')).digest('hex') : null;
+}
+
+function packsInOptions(text) {
+  const m = /^resourcePacks:(.*)$/m.exec(String(text || ''));
+  if (!m) return [];
+  try {
+    const list = JSON.parse(m[1].trim());
+    return Array.isArray(list) ? list.filter((x) => typeof x === 'string' && x.startsWith('file/')).map((x) => x.slice(5)) : [];
+  } catch {
+    return [];
+  }
 }
 
 const isAlive = (pid) => {
@@ -640,8 +660,15 @@ class Instances extends EventEmitter {
         dirs: this.dirs, signal: ctrl.signal, gameDir,
         javaCustom: (major) => settings.javaPaths?.[major] || undefined,
       });
+      const own = Object.keys((ws ? ws.hash : st.files) || {}).some((p) => /^mods\/[^/]*viciontrp[^/]*\.jar$/i.test(p));
+      const mod = !own && vrpmod.usesPlugin(remote || st.summary) ? await vrpmod.modFile(st.mc, st.loader?.type).catch((e) => {
+        this.log.warn('No se pudo comprobar el mod ViciontRP:', e.message);
+        return null;
+      }) : null;
+      const modJar = mod ? path.join(vrpmod.modDir(this.dirs), mod.file) : null;
       try {
         const extra = ws ? await this.cslItems(gameDir, st) : [];
+        if (mod) extra.push({ url: mod.url, dest: modJar, sha1: mod.sha1, size: mod.size, label: mod.file, optional: true });
         await downloadAll([...plan.items, ...extra], { concurrency: settings.concurrency, signal: ctrl.signal, progress, verify: 'size' });
         for (const post of plan.posts) await post(progress);
       } finally {
@@ -650,13 +677,17 @@ class Instances extends EventEmitter {
       if (st.loader?.type && st.loader.type !== 'vanilla') await csl.configure(gameDir, this.backend.base()).catch(() => {});
       if (!ws) st = await this.relayout(id, st, this.protectKinds(remote || st.summary, st.loader, isTestId(id)));
       const extraJvm = [];
+      const addMods = [];
       if (!ws && this.kindsOf(st).includes('mods')) {
         const pdir = this.protectedDir(id);
-        if (st.loader?.type === 'quilt') {
-          const jars = (await fsp.readdir(pdir).catch(() => [])).filter((n) => /\.jar$/i.test(n)).map((n) => path.join(pdir, n));
-          if (jars.length) extraJvm.push(`-Dloader.addMods=${jars.join(path.delimiter)}`);
-        } else extraJvm.push(`-Dfabric.addMods=${pdir}`);
+        if (st.loader?.type === 'quilt') addMods.push(...(await fsp.readdir(pdir).catch(() => [])).filter((n) => /\.jar$/i.test(n)).map((n) => path.join(pdir, n)));
+        else addMods.push(pdir);
       }
+      if (modJar && (await statOrNull(modJar))?.size === mod.size) {
+        addMods.push(modJar);
+        vrpmod.prune(this.dirs, mod.file).catch(() => {});
+      } else if (mod) this.log.warn('No se pudo descargar el mod ViciontRP: se juega sin él.');
+      if (addMods.length) extraJvm.push(`-D${st.loader?.type === 'quilt' ? 'loader' : 'fabric'}.addMods=${addMods.join(path.delimiter)}`);
       const staged = ws ? null : await this.stage(id, st);
       const o = st.options || {};
       const summary = remote || st.summary || {};
@@ -672,9 +703,11 @@ class Instances extends EventEmitter {
           resolution: o.resolution || settings.resolution,
           server: o.autoJoin === false ? null : summary.server,
           launcherVersion: hooks.version,
+          env: own || (modJar && addMods.includes(modJar)) ? await hooks.bridge?.(id) : null,
         });
       } catch (e) {
         if (staged) await this.unstage(id, { force: true }).catch(() => {});
+        hooks.closed?.(id);
         throw e;
       }
       this.running.set(id, game);
@@ -686,6 +719,7 @@ class Instances extends EventEmitter {
         const crashed = code !== 0 && code !== null;
         const crash = crashed ? await collectCrash({ gameDir, startedAt: game.startedAt, pid: game.pid, logFile: game.logFile }).catch(() => null) : null;
         this.running.delete(id);
+        hooks.closed?.(id);
         if (staged) await this.unstage(id, { force: true }).catch((e) => this.log.warn(`No se pudieron retirar los archivos ocultos de ${id}:`, e.message));
         const cur = (await this.readState(id)) || st;
         await this.writeState(id, { ...cur, playTime: (cur.playTime || 0) + Math.round(duration / 1000) }).catch(() => {});
@@ -702,6 +736,155 @@ class Instances extends EventEmitter {
       this.emitChange(id);
     });
     return task.promise;
+  }
+
+  async installedAssets(id) {
+    const st = await this.readState(id);
+    if (!st || st.workspace) return null;
+    return assetsHash(Object.entries(st.files || {}).filter(([, r]) => r.managedBy !== 'launcher').map(([p, r]) => ({ path: p, sha1: r.sha1 })));
+  }
+
+  // Packs de recursos con el juego abierto (mod ViciontRP): se descarga lo que cambió, lo nuevo se pone ya
+  // y lo que hay que reemplazar o borrar espera a hotApply, cuando el juego ha soltado los packs.
+  async hotPrepare(id, { signal, progress }) {
+    const st = await this.readState(id);
+    if (!st?.installedVersion || st.workspace) return { nothing: true };
+    const bid = baseId(id);
+    const { instance, manifest, downloadToken } = await this.fetchManifest(id);
+    this.remote.set(bid, instance);
+    const gameDir = this.gameDir(id);
+    const kinds = this.kindsOf(st);
+    const prevFiles = st.files || {};
+    let others = manifest.mc !== st.mc || JSON.stringify(manifest.loader || null) !== JSON.stringify(st.loader || null)
+      || this.protectKinds(instance, manifest.loader, isTestId(id)).join(',') !== kinds.join(',');
+    const files = [];
+    const seen = new Set();
+    for (const f of manifest.files) {
+      const rel = normalizeRel(f.path);
+      if (!rel || seen.has(rel.toLowerCase()) || !/^[a-f0-9]{40}$/i.test(f.sha1 || '') || rel.toLowerCase().startsWith('.vsl/')) continue;
+      seen.add(rel.toLowerCase());
+      files.push({ ...f, path: rel });
+    }
+    const changes = [];
+    for (const f of files) {
+      const sha = f.sha1.toLowerCase();
+      const rec = prevFiles[f.path];
+      if (!isPackRel(f.path) || (f.policy || 'always') !== 'always') {
+        if (!rec || rec.sha1 !== sha) others = true;
+        continue;
+      }
+      const loc = locOf(f.path, kinds);
+      const dest = this.fileAt(id, f.path, sha, loc);
+      const now = await statOrNull(dest);
+      if (rec && rec.sha1 === sha && (rec.loc || 'g') === loc && now && now.size === rec.size) continue;
+      const url = this.fileUrl(bid, f, downloadToken);
+      if (!url) { others = true; continue; }
+      changes.push({ rel: f.path, sha, size: f.size, url, loc, dest, existed: Boolean(now), managedBy: f.managedBy });
+    }
+    const removed = [];
+    for (const [rel, rec] of Object.entries(prevFiles)) {
+      if (seen.has(rel.toLowerCase()) || rec.managedBy === 'launcher') continue;
+      if (isPackRel(rel) && (rec.policy || 'always') === 'always') removed.push({ rel, sha: rec.sha1, loc: rec.loc || 'g' });
+      else others = true;
+    }
+    if (!changes.length && !removed.length) {
+      if (!others && manifest.version > st.installedVersion) await this.writeState(id, { ...st, installedVersion: manifest.version, summary: instance });
+      return { nothing: true, version: manifest.version };
+    }
+    const hot = path.join(gameDir, '.vsl', 'hot');
+    await rmrf(hot);
+    await ensureDir(hot);
+    const items = new Map();
+    for (const c of changes) if (!items.has(c.sha)) items.set(c.sha, { url: c.url, dest: path.join(hot, c.sha), sha1: c.sha, size: c.size, label: path.basename(c.rel), force: true });
+    await downloadAll([...items.values()], { concurrency: this.settings.get().concurrency, signal, progress, verify: 'hash' });
+    if (signal?.aborted) throw Object.assign(new Error('Operación cancelada'), { name: 'AbortError' });
+    const staged = await readJson(this.stageFile(id));
+    const added = changes.filter((c) => !c.existed);
+    for (const c of added) await this.hotPut(id, c, hot, staged);
+    if (staged) await writeJsonAtomic(this.stageFile(id), staged);
+    await this.hotRecord(id, added, []);
+    const had = new Set(Object.keys(prevFiles).filter(isPackRel).map(packName));
+    const fresh = [...new Set(added.map((c) => packName(c.rel)))].filter((n) => !had.has(n));
+    let enable = [];
+    if (fresh.length) {
+      const opt = files.find((f) => f.path.toLowerCase() === 'options.txt');
+      const url = opt && this.fileUrl(bid, opt, downloadToken);
+      const text = url ? await getText(url, { timeout: 15000, retries: 1 }).catch(() => '') : '';
+      enable = packsInOptions(text).filter((n) => fresh.includes(n));
+    }
+    this.log.info(`Packs de ${id} preparados con el juego abierto: ${changes.length} archivo(s), ${removed.length} quitado(s)${others ? ' (la versión tiene más cambios)' : ''}`);
+    return { job: { id, version: manifest.version, instance, others, changes: changes.filter((c) => c.existed), removed, hot }, enable };
+  }
+
+  async hotApply(job) {
+    const { id } = job;
+    const staged = await readJson(this.stageFile(id));
+    for (const c of job.changes) await this.hotPut(id, c, job.hot, staged);
+    const gameDir = this.gameDir(id);
+    for (const r of job.removed) {
+      await fsp.rm(this.fileAt(id, r.rel, r.sha, r.loc), { force: true });
+      if (r.loc === 'h') {
+        await this.pruneDirs(this.hiddenDir(id), r.rel);
+        if (staged) {
+          await fsp.rm(safeJoin(gameDir, r.rel), { force: true }).catch(() => {});
+          staged.files = (staged.files || []).filter((e) => e.rel !== r.rel);
+        }
+      }
+      await this.pruneDirs(gameDir, r.rel);
+    }
+    if (staged) await writeJsonAtomic(this.stageFile(id), staged);
+    await this.hotRecord(id, job.changes, job.removed, job.others ? null : job);
+    await rmrf(job.hot).catch(() => {});
+    this.emitChange(id);
+    this.log.info(`Packs de ${id} actualizados con el juego abierto${job.others ? '' : ` (versión ${job.version})`}`);
+    return { onlyPacks: !job.others, version: job.version };
+  }
+
+  async hotPut(id, c, hot, staged) {
+    await ensureDir(path.dirname(c.dest));
+    await fsp.rm(c.dest, { force: true });
+    await fsp.copyFile(path.join(hot, c.sha), c.dest);
+    if (c.loc !== 'h' || !staged) return;
+    const gameDir = this.gameDir(id);
+    const dst = safeJoin(gameDir, c.rel);
+    const parts = c.rel.split('/');
+    for (let i = 1; i < parts.length; i++) {
+      const rel = parts.slice(0, i).join('/');
+      if (await exists(safeJoin(gameDir, rel))) continue;
+      await fsp.mkdir(safeJoin(gameDir, rel)).catch(() => {});
+      staged.dirs = [...new Set([...(staged.dirs || []), rel])];
+      if (i !== 2) continue;
+      staged.hide = [...new Set([...(staged.hide || []), rel])];
+      await setHidden([safeJoin(gameDir, rel)], true);
+    }
+    await fsp.rm(dst, { force: true });
+    const e = { rel: c.rel };
+    try {
+      await fsp.link(c.dest, dst);
+      e.mode = 'link';
+    } catch {
+      await fsp.copyFile(c.dest, dst);
+      e.mode = 'copy';
+    }
+    const d = await fsp.stat(dst, { bigint: true });
+    Object.assign(e, { ino: String(d.ino), size: Number(d.size), mtime: Number(d.mtimeMs) });
+    staged.files = [...(staged.files || []).filter((x) => x.rel !== c.rel), e];
+    if (parts.length === 2) {
+      staged.hide = [...new Set([...(staged.hide || []), c.rel])];
+      await setHidden([dst], true);
+    }
+  }
+
+  async hotRecord(id, changes, removed, done = null) {
+    const st = await this.readState(id);
+    if (!st) return;
+    const files = { ...(st.files || {}) };
+    for (const c of changes) {
+      const s = await statOrNull(c.dest);
+      if (s) files[c.rel] = { sha1: c.sha, size: s.size, mtime: s.mtimeMs, policy: 'always', managedBy: c.managedBy, loc: c.loc };
+    }
+    for (const r of removed) delete files[r.rel];
+    await this.writeState(id, { ...st, files, ...(done ? { installedVersion: done.version, summary: done.instance } : {}) });
   }
 
   async cslItems(gameDir, st) {
@@ -759,4 +942,4 @@ class Instances extends EventEmitter {
   logTail(id) { return this.running.get(id)?.lines.slice(-400) || []; }
 }
 
-module.exports = { Instances, ID_RE, baseId, isTestId, isProtectable, STAGED };
+module.exports = { Instances, ID_RE, baseId, isTestId, isProtectable, STAGED, assetsHash, packsInOptions };
