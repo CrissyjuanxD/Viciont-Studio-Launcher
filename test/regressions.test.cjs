@@ -442,3 +442,198 @@ test('si Windows no deja abrir el instalador, el launcher no se cierra y avisa',
   assert.equal(ok.state.blocked, null);
   assert.equal(ok.installOnQuit(), null);
 });
+
+async function hotFixture(t, { hidden = false } = {}) {
+  const dir = temp(t);
+  const http = require('node:http');
+  const blobs = new Map();
+  const server = http.createServer((req, res) => {
+    const sha = req.url.split('?')[0].split('/').pop();
+    if (!blobs.has(sha)) { res.writeHead(404); res.end(); return; }
+    res.writeHead(200, { 'Content-Length': blobs.get(sha).length });
+    res.end(blobs.get(sha));
+  });
+  await new Promise((r) => server.listen(0, '127.0.0.1', r));
+  t.after(() => { server.closeAllConnections(); server.close(); });
+  const base = `http://127.0.0.1:${server.address().port}`;
+  const dl = require(path.join(root, 'src/main/util/downloader.js'));
+  const { Instances } = load('src/main/services/instances.js', {
+    '../game/install': {}, '../game/launch': {}, '../game/crash': {}, './csl': {},
+    '../util/downloader': { ...dl, downloadAll: dl.downloadAllLocal },
+  });
+  const id = 'evento';
+  let manifest = null;
+  const summary = { id, name: 'Evento', version: 1, protect: hidden ? ['resourcepacks'] : [] };
+  const backend = { base: () => base, configured: () => true, call: async () => ({ instance: { ...summary, version: manifest.version }, manifest, downloadToken: null }) };
+  const accounts = { active: () => ({ uuid: 'a' }), session: async () => 'a', invalidateSession() {} };
+  const instances = new Instances({ configRoot: dir, dirs: { instances: path.join(dir, 'instances'), meta: path.join(dir, 'meta') }, backend, accounts, log,
+    settings: { get: () => ({ concurrency: 4 }) } });
+  const game = instances.gameDir(id);
+  const put = (body) => { const sha = sha1(body); blobs.set(sha, Buffer.from(body)); return sha; };
+  const file = (p, body, extra = {}) => ({ path: p, sha1: put(body), size: Buffer.byteLength(body), source: 'upload', ...extra });
+  async function install(files, version = 1) {
+    const kinds = hidden ? ['resourcepacks'] : [];
+    const record = {};
+    for (const f of files) {
+      const loc = hidden && f.path.startsWith('resourcepacks/') ? 'h' : 'g';
+      const abs = instances.fileAt(id, f.path, f.sha1, loc);
+      fs.mkdirSync(path.dirname(abs), { recursive: true });
+      fs.writeFileSync(abs, blobs.get(f.sha1));
+      record[f.path] = { sha1: f.sha1, size: f.size, mtime: fs.statSync(abs).mtimeMs, policy: f.policy || 'always', loc };
+    }
+    const st = { installedVersion: version, mc: '1.21.1', loader: { type: 'fabric', version: '0.16' }, files: record, summary, protectKinds: kinds, protected: false };
+    fs.mkdirSync(path.join(game, '.vsl'), { recursive: true });
+    await instances.writeState(id, st);
+    return st;
+  }
+  return { instances, id, game, file, install, setManifest: (m) => { manifest = m; }, read: (rel) => fs.readFileSync(path.join(game, ...rel.split('/')), 'utf8') };
+}
+
+test('con el juego abierto, el launcher cambia solo los packs que cambiaron y quita el botón de actualizar si no hubo nada más', async (t) => {
+  const f = await hotFixture(t);
+  const a1 = f.file('resourcepacks/Pack/a.png', 'a1');
+  const old = f.file('resourcepacks/Old.zip', 'viejo');
+  const mod = f.file('mods/x.jar', 'jar');
+  const options = f.file('options.txt', 'resourcePacks:["vanilla","file/New.zip"]\n', { policy: 'merge' });
+  await f.install([a1, old, mod, options]);
+  const a2 = f.file('resourcepacks/Pack/a.png', 'a2');
+  const b = f.file('resourcepacks/Pack/b.png', 'b');
+  const fresh = f.file('resourcepacks/New.zip', 'nuevo');
+  const files = [a2, b, fresh, mod, options];
+  f.setManifest({ version: 2, mc: '1.21.1', loader: { type: 'fabric', version: '0.16' }, files });
+  const p = await f.instances.hotPrepare(f.id, { progress: null });
+  assert.deepEqual(p.enable, ['New.zip']);
+  assert.equal(f.read('resourcepacks/New.zip'), 'nuevo');
+  assert.equal(f.read('resourcepacks/Pack/b.png'), 'b');
+  assert.equal(f.read('resourcepacks/Pack/a.png'), 'a1');
+  assert.equal(f.read('resourcepacks/Old.zip'), 'viejo');
+  assert.equal((await f.instances.readState(f.id)).installedVersion, 1);
+  const r = await f.instances.hotApply(p.job);
+  assert.deepEqual(r, { onlyPacks: true, version: 2 });
+  assert.equal(f.read('resourcepacks/Pack/a.png'), 'a2');
+  assert.ok(!fs.existsSync(path.join(f.game, 'resourcepacks', 'Old.zip')));
+  assert.ok(!fs.existsSync(path.join(f.game, '.vsl', 'hot')));
+  const st = await f.instances.readState(f.id);
+  assert.equal(st.installedVersion, 2);
+  assert.deepEqual(Object.keys(st.files).sort(), files.map((x) => x.path).sort());
+  const server = files.filter((x) => x.path.toLowerCase().startsWith('resourcepacks/')).map((x) => `${x.path}\t${x.sha1}`).sort().join('\n');
+  assert.equal(await f.instances.installedAssets(f.id), sha1(server));
+  assert.deepEqual(await f.instances.hotPrepare(f.id, { progress: null }), { nothing: true, version: 2 });
+});
+
+test('si la versión también cambia mods, los packs se actualizan igual pero el botón de actualizar sigue', async (t) => {
+  const f = await hotFixture(t);
+  const a1 = f.file('resourcepacks/Pack/a.png', 'a1');
+  await f.install([a1, f.file('mods/x.jar', 'jar')]);
+  const a2 = f.file('resourcepacks/Pack/a.png', 'a2');
+  f.setManifest({ version: 2, mc: '1.21.1', loader: { type: 'fabric', version: '0.16' }, files: [a2, f.file('mods/x.jar', 'jar2')] });
+  const p = await f.instances.hotPrepare(f.id, { progress: null });
+  assert.deepEqual(p.enable, []);
+  assert.deepEqual(await f.instances.hotApply(p.job), { onlyPacks: false, version: 2 });
+  assert.equal(f.read('resourcepacks/Pack/a.png'), 'a2');
+  assert.equal(f.read('mods/x.jar'), 'jar');
+  const st = await f.instances.readState(f.id);
+  assert.equal(st.installedVersion, 1);
+  assert.equal(st.files['resourcepacks/Pack/a.png'].sha1, a2.sha1);
+});
+
+test('con los resourcepacks ocultos, el pack nuevo llega a la carpeta del juego y al cerrar se retira bien', async (t) => {
+  const f = await hotFixture(t, { hidden: true });
+  const a1 = f.file('resourcepacks/Pack/a.png', 'a1');
+  const z1 = f.file('resourcepacks/Z.zip', 'z1');
+  const st = await f.install([a1, z1]);
+  await f.instances.stage(f.id, st);
+  assert.equal(f.read('resourcepacks/Z.zip'), 'z1');
+  const a2 = f.file('resourcepacks/Pack/a.png', 'a2');
+  const z2 = f.file('resourcepacks/Z.zip', 'z2');
+  const n = f.file('resourcepacks/Nuevo/n.png', 'n');
+  f.setManifest({ version: 2, mc: '1.21.1', loader: { type: 'fabric', version: '0.16' }, files: [a2, z2, n] });
+  const p = await f.instances.hotPrepare(f.id, { progress: null });
+  assert.equal(f.read('resourcepacks/Nuevo/n.png'), 'n');
+  await f.instances.hotApply(p.job);
+  assert.equal(f.read('resourcepacks/Z.zip'), 'z2');
+  assert.equal(f.read('resourcepacks/Pack/a.png'), 'a2');
+  const hidden = (rel) => fs.readFileSync(f.instances.fileAt(f.id, rel, null, 'h'), 'utf8');
+  assert.equal(hidden('resourcepacks/Z.zip'), 'z2');
+  assert.equal(hidden('resourcepacks/Nuevo/n.png'), 'n');
+  f.instances.running.set(f.id, {});
+  await f.instances.unstage(f.id, { force: true });
+  assert.ok(!fs.existsSync(path.join(f.game, 'resourcepacks', 'Z.zip')));
+  assert.ok(!fs.existsSync(path.join(f.game, 'resourcepacks', 'Nuevo')));
+  assert.ok(!fs.existsSync(path.join(f.game, 'resourcepacks', 'Pack')));
+  assert.equal(hidden('resourcepacks/Z.zip'), 'z2');
+  assert.equal(hidden('resourcepacks/Pack/a.png'), 'a2');
+  assert.equal((await f.instances.readState(f.id)).installedVersion, 2);
+});
+
+test('el canal del mod solo responde a su partida y pasa por preparar, aplicar y el pase', async (t) => {
+  const calls = [];
+  let job = 0;
+  const instances = {
+    readState: async () => ({ installedVersion: 3 }),
+    installedAssets: async () => 'c'.repeat(40),
+    hotPrepare: async (id, { progress }) => { progress.addTotal(10); progress.addDone(10); return { job: { n: ++job }, enable: ['New.zip'] }; },
+    hotApply: async (j) => { calls.push(['apply', j.n]); return { onlyPacks: true, version: 4 }; },
+  };
+  const backend = { call: async (p, o) => { calls.push([p, o.json.instance]); return { ticket: 'pase', expiresAt: Date.now() + 86400000 }; } };
+  const { Bridge } = load('src/main/services/bridge.js', { './instances': { baseId: (id) => id.replace(/~test$/, '') } });
+  const bridge = new Bridge({ instances, accounts: { session: async () => 'sesion' }, backend, log, version: '1.5.2' });
+  const env = await bridge.open('evento~test');
+  t.after(() => bridge.server.close());
+  const base = env.VICIONT_BRIDGE;
+  assert.match(base, /^http:\/\/127\.0\.0\.1:\d+$/);
+  assert.match(env.VICIONT_BRIDGE_TOKEN, /^[a-f0-9]{48}$/);
+  const req = (method, p, { token = env.VICIONT_BRIDGE_TOKEN, headers = {}, body } = {}) => fetch(`${base}${p}`, {
+    method, headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json', ...headers }, body: body ? JSON.stringify(body) : undefined,
+  }).then(async (r) => ({ status: r.status, ...(await r.json()) }));
+  assert.equal((await req('GET', '/hello', { token: 'f'.repeat(48) })).status, 401);
+  assert.equal((await req('GET', '/hello', { headers: { Origin: 'https://example.com' } })).status, 403);
+  const hello = await req('GET', '/hello');
+  assert.deepEqual([hello.instance, hello.assets, hello.version, hello.launcher], ['evento', 'c'.repeat(40), 3, '1.5.2']);
+  assert.equal((await req('POST', '/ticket')).ticket, 'pase');
+  assert.equal((await req('POST', '/ticket')).ticket, 'pase');
+  assert.equal((await req('POST', '/assets/apply')).status, 409);
+  await req('POST', '/assets/prepare', { body: { assets: 'd'.repeat(40) } });
+  let s;
+  for (let i = 0; i < 50; i++) {
+    s = await req('GET', '/assets/status');
+    if (s.state === 'ready') break;
+    await new Promise((r) => setTimeout(r, 20));
+  }
+  assert.deepEqual([s.state, s.done, s.total, s.replace, s.enable], ['ready', 10, 10, true, ['New.zip']]);
+  const applied = new Promise((r) => bridge.once('applied', r));
+  assert.equal((await req('POST', '/assets/apply')).onlyPacks, true);
+  assert.deepEqual(await applied, { id: 'evento~test', onlyPacks: true, version: 4 });
+  assert.deepEqual(calls, [['/v1/play/ticket', 'evento'], ['apply', 1]]);
+  const old = env.VICIONT_BRIDGE_TOKEN;
+  bridge.close('evento~test');
+  assert.equal((await req('GET', '/hello', { token: old })).status, 401);
+});
+
+test('el launcher elige el jar del mod ViciontRP de cada versión de Minecraft', async () => {
+  const index = {
+    version: '1.1.0',
+    files: [
+      { file: 'ViciontRP-mod-1.21.1-1.0.0.jar', url: 'https://github.com/x/a.jar', sha1: 'a'.repeat(40), size: 1, min: '1.21', max: '1.21.1' },
+      { file: 'ViciontRP-mod-1.21.4-1.0.0.jar', url: 'https://github.com/x/b.jar', sha1: 'b'.repeat(40), size: 1, min: '1.21.2', max: '1.21.4' },
+      { file: 'ViciontRP-mod-26.3-1.0.0.jar', url: 'https://github.com/x/c.jar', sha1: 'c'.repeat(40), size: 1, min: '26.3', max: '26.3' },
+      { file: '../malo.jar', url: 'https://github.com/x/d.jar', sha1: 'd'.repeat(40), size: 1, min: '1.0', max: '99' },
+    ],
+  };
+  const vrp = load('src/main/services/vrpmod.js', { '../util/net': { getJson: async () => index, cached: (k, ttl, fn) => fn() } });
+  assert.ok(vrp.cmpVersion('1.21', '1.21.1') < 0);
+  assert.ok(vrp.cmpVersion('1.21.10', '1.21.9') > 0);
+  assert.ok(vrp.cmpVersion('26.1', '1.21.11') > 0);
+  assert.equal((await vrp.modFile('1.21', 'fabric')).file, 'ViciontRP-mod-1.21.1-1.0.0.jar');
+  assert.equal((await vrp.modFile('1.21.3', 'quilt')).file, 'ViciontRP-mod-1.21.4-1.0.0.jar');
+  assert.equal(await vrp.modFile('1.21.5', 'fabric'), null);
+  assert.equal(await vrp.modFile('1.21.1', 'forge'), null);
+  assert.equal(await vrp.modFile('1.20.1', 'fabric'), null);
+  assert.deepEqual(await vrp.support('1.20.1', 'fabric'), { ok: false, reason: 'old', min: '1.21', max: '26.3' });
+  assert.deepEqual(await vrp.support('26.4', 'fabric'), { ok: false, reason: 'new', min: '1.21', max: '26.3' });
+  assert.deepEqual(await vrp.support('1.21.1', 'neoforge'), { ok: false, reason: 'loader', min: '1.21', max: '26.3' });
+  assert.equal((await vrp.support('26.3', 'fabric')).ok, true);
+  assert.equal(vrp.usesPlugin({ plugin: true }), true);
+  assert.equal(vrp.usesPlugin({ serverPacks: ['resourcepacks/A'] }), true);
+  assert.equal(vrp.usesPlugin({ serverPacks: [] }), false);
+});

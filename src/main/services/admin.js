@@ -33,6 +33,8 @@ const DISCORD_API = 11;
 const ACCESS_API = 12;
 const PLAYERS_API = 13;
 const RP_API = 15;
+const PACKS_API = 16;
+const MAX_SERVER_PACKS = 8;
 const ACCESS_KEYS = ['allow', 'deny', 'discord'];
 const ACCESS_RULES = { allow: ['add', 'remove'], discord: ['add', 'remove'], deny: ['remove', 'add'] };
 const BATCH_FILE_MAX = 4 * 1024 * 1024;
@@ -70,6 +72,7 @@ const NO_CREATE = 'No tienes el permiso «Crear instancias». Pídeselo a quien 
 const NO_VIEW = 'No tienes el permiso «Ver jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
 const NO_ADD = 'No tienes el permiso «Añadir jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
 const NO_REMOVE = 'No tienes el permiso «Retirar o eliminar jugadores». Pídeselo a quien administra el panel web de Viciont Studios.';
+const MANY_PACKS = 'Para usar varios packs del servidor, primero actualiza el servidor (API 16): pega el código nuevo en Cloudflare y pulsa Deploy.';
 const accessKey = (k, x) => (k === 'discord' ? String(x) : String(x).toLowerCase());
 
 function err(message, code) { return Object.assign(new Error(message), { code }); }
@@ -79,6 +82,7 @@ function cleanMeta(m = {}, id) {
   const lt = m.loader && LOADERS[m.loader.type] ? m.loader.type : 'vanilla';
   const loader = { type: lt, version: lt === 'vanilla' ? '' : str(m.loader?.version, 60) };
   const allow = [...new Set((Array.isArray(m.allow) ? m.allow : []).map((x) => str(x, 40)).filter((x) => NICK_RE.test(x) || UUID_RE.test(x)))].slice(0, 500);
+  const serverPacks = serverPacksOf(m);
   return {
     id,
     name: str(m.name, 60) || id,
@@ -98,9 +102,20 @@ function cleanMeta(m = {}, id) {
     protect: [...new Set((Array.isArray(m.protect) ? m.protect : []).filter((x) => PROTECTABLE.includes(x)))].sort(),
     discord: [...new Set((Array.isArray(m.discord) ? m.discord : []).map((x) => String(x)).filter((x) => /^\d{17,20}$/.test(x)))].slice(0, 5),
     deny: [...new Set((Array.isArray(m.deny) ? m.deny : []).map((x) => str(x, 40)).filter((x) => NICK_RE.test(x)))].slice(0, 500),
-    serverPack: PACK_RE.test(normalizeRel(m.serverPack || '') || '') ? normalizeRel(m.serverPack) : '',
+    serverPack: serverPacks[0] || '',
+    serverPacks,
   };
 }
+
+function serverPacksOf(m) {
+  const out = [];
+  for (const p of Array.isArray(m?.serverPacks) ? m.serverPacks : [m?.serverPack]) {
+    const c = normalizeRel(p || '') || '';
+    if (PACK_RE.test(c) && !out.some((x) => x.toLowerCase() === c.toLowerCase())) out.push(c);
+  }
+  return out.slice(0, MAX_SERVER_PACKS);
+}
+const rpsOf = (inst) => (Array.isArray(inst?.rps) ? inst.rps : inst?.rp ? [inst.rp] : []);
 
 const mediaFrom = (inst) => ({
   icon: inst?.media?.icon ? { key: inst.media.icon } : null,
@@ -446,7 +461,7 @@ class Admin extends EventEmitter {
       name: 'Nombre', summary: 'Resumen', description: 'Descripción', mc: 'Versión de Minecraft', loader: 'Cargador',
       visibility: 'Visibilidad', allow: 'Nicks con permiso', memory: 'RAM recomendada', server: 'Servidor', tags: 'Etiquetas',
       order: 'Orden en la lista', accent: 'Color', changelog: 'Novedades', showFolder: 'Botón «Carpeta»', protect: 'Carpetas ocultas',
-      discord: 'Acceso con Discord', deny: 'Nicks retirados',
+      discord: 'Acceso con Discord', deny: 'Nicks retirados', serverPacks: 'Packs del servidor',
     };
     const short = (v) => { const s = String(v ?? '').replace(/\s+/g, ' ').trim(); return s.length > 160 ? `${s.slice(0, 160)}…` : (s || '—'); };
     const fmt = (k, v) => {
@@ -459,6 +474,7 @@ class Admin extends EventEmitter {
       if (k === 'protect') return v.length ? v.join(', ') : 'ninguna';
       if (k === 'discord') return v.length ? `${v.length} canal(es)` : 'desactivado';
       if (k === 'deny') return `${v.length} nick(s)`;
+      if (k === 'serverPacks') return v.length ? v.map((p) => p.split('/').pop()).join(', ') : 'ninguno';
       return short(v);
     };
     const out = [];
@@ -497,7 +513,9 @@ class Admin extends EventEmitter {
       metaChanges: this.metaChanges(d, inst),
       apiVersion: await this.serverVersion().catch(() => this.apiVer || 0),
       accessHidden: Boolean(inst?.accessHidden),
-      serverPackInfo: inst?.rp || null,
+      serverPackInfo: rpsOf(inst)[0] || null,
+      serverPacksInfo: rpsOf(inst),
+      plugin: Boolean(inst?.plugin),
       legacy: legacy || Array.isArray(d.files),
       ...(ws ? { workspace: await (ws === true ? this.wsStatus(id) : ws).catch((e) => ({ synced: false, error: e.message })) } : {}),
     };
@@ -1591,20 +1609,25 @@ class Admin extends EventEmitter {
         }
       }
 
-      const packApi = (await this.serverVersion()) >= RP_API;
-      let pack = { rp: null, upload: null };
-      if (packApi && meta.serverPack) {
-        progress.setPhase('pack', 'Preparando el pack del servidor…');
-        pack = await this.buildPack(meta.serverPack, entries.map((e) => ({ ...e, abs: scan.files.get(e.path)?.abs || null })), inst, pubDir);
+      const api = await this.serverVersion();
+      const packApi = api >= RP_API;
+      if (meta.serverPacks.length > 1 && api < PACKS_API) throw err(MANY_PACKS, 'EOLDSERVER');
+      const packs = [];
+      if (packApi && meta.serverPacks.length) {
+        progress.setPhase('pack', meta.serverPacks.length > 1 ? 'Preparando los packs del servidor…' : 'Preparando el pack del servidor…');
+        const list = entries.map((e) => ({ ...e, abs: scan.files.get(e.path)?.abs || null }));
+        for (const p of meta.serverPacks) packs.push(await this.buildPack(p, list, inst, pubDir));
       }
+      const rps = packs.map((x) => x.rp);
+      const packUploads = packs.map((x) => x.upload).filter(Boolean);
       const uploads = entries.filter((e) => e.source === 'upload');
-      const sha1s = [...new Set([...uploads.map((e) => e.sha1.toLowerCase()), ...(pack.upload ? [pack.upload.sha] : [])])];
+      const sha1s = [...new Set([...uploads.map((e) => e.sha1.toLowerCase()), ...packUploads.map((u) => u.sha)])];
       const { missing = [] } = sha1s.length
         ? await this.call(`/v1/admin/instances/${id}/blobs/missing`, { method: 'POST', json: { sha1s }, timeout: 60000 })
         : {};
       const bySha = new Map();
       for (const e of uploads) if (e.local && !bySha.has(e.sha1.toLowerCase())) bySha.set(e.sha1.toLowerCase(), e);
-      if (pack.upload) bySha.set(pack.upload.sha, { local: pack.upload.file, path: pack.upload.name, sha1: pack.upload.sha });
+      for (const u of packUploads) bySha.set(u.sha, { local: u.file, path: u.name, sha1: u.sha });
       if (missing.length) progress.setPhase('check', `Comprobando ${missing.length} archivo(s)…`);
       const todo = [];
       await pool(missing, 8, async (sha) => {
@@ -1623,7 +1646,7 @@ class Admin extends EventEmitter {
       const files = entries.map(({ local, ...e }) => e);
       const r = await this.call(`/v1/admin/instances/${id}/publish`, {
         method: 'POST', timeout: 60000,
-        json: { baseVersion: ws.baseVersion || 0, meta, media: this.mediaNames(d), files, ...(packApi ? { rp: pack.rp } : {}) },
+        json: { baseVersion: ws.baseVersion || 0, meta, media: this.mediaNames(d), files, ...(packApi ? { rp: rps[0] || null, rps } : {}) },
       }).catch(async (e) => {
         if (e.code === 'sync_revoked') {
           if (ws.baseVersion) await this.dropWs(id).catch(() => {});
@@ -1662,7 +1685,8 @@ class Admin extends EventEmitter {
     const files = packFiles(packPath, list);
     if (!files.length) throw err(`La carpeta del pack del servidor «${label}» está vacía o ya no existe. Elige otro en Contenido.`, 'ENOPACK');
     const id = packId(packPath, list);
-    if (inst?.rp?.path === packPath && inst.rp.id === id && inst.rp.sha1) return { rp: inst.rp, upload: null };
+    const had = rpsOf(inst).find((r) => r.path === packPath);
+    if (had && had.id === id && had.sha1) return { rp: had, upload: null };
     const missing = files.find((f) => !f.abs);
     if (missing) throw err(`Falta «${missing.path}» en tu carpeta: no se puede preparar el pack del servidor.`, 'ENOPACK');
     await ensureDir(tmpDir);
@@ -1672,30 +1696,41 @@ class Admin extends EventEmitter {
     return { rp: { path: packPath, id, sha1: sha, size }, upload: { sha, file, size, name: `${packPath}.zip` } };
   }
 
-  async metaPack(id, meta, inst) {
-    if (!meta.serverPack || (await this.serverVersion()) < RP_API) return undefined;
+  async metaPacks(id, meta, inst) {
+    if (!meta.serverPacks.length || (await this.serverVersion()) < RP_API) return undefined;
+    if (meta.serverPacks.length > 1 && (await this.serverVersion()) < PACKS_API) throw err(MANY_PACKS, 'EOLDSERVER');
     const st = await this.instances.readState(id);
     const ws = st?.workspace;
     if (!ws?.baseVersion) return undefined;
     const dir = this.instances.gameDir(id);
     const list = Object.entries(ws.base || {}).map(([p, b]) => ({ ...b, path: p, abs: ws.hash?.[p]?.sha1 === b.sha1 ? path.join(dir, ...p.split('/')) : null }));
-    const pid = packId(meta.serverPack, list);
-    if (!pid) return undefined;
-    if (inst?.rp?.path === meta.serverPack && inst.rp.id === pid) return inst.rp;
-    if (!isZipPack(meta.serverPack) && packFiles(meta.serverPack, list).some((f) => !f.abs)) return undefined;
+    const old = rpsOf(inst);
+    const out = [];
+    const todo = [];
+    for (const p of meta.serverPacks) {
+      const pid = packId(p, list);
+      const had = old.find((r) => r.path === p);
+      if (had && (!pid || had.id === pid)) out.push(had);
+      else if (pid && (isZipPack(p) || !packFiles(p, list).some((f) => !f.abs))) { out.push(null); todo.push(p); }
+      else if (had) out.push(had);
+    }
+    if (!todo.length) return out.length === old.length && out.every((r, i) => r === old[i]) ? undefined : out;
     const key = `meta:${id}`;
     const tmp = path.join(dir, '.vsl', 'pub-pack');
-    const progress = this.startProgress(key, 'Preparando el pack del servidor…');
+    const progress = this.startProgress(key, todo.length > 1 ? 'Preparando los packs del servidor…' : 'Preparando el pack del servidor…');
     try {
-      const pack = await this.buildPack(meta.serverPack, list, inst, tmp);
-      if (pack.upload) {
-        const { missing = [] } = await this.call(`/v1/admin/instances/${id}/blobs/missing`, { method: 'POST', json: { sha1s: [pack.upload.sha] }, timeout: 60000 });
-        if (missing.length) {
-          progress.addTotal(pack.upload.size, 1);
-          await this.uploadAll(id, [pack.upload], progress);
+      for (const p of todo) {
+        const pack = await this.buildPack(p, list, inst, tmp);
+        if (pack.upload) {
+          const { missing = [] } = await this.call(`/v1/admin/instances/${id}/blobs/missing`, { method: 'POST', json: { sha1s: [pack.upload.sha] }, timeout: 60000 });
+          if (missing.length) {
+            progress.addTotal(pack.upload.size, 1);
+            await this.uploadAll(id, [pack.upload], progress);
+          }
         }
+        out[out.indexOf(null)] = pack.rp;
       }
-      return pack.rp;
+      return out;
     } finally {
       await rmrf(tmp).catch(() => {});
       this.stopProgress(key);
@@ -1897,8 +1932,8 @@ class Admin extends EventEmitter {
       const { d } = await this.metaDraft(id);
       d.meta = cleanMeta({ ...d.meta, ...meta }, id);
       await this.uploadMedia(id, d, null);
-      const rp = await this.metaPack(id, d.meta, this.pub.get(id));
-      const r = await this.call(`/v1/admin/instances/${id}/meta`, { method: 'PUT', json: { meta: d.meta, media: this.mediaNames(d), ...(rp !== undefined ? { rp } : {}) } });
+      const rps = await this.metaPacks(id, d.meta, this.pub.get(id));
+      const r = await this.call(`/v1/admin/instances/${id}/meta`, { method: 'PUT', json: { meta: d.meta, media: this.mediaNames(d), ...(rps !== undefined ? { rp: rps[0] || null, rps } : {}) } });
       this.pub.set(id, r.instance);
       await this.persistMeta({ id, meta: d.meta, media: mediaFrom(r.instance) }, r.instance);
       return r.instance;

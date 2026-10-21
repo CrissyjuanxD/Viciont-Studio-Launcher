@@ -28,6 +28,8 @@ const UPD_RE = /^(mods|resourcepacks|shaderpacks|datapacks)\/.+\.(jar|zip)$/i;
 const byPath = new Intl.Collator();
 const CHANGES_MAX = 400;
 const RP_API = 15;
+const PACKS_API = 16;
+const MAX_SERVER_PACKS = 8;
 const RP_RELEASES = 'https://github.com/CrissyjuanxD/ViciontRP/releases/latest';
 const canDiff = (f) => !BIN_RE.test(f.path) && !f.policyOnly && (f.size || 0) <= DIFF_MAX && (f.oldSize || 0) <= DIFF_MAX;
 
@@ -872,35 +874,71 @@ function renderEditor(root, id, app, route = {}) {
     lockIn(el);
     hydrateIcons(el);
   };
+  let rpModInfo = null;
+  let rpModFor = '';
+  const paintRpMod = (box) => {
+    const el = box?.querySelector('#rp-mod');
+    if (!el) return;
+    const mc = d.meta.mc || '';
+    const loader = d.meta.loader?.type || 'vanilla';
+    const key = `${mc}|${loader}`;
+    if (rpModFor !== key) {
+      rpModFor = key;
+      rpModInfo = null;
+      call('admin:rpMod', mc, loader).then((r) => { if (rpModFor === key) { rpModInfo = r; paintRpMod(root.querySelector('#rp-box')); } }).catch(() => {});
+    }
+    const r = rpModInfo;
+    if (!r) { el.innerHTML = ''; return; }
+    const later = 'Quien juega desde el launcher verá los packs nuevos al actualizar la instancia.';
+    el.className = `rp-state${r.ok ? '' : ' is-pending'}`;
+    el.innerHTML = r.ok
+      ? `${icon('check')}<span>Quien juega desde el launcher recibe los packs nuevos <b>sin salir del servidor</b>: el launcher le pone el mod ViciontRP solo.</span>`
+      : `${icon('alert')}<span>La actualización dentro del juego (mod ViciontRP) <b>no es compatible</b> con ${r.reason === 'loader' ? `${esc(LOADER_NAMES[loader] || loader)}: solo funciona con Fabric o Quilt` : `Minecraft ${esc(mc || '?')}: funciona de la ${esc(r.min)} a la ${esc(r.max)}`}. ${later}</span>`;
+    hydrateIcons(el);
+  };
   const drawRp = (body) => {
     const box = body.querySelector('#rp-box');
     if (!box) return;
     const api = (d.apiVersion || 0) >= RP_API;
-    const chosen = d.meta.serverPack || '';
+    const many = (d.apiVersion || 0) >= PACKS_API;
+    const chosen = Array.isArray(d.meta.serverPacks) ? d.meta.serverPacks : d.meta.serverPack ? [d.meta.serverPack] : [];
     const choices = packChoices();
-    if (chosen && !choices.some((c) => c.path === chosen)) choices.unshift({ path: chosen, name: chosen.split('/').pop(), missing: true });
-    const pub = d.serverPackInfo;
-    const folder = Boolean(chosen) && !/\.zip$/i.test(chosen);
+    for (const p of [...chosen].reverse()) if (!choices.some((c) => c.path === p)) choices.unshift({ path: p, name: p.split('/').pop(), missing: true });
+    const pubs = Array.isArray(d.serverPacksInfo) ? d.serverPacksInfo : d.serverPackInfo ? [d.serverPackInfo] : [];
+    const full = chosen.length >= (many ? MAX_SERVER_PACKS : 1);
+    const label = (p) => esc(p.split('/').pop());
+    const folder = (p) => !/\.zip$/i.test(p);
+    const pending = chosen.filter((p) => !pubs.some((x) => x.path === p));
     const state = !api ? `<p class="inst__warn">${icon('alert')}Para usarlo, primero actualiza el servidor: pega el código nuevo en Cloudflare y pulsa Deploy.</p>`
-      : !chosen ? '<p class="field__hint">Sin pack: el plugin no le pedirá nada a nadie.</p>'
-        : pub?.path === chosen ? `<p class="rp-state">${icon('check')}<span>En el servidor: <b>${esc(chosen.split('/').pop())}</b> · ${bytes(pub.size || 0)}${folder ? ' (.zip creado de la carpeta)' : ''}. Cuando publiques cambios en el pack, el plugin recibe el nuevo solo.</span></p>`
-          : `<p class="rp-state is-pending">${icon('clock')}<span>Se enviará al servidor al publicar la versión ${(d.baseVersion || 0) + 1}${d.baseVersion ? ' o con «Guardar solo textos y permisos»' : ''}${folder ? ', creando su .zip' : ''}.</span></p>`;
+      : !chosen.length ? '<p class="field__hint">Sin packs: el plugin no le pedirá nada a quien entre sin el launcher.</p>'
+        : `${chosen.filter((p) => !pending.includes(p)).map((p) => {
+          const x = pubs.find((y) => y.path === p);
+          return `<p class="rp-state">${icon('check')}<span>En el servidor: <b>${label(p)}</b> · ${bytes(x.size || 0)}${folder(p) ? ' (.zip creado de la carpeta)' : ''}.</span></p>`;
+        }).join('')}${pending.length ? `<p class="rp-state is-pending">${icon('clock')}<span>${pending.map(label).map((n) => `<b>${n}</b>`).join(', ')}: se ${pending.length > 1 ? 'enviarán' : 'enviará'} al servidor al publicar la versión ${(d.baseVersion || 0) + 1}${d.baseVersion ? ' o con «Guardar solo textos y permisos»' : ''}${pending.some(folder) ? ', creando su .zip' : ''}.</span></p>` : ''}`;
     box.innerHTML = `
       <div class="panel__title"><span>Pack del servidor de Minecraft</span><span class="tag">ViciontRP</span></div>
-      <p class="field__hint">Si la instancia es para entrar a un servidor, el plugin <a href="${RP_RELEASES}" target="_blank" rel="noopener noreferrer">ViciontRP</a> le da este pack a quien entre sin el launcher. A quien juega desde el launcher con la instancia al día no le pide nada. Si el pack es una carpeta, al publicar se crea su .zip.</p>
-      <label class="field" style="margin-top:12px"><span class="field__label">Pack</span>
-        <select class="input select" id="rp-pick" ${api ? '' : 'disabled'}>
-          <option value="">Ninguno</option>
-          ${choices.map((c) => `<option value="${esc(c.path)}" ${c.path === chosen ? 'selected' : ''}>${esc(c.name)}${c.missing ? ' (ya no está en tu carpeta)' : c.folder ? ` · carpeta, ${c.files} archivos, ${bytes(c.size)}` : ` · ${bytes(c.size)}`}</option>`).join('')}
-        </select></label>
+      <p class="field__hint">Si la instancia es para entrar a un servidor, el plugin <a href="${RP_RELEASES}" target="_blank" rel="noopener noreferrer">ViciontRP</a> le da estos packs a quien entre sin el launcher. A quien juega desde el launcher con la instancia al día no le pide nada, y cuando cambias los packs se los actualiza sin salir del servidor. Si un pack es una carpeta, al publicar se crea su .zip.</p>
+      <div class="rp-picks">${choices.length ? choices.map((c) => {
+        const on = chosen.includes(c.path);
+        const off = !api || (!on && full);
+        return `<label class="check rp-pick${off ? ' is-disabled' : ''}"><input type="checkbox" data-rppack="${esc(c.path)}" ${on ? 'checked' : ''} ${off ? 'disabled' : ''}>
+          <span><b>${esc(c.name)}</b> <small>${c.missing ? 'ya no está en tu carpeta' : c.folder ? `carpeta, ${c.files} archivos, ${bytes(c.size)}` : bytes(c.size)}</small></span></label>`;
+      }).join('') : '<span class="field__hint">No hay packs en «resourcepacks» de tu carpeta.</span>'}</div>
+      ${api && !many && choices.length > 1 ? '<p class="field__hint">Para elegir varios packs, actualiza el servidor (API 16).</p>' : ''}
       ${state}
+      ${api && chosen.length ? '<p class="rp-state" id="rp-mod"></p>' : ''}
       ${api && d.baseVersion ? '<div class="rp-key" id="rp-key"></div>' : ''}`;
-    box.querySelector('#rp-pick').addEventListener('change', (e) => {
-      d.meta.serverPack = e.target.value;
-      saveMeta({ serverPack: e.target.value });
+    box.querySelectorAll('[data-rppack]').forEach((el) => el.addEventListener('change', () => {
+      const p = el.dataset.rppack;
+      const next = el.checked ? [...chosen.filter((x) => x !== p), p] : chosen.filter((x) => x !== p);
+      const order = choices.map((c) => c.path).filter((x) => next.includes(x));
+      d.meta.serverPacks = order;
+      d.meta.serverPack = order[0] || '';
+      saveMeta({ serverPacks: order, serverPack: order[0] || '' });
       drawRp(body);
       paintBar();
-    });
+    }));
+    paintRpMod(box);
     paintRpKey(box);
     lockIn(box);
     hydrateIcons(box);
