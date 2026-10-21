@@ -572,7 +572,7 @@ test('el canal del mod solo responde a su partida y pasa por preparar, aplicar y
   const instances = {
     readState: async () => ({ installedVersion: 3 }),
     installedAssets: async () => 'c'.repeat(40),
-    hotPrepare: async (id, { progress }) => { progress.addTotal(10); progress.addDone(10); return { job: { n: ++job }, enable: ['New.zip'] }; },
+    hotPrepare: async (id, { progress }) => { progress.addTotal(10, 3); progress.addDone(10); progress.fileDone(3); return { job: { n: ++job }, enable: ['New.zip'] }; },
     hotApply: async (j) => { calls.push(['apply', j.n]); return { onlyPacks: true, version: 4 }; },
   };
   const backend = { call: async (p, o) => { calls.push([p, o.json.instance]); return { ticket: 'pase', expiresAt: Date.now() + 86400000 }; } };
@@ -600,7 +600,7 @@ test('el canal del mod solo responde a su partida y pasa por preparar, aplicar y
     if (s.state === 'ready') break;
     await new Promise((r) => setTimeout(r, 20));
   }
-  assert.deepEqual([s.state, s.done, s.total, s.replace, s.enable], ['ready', 10, 10, true, ['New.zip']]);
+  assert.deepEqual([s.state, s.done, s.total, s.files, s.filesDone, s.replace, s.enable], ['ready', 10, 10, 3, 3, true, ['New.zip']]);
   const applied = new Promise((r) => bridge.once('applied', r));
   assert.equal((await req('POST', '/assets/apply')).onlyPacks, true);
   assert.deepEqual(await applied, { id: 'evento~test', onlyPacks: true, version: 4 });

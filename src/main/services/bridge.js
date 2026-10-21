@@ -82,7 +82,7 @@ class Bridge extends EventEmitter {
     }
     if (route === 'GET /assets/status') {
       return send(res, 200, {
-        ok: true, state: s.state, done: s.progress?.done || 0, total: s.progress?.total || 0, error: s.error || null,
+        ok: true, state: s.state, done: s.progress?.done || 0, total: s.progress?.total || 0, files: s.progress?.filesTotal || 0, filesDone: s.progress?.filesDone || 0, error: s.error || null,
         replace: s.state === 'ready', enable: s.enable || [],
       });
     }
