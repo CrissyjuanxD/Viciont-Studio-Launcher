@@ -224,10 +224,14 @@ function paintUpdateButton() {
   b.classList.toggle('is-ready', ready);
   b.style.setProperty('--p', `${pct}%`);
   if (u.status === 'available') b.dataset.tipSub = `La versión ${u.version} está en la web de Viciont Studios: pulsa para descargarla.`;
+  else if (ready && u.blocked?.version === u.version) b.dataset.tipSub = `No se pudo instalar la versión ${u.version}: pulsa para ver qué hacer.`;
   else if (ready) b.dataset.tipSub = `La versión ${u.version} ya está descargada: pulsa para actualizar.`;
   else b.dataset.tipSub = `Descargando la versión ${u.version || 'nueva'}… ${pct}%`;
   tooltips?.refresh();
 }
+
+const INSTALL_TEXT = 'El launcher se cerrará un momento y se volverá a abrir solo, ya actualizado.';
+const ELEVATE_TEXT = 'Windows te pedirá permiso para instalar la actualización: pulsa «Sí». Si no ves esa ventana, búscala en la barra de tareas.';
 
 function updatingScreen(version) {
   const el = document.createElement('div');
@@ -238,20 +242,25 @@ function updatingScreen(version) {
       <h2 class="updating__title">Actualizando</h2>
       <p class="updating__ver mono">Versión ${esc(version)}</p>
       <div class="updating__bar"><span></span></div>
-      <p class="updating__text">El launcher se cerrará un momento y se volverá a abrir solo, ya actualizado.</p>
+      <p class="updating__text">${INSTALL_TEXT}</p>
     </div>`;
   document.body.appendChild(el);
   requestAnimationFrame(() => el.classList.add('on'));
-  return () => { el.classList.remove('on'); setTimeout(() => el.remove(), 250); };
+  return {
+    text(t) { el.querySelector('.updating__text').textContent = t; },
+    close() { el.classList.remove('on'); setTimeout(() => el.remove(), 250); },
+  };
 }
 
 let startBox = null;
+let installBox = null;
+let blockedShown = null;
 let booted = false;
 let notified = null;
 
 function notifyUpdate() {
   const u = state.update;
-  if (!booted || !u?.version || notified === u.version || (u.onStart && !u.skipped)) return;
+  if (!booted || !u?.version || notified === u.version || (u.onStart && !u.skipped) || u.blocked?.version === u.version) return;
   const ready = !u.manual && u.status === 'ready';
   const web = u.manual && u.status === 'available' && !u.onStart;
   if (!ready && !web) return;
@@ -290,7 +299,7 @@ function startUpdateScreen() {
       f('bar').classList.toggle('is-progress', !installing);
       f('bar').style.setProperty('--p', `${pct}%`);
       f('stats').textContent = installing ? '' : u.total ? `${bytes(u.transferred || 0)} de ${bytes(u.total)}${u.bps ? ` · ${speed(u.bps)}` : ''} · ${pct}%` : `${pct}%`;
-      f('text').textContent = installing
+      f('text').textContent = u.elevating ? ELEVATE_TEXT : installing
         ? 'Instalando: el launcher se cerrará un momento y se volverá a abrir solo, ya actualizado.'
         : 'Hay una versión nueva del launcher. Se está descargando y se instalará sola en cuanto termine.';
       f('skip').hidden = installing;
@@ -320,6 +329,7 @@ function paintStartUpdate() {
   if (!startBox) return;
   startBox.close();
   startBox = null;
+  if (u.blocked?.version === u.version) return;
   if (u.status === 'error') toast('No se pudo descargar la actualización del launcher. Se volverá a intentar la próxima vez que lo abras.', { kind: 'error', timeout: 8000 });
   else if (u.skipped) toast('La actualización se sigue descargando: se instalará al cerrar el launcher o cuando pulses «Hay una versión disponible».', { timeout: 8000 });
 }
@@ -338,15 +348,51 @@ async function onUpdateButton() {
     if (state.accounts?.active && !$('shell').hidden) app.openSettings('launcher');
     return;
   }
+  if (u.blocked?.version === u.version) {
+    blockedModal(u.blocked);
+    return;
+  }
   const ok = await confirm({ title: 'Actualizar el launcher', text: `El launcher se cerrará unos segundos para instalar la versión ${u.version}: verás el progreso en una ventanita y se volverá a abrir solo.`, ok: 'Actualizar ahora', icon: 'download' });
-  if (!ok) return;
+  if (ok) installNow(u.version);
+}
+
+async function installNow(version) {
   const shownAt = Date.now();
-  const close = updatingScreen(u.version);
+  const box = updatingScreen(version);
+  installBox = box;
   try {
     await call('app:installUpdate');
   } catch (e) {
-    setTimeout(() => { close(); toastError(e); }, Math.max(0, 1200 - (Date.now() - shownAt)));
+    if (installBox === box) installBox = null;
+    setTimeout(() => { box.close(); toastError(e); }, Math.max(0, 1200 - (Date.now() - shownAt)));
   }
+}
+
+function paintBlocked() {
+  const u = state.update;
+  installBox?.text(u?.elevating ? ELEVATE_TEXT : INSTALL_TEXT);
+  const b = u?.blocked;
+  if (!b || blockedShown === b.at) return;
+  blockedShown = b.at;
+  installBox?.close();
+  installBox = null;
+  blockedModal(b);
+}
+
+async function blockedModal(b) {
+  const denied = b.why === 'denied';
+  const web = { label: 'Ir a la descarga', value: 'web', kind: denied ? 'ghost' : 'primary' };
+  const retry = { label: 'Reintentar', value: 'retry', kind: denied ? 'primary' : 'ghost' };
+  const r = await confirm({
+    title: 'No se pudo actualizar el launcher',
+    text: denied
+      ? `Para instalar la versión ${b.version}, Windows pide permiso: pulsa «Sí» en esa ventana. Puedes reintentarlo o descargarla desde la web e instalarla encima. Tus instancias y cuentas se conservan.`
+      : `Windows no dejó abrir el instalador de la versión ${b.version}; suele ser el antivirus o Smart App Control. Descárgala desde la web de Viciont Studios e instálala encima: tus instancias y cuentas se conservan.`,
+    icon: 'alert',
+    buttons: [{ label: 'Ahora no', value: null, kind: 'ghost' }, ...(denied ? [web, retry] : [retry, web])],
+  });
+  if (r === 'web') call('app:openDownload').catch(toastError);
+  else if (r === 'retry') installNow(b.version);
 }
 
 let loginCleanup = null;
@@ -406,7 +452,7 @@ on('task-done', (d) => {
   else if (!d.ok) toast(`No se pudo instalar ${name}: ${d.error}`, { kind: 'error', timeout: 9000, actions: [{ label: 'Reintentar', onClick: () => call('instances:install', d.id) }] });
 });
 on('accounts', () => { if (!$('shell').hidden) app.refreshAvatar(); });
-on('update', () => { paintUpdateButton(); paintStartUpdate(); notifyUpdate(); });
+on('update', () => { paintUpdateButton(); paintStartUpdate(); notifyUpdate(); paintBlocked(); });
 on('admin-sync-revoked', (list) => {
   for (const x of list || []) toast(`${x.by || 'Viciont Studios'} revocó desde el panel tu sincronización de «${x.name}». Tu carpeta vuelve a ser una instancia normal y se actualizará como la de cualquier jugador.`, { kind: 'error', timeout: 12000 });
 });
@@ -509,6 +555,12 @@ async function boot() {
   if (state.info?.credentialsPersistent === false && state.accounts.active) {
     toast('El almacén seguro no está disponible. Las credenciales se conservarán solo durante esta sesión. Guarda tu código de recuperación antes de salir.', {
       timeout: 12000, actions: [{ label: 'Ver mi cuenta', onClick: () => app.openSettings('account') }],
+    });
+  }
+  const failed = state.update?.failed;
+  if (failed && !state.info?.justUpdated) {
+    toast(`La actualización ${failed} del launcher no se terminó de instalar la última vez. Si vuelve a pasar, descárgala desde la web e instálala encima.`, {
+      kind: 'error', timeout: 12000, actions: [{ label: 'Ir a la descarga', onClick: () => call('app:openDownload').catch(toastError) }],
     });
   }
   if (state.info?.justUpdated) setTimeout(() => toast(`Launcher actualizado a la versión ${state.info.version}.`, { kind: 'success', timeout: 6000 }), 1200);

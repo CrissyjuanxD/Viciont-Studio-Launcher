@@ -408,3 +408,37 @@ test('al publicar, el pack del servidor solo se vuelve a crear si cambió algo d
   assert.deepEqual(zip, { rp: { path: 'resourcepacks/Listo.zip', id: sha1('zip'), sha1: sha1('zip'), size: 3, url: 'https://cdn.modrinth.com/data/x/Listo.zip' }, upload: null });
   await assert.rejects(f.admin.buildPack('resourcepacks/Falta', list, null, tmp), /está vacía o ya no existe/);
 });
+
+test('si Windows no deja abrir el instalador, el launcher no se cierra y avisa', { skip: process.platform !== 'win32' }, async (t) => {
+  const dir = temp(t);
+  let quits = 0;
+  const app = { isPackaged: true, getVersion: () => '1.5.0', quit: () => { quits++; } };
+  const { Updater } = load('src/main/services/updater.js', { electron: { app } });
+  const make = (file) => {
+    const u = new Updater({ log, settings: { get: () => ({}) } });
+    u.au = { installerPath: file, downloadedUpdateHelper: { downloadedFileInfo: { isAdminRightsRequired: false } } };
+    u.state.status = 'ready';
+    u.state.version = '1.5.1';
+    return u;
+  };
+  const bad = path.join(dir, 'Setup-1.5.1.exe');
+  fs.writeFileSync(bad, 'esto no es un programa');
+  for (const file of [bad, path.join(dir, 'no-existe.exe')]) {
+    const u = make(file);
+    u.state.installing = true;
+    assert.equal(await u.install(), false);
+    assert.equal(u.state.installing, false);
+    assert.equal(u.state.skipped, true);
+    assert.equal(u.state.blocked.version, '1.5.1');
+    assert.equal(u.state.blocked.why, 'blocked');
+    assert.equal(u.installOnQuit(), null);
+  }
+  await new Promise((r) => setImmediate(r));
+  assert.equal(quits, 0);
+  const ok = make(path.join(process.env.SystemRoot, 'System32', 'where.exe'));
+  assert.equal(await ok.install(), true);
+  await new Promise((r) => setImmediate(r));
+  assert.equal(quits, 1);
+  assert.equal(ok.state.blocked, null);
+  assert.equal(ok.installOnQuit(), null);
+});

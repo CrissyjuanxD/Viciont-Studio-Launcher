@@ -191,3 +191,35 @@ jobs:
           name: prueba-instalador
           path: smoke-out
           retention-days: 7
+
+  windows-update:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 22
+      - run: npm ci
+      - name: Crear esta versión y una más nueva, con las actualizaciones en local
+        shell: pwsh
+        run: |
+          npm pkg delete "build.publish[0].owner" "build.publish[0].repo" "build.publish[0].releaseType"
+          npm pkg set "build.publish[0].provider=generic" "build.publish[0].url=http://127.0.0.1:8123/"
+          npx electron-builder --win --x64 --publish never
+          Move-Item dist dist-old
+          npm pkg set version=9.9.9
+          npx electron-builder --win --x64 --publish never
+      - name: Bloquear el servidor de producción
+        shell: pwsh
+        run: Add-Content -Path "$env:SystemRoot\System32\drivers\etc\hosts" -Value "`r`n127.0.0.1 $env:API_HOST"
+      - name: Actualizar desde el propio launcher
+        shell: pwsh
+        run: |
+          $old = (Get-ChildItem dist-old\*Setup-*.exe | Select-Object -First 1).FullName
+          pwsh -NoProfile -ExecutionPolicy Bypass -File scripts\update-e2e.ps1 -Old $old -Feed (Resolve-Path dist).Path -Out smoke-out
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: prueba-actualizar
+          path: smoke-out
+          retention-days: 7

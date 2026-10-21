@@ -313,12 +313,13 @@ function start() {
     if (quitting || !s.onStart || s.skipped || s.installing || !updater.canInstall()) return;
     if (instances.busy() || instances.anyRunning() || admin.tasks.size) { updater.set({ skipped: true }); return; }
     settings.set({ updateTried: { version: s.version, at: Date.now() } });
-    track('launcher.update', { message: `Instaló la actualización ${s.version} al abrir el launcher` });
+    track('launcher.update', { message: `Empezó a instalar la actualización ${s.version} al abrir el launcher` });
     log.info(`Instalando la actualización ${s.version} al abrir el launcher`);
     quitting = true;
     updater.set({ installing: true });
-    setTimeout(() => updater.install(), 1800);
+    setTimeout(() => updater.install().then((ok) => { if (!ok) quitting = false; }), 1800);
   };
+  let lastBlocked = null;
   updater.on('state', (s) => {
     send('update', s);
     if (s.status === 'ready' && s.onStart && !s.skipped && !s.installing) setImmediate(installOnStart);
@@ -326,6 +327,12 @@ function start() {
     lastUpdateStatus = s.status;
     if (s.status === 'ready') track('launcher.update', { message: `Descargó la actualización ${s.version} del launcher` });
     if (s.status === 'error') track('launcher.update_error', { level: 'warn', message: `No se pudo actualizar el launcher: ${s.error}` });
+  });
+  updater.on('state', (s) => {
+    if (!s.blocked || s.blocked === lastBlocked) return;
+    lastBlocked = s.blocked;
+    const what = s.blocked.why === 'denied' ? 'no se aceptaron los permisos de administrador' : `Windows no dejó abrir el instalador (${s.blocked.code || 'bloqueado'})`;
+    track('launcher.update_error', { level: 'warn', message: `No se pudo instalar la actualización ${s.blocked.version}: ${what}` });
   });
 
   const handlers = {};
@@ -422,8 +429,9 @@ function start() {
     if (!updater.canInstall()) throw new Error('No hay ninguna actualización lista para instalar.');
     if (instances.busy()) throw new Error('Espera a que terminen las descargas antes de actualizar.');
     if (instances.anyRunning()) throw new Error('Cierra el juego antes de actualizar el launcher.');
+    settings.set({ updateTried: { version: updater.state.version, at: Date.now() } });
     quitting = true;
-    setTimeout(() => updater.install(), 900);
+    setTimeout(() => updater.install().then((ok) => { if (!ok) quitting = false; }), 900);
     return true;
   });
 
@@ -734,6 +742,13 @@ function start() {
       }
       return;
     }
+    const pending = updater.installOnQuit();
+    if (pending) {
+      e.preventDefault();
+      quitting = true;
+      pending.finally(() => app.quit());
+      return;
+    }
     quitting = true;
     saveWindowState();
     discord.disconnect();
@@ -809,6 +824,7 @@ function start() {
     await instances.loadCache();
     instances.recoverStaged().catch((e) => log.warn('No se pudieron revisar los archivos ocultos:', e.message));
     updater.init();
+    if (updater.state.failed) track('launcher.update_error', { level: 'warn', message: `La actualización ${updater.state.failed} no se terminó de instalar` });
     await telemetry.init();
     track('launcher.start', {
       message: `Abrió el launcher ${VERSION}`,
