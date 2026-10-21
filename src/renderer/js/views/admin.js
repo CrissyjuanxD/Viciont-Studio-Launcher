@@ -893,7 +893,7 @@ function renderEditor(root, id, app, route = {}) {
     el.className = `rp-state${r.ok ? '' : ' is-pending'}`;
     el.innerHTML = r.ok
       ? `${icon('check')}<span>Quien juega desde el launcher recibe los packs nuevos <b>sin salir del servidor</b>: el launcher le pone el mod ViciontRP por su cuenta.</span>`
-      : `${icon('alert')}<span>La actualización dentro del juego (mod ViciontRP) <b>no es compatible</b> con ${r.reason === 'loader' ? `${esc(LOADER_NAMES[loader] || loader)}: solo funciona con Fabric o Quilt` : `Minecraft ${esc(mc || '?')}: funciona de la ${esc(r.min)} a la ${esc(r.max)}`}. ${later}</span>`;
+      : `${icon('alert')}<span>La actualización dentro del juego (mod ViciontRP) <b>no es compatible</b> con ${r.reason === 'loader' ? `${esc(LOADER_NAMES[loader] || loader)}: solo funciona con Fabric o Quilt` : `Minecraft ${esc(mc || '?')}: funciona con ${esc(listVersions(r.versions || []))}`}. ${later}</span>`;
     hydrateIcons(el);
   };
   const drawRp = (body) => {
@@ -2045,6 +2045,10 @@ function versionsModal(id, d, f, info, { ro, need, onChange }) {
     box.innerHTML = `<div class="form-error">${icon('alert')}<span>${esc(e.message)}</span></div>`;
     hydrateIcons(box);
   });
+}
+
+function listVersions(list) {
+  return list.length > 1 ? `${list.slice(0, -1).join(', ')} y ${list[list.length - 1]}` : list[0] || '';
 }
 
 function rpKeyModal(key) {

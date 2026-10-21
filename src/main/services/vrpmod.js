@@ -40,12 +40,11 @@ async function modFile(mc, loader) {
 
 async function support(mc, loader) {
   const files = await index().then((r) => r.files).catch(() => []);
-  const range = files.length
-    ? { min: files.map((f) => f.min).sort(cmpVersion)[0], max: files.map((f) => f.max).sort(cmpVersion).pop() }
-    : RANGE;
-  if (!LOADERS.has(loader)) return { ok: false, reason: 'loader', ...range };
-  if (files.length ? files.some((f) => inRange(mc, f)) : mc && inRange(mc, range)) return { ok: true, ...range };
-  return { ok: false, reason: !mc || cmpVersion(mc, range.min) < 0 ? 'old' : 'new', ...range };
+  const ranges = (files.length ? files : [RANGE]).map((f) => ({ min: f.min, max: f.max })).sort((a, b) => cmpVersion(a.min, b.min));
+  const versions = ranges.map((r) => (r.min === r.max ? r.min : `${r.min} a ${r.max}`));
+  if (!LOADERS.has(loader)) return { ok: false, reason: 'loader', versions };
+  if (mc && ranges.some((r) => inRange(mc, r))) return { ok: true, versions };
+  return { ok: false, reason: 'version', versions };
 }
 
 const modDir = (dirs) => path.join(dirs.meta, 'viciontrp');

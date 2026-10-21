@@ -629,9 +629,11 @@ test('el launcher elige el jar del mod ViciontRP de cada versión de Minecraft',
   assert.equal(await vrp.modFile('1.21.5', 'fabric'), null);
   assert.equal(await vrp.modFile('1.21.1', 'forge'), null);
   assert.equal(await vrp.modFile('1.20.1', 'fabric'), null);
-  assert.deepEqual(await vrp.support('1.20.1', 'fabric'), { ok: false, reason: 'old', min: '1.21', max: '26.3' });
-  assert.deepEqual(await vrp.support('26.4', 'fabric'), { ok: false, reason: 'new', min: '1.21', max: '26.3' });
-  assert.deepEqual(await vrp.support('1.21.1', 'neoforge'), { ok: false, reason: 'loader', min: '1.21', max: '26.3' });
+  const versions = ['1.21 a 1.21.1', '1.21.2 a 1.21.4', '26.3'];
+  assert.deepEqual(await vrp.support('1.20.1', 'fabric'), { ok: false, reason: 'version', versions });
+  assert.deepEqual(await vrp.support('1.21.5', 'fabric'), { ok: false, reason: 'version', versions });
+  assert.deepEqual(await vrp.support('26.4', 'fabric'), { ok: false, reason: 'version', versions });
+  assert.deepEqual(await vrp.support('1.21.1', 'neoforge'), { ok: false, reason: 'loader', versions });
   assert.equal((await vrp.support('26.3', 'fabric')).ok, true);
   assert.equal(vrp.usesPlugin({ plugin: true }), true);
   assert.equal(vrp.usesPlugin({ serverPacks: ['resourcepacks/A'] }), true);
